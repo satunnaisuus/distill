@@ -15,6 +15,11 @@ type BindingEagerDependencyTokens<TBinding extends AnyBinding> =
             : never
         : never;
 
+type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
+
+type IsUnion<TValue, TUnion = TValue> =
+    IsAny<TValue> extends true ? false : TValue extends unknown ? ([TUnion] extends [TValue] ? false : true) : false;
+
 type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
 type RegisteredTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
@@ -117,6 +122,13 @@ type CircularDependencyError<TBinding extends AnyBinding, TBindings extends read
           }
         : {};
 
+type UnionBindingTokenError<TBinding extends AnyBinding> =
+    IsUnion<TBinding["token"]> extends true
+        ? {
+              readonly __union_binding_token__: TokenKey<TBinding["token"]>;
+          }
+        : {};
+
 type ValidateBinding<
     TBinding extends AnyBinding,
     TBindings extends readonly AnyBinding[],
@@ -127,7 +139,8 @@ type ValidateBinding<
     DependenciesOutsideRegistryError<TBinding, TRegistryTokens> &
     MissingDependenciesError<TBinding, TRegisteredTokens> &
     DuplicateBindingError<TBinding, TBindings> &
-    CircularDependencyError<TBinding, TBindings>;
+    CircularDependencyError<TBinding, TBindings> &
+    UnionBindingTokenError<TBinding>;
 
 export type ValidateBindings<TBindings extends readonly AnyBinding[], TRegistry extends AnyTokenRegistry> = {
     [TIndex in keyof TBindings]: TBindings[TIndex] extends AnyBinding

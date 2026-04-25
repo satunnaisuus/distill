@@ -82,6 +82,17 @@ test("rejects duplicate binding tokens", () => {
     }).type.toRaiseError("__duplicate_binding__");
 });
 
+test("rejects union binding tokens", () => {
+    const configOrPortToken = tokens.config as typeof tokens.config | typeof tokens.port;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(configOrPortToken, () => 3000),
+        );
+    }).type.toRaiseError("__union_binding_token__");
+});
+
 test("allows dependencies registered after dependent bindings", () => {
     const container = createContainer(
         tokens,
