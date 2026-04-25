@@ -1,18 +1,7 @@
 import { bind, createContainer, defineTokens, type as defineType, ref } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
-
-type ServiceA = {
-    readonly getB: () => ServiceB;
-};
-
-type ServiceB = {
-    readonly getA: () => ServiceA;
-};
-
-const tokens = defineTokens({
-    serviceA: defineType<ServiceA>(),
-    serviceB: defineType<ServiceB>(),
-});
+import type { ServiceA, ServiceB } from "./fixtures/services.js";
+import { cycleTokens as tokens } from "./fixtures/tokens.js";
 
 test("rejects eager circular dependencies without ref", () => {
     expect(() => {

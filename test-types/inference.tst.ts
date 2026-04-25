@@ -1,34 +1,7 @@
-import {
-    bind,
-    createContainer,
-    defineTokens,
-    type as defineType,
-    type Ref,
-    type RefToken,
-    ref,
-    type Token,
-} from "@satunnaisuus/distill";
+import { bind, createContainer, type Ref, type RefToken, ref, type Token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
-
-type Config = {
-    readonly port: number;
-};
-
-type Logger = {
-    readonly log: (message: string) => void;
-};
-
-type Server = {
-    readonly port: number;
-};
-
-const tokens = defineTokens({
-    config: defineType<Config>(),
-    logger: defineType<Logger>(),
-    port: defineType<number>(),
-    server: defineType<Server>(),
-    unknown: defineType(),
-});
+import type { Config, Logger, Server } from "./fixtures/services.js";
+import { tokens } from "./fixtures/tokens.js";
 
 test("defineTokens preserves literal token keys and value types", () => {
     expect(tokens.config).type.toBe<Token<"config", Config>>();
