@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { bind, getBindingDependencies } from "../src/bind";
-import { bindingDependenciesBrand } from "../src/brands";
+import { bind, getBindingDependencies, isBinding } from "../src/bind";
+import { bindingBrand, bindingDependenciesBrand } from "../src/brands";
 import { defineTokens } from "../src/token";
 import { type as defineType } from "../src/type-descriptor";
 
@@ -17,6 +17,8 @@ describe("bind", () => {
         expect(binding.token).toBe(tokens.port);
         expect(binding.factory).toBe(factory);
         expect(binding.factory()).toBe(3000);
+        expect(isBinding(binding)).toBe(true);
+        expect(Object.hasOwn(binding, bindingBrand)).toBe(true);
         expect(getBindingDependencies(binding)).toBeUndefined();
         expect(Object.hasOwn(binding, bindingDependenciesBrand)).toBe(false);
     });
@@ -36,6 +38,8 @@ describe("bind", () => {
         expect(binding.token).toBe(tokens.port);
         expect(binding.factory).toBe(factory);
         expect(binding.factory({ config: { port: 3000 } })).toBe(3000);
+        expect(isBinding(binding)).toBe(true);
+        expect(Object.hasOwn(binding, bindingBrand)).toBe(true);
         expect(getBindingDependencies(binding)).toBe(dependencies);
         expect(binding[bindingDependenciesBrand]).toBe(dependencies);
     });
@@ -60,10 +64,7 @@ describe("getBindingDependencies", () => {
         const tokens = defineTokens({
             port: defineType<number>(),
         });
-        const binding = {
-            token: tokens.port,
-            factory: () => 3000,
-        };
+        const binding = bind(tokens.port, () => 3000);
 
         expect(getBindingDependencies(binding)).toBeUndefined();
     });
@@ -76,16 +77,12 @@ describe("getBindingDependencies", () => {
         const dependencies = {
             config: tokens.config,
         };
-        const binding = {
-            token: tokens.port,
-            [bindingDependenciesBrand]: dependencies,
-            factory: () => 3000,
-        };
+        const binding = bind(tokens.port, dependencies, () => 3000);
 
         expect(getBindingDependencies(binding)).toBe(dependencies);
     });
 
-    it("returns dependencies when the binding brand is inherited", () => {
+    it("ignores dependencies when the dependency brand is inherited", () => {
         const tokens = defineTokens({
             config: defineType<{ readonly port: number }>(),
             port: defineType<number>(),
@@ -94,10 +91,38 @@ describe("getBindingDependencies", () => {
             config: tokens.config,
         };
         const binding = Object.assign(Object.create({ [bindingDependenciesBrand]: dependencies }), {
+            [bindingBrand]: true as const,
             token: tokens.port,
             factory: () => 3000,
         });
 
-        expect(getBindingDependencies(binding)).toBe(dependencies);
+        expect(getBindingDependencies(binding)).toBeUndefined();
+    });
+});
+
+describe("isBinding", () => {
+    it("rejects structural objects that were not created by bind", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+
+        expect(
+            isBinding({
+                token: tokens.port,
+                factory: () => 3000,
+            }),
+        ).toBe(false);
+    });
+
+    it("rejects objects with inherited binding brands", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const binding = Object.assign(Object.create({ [bindingBrand]: true }), {
+            token: tokens.port,
+            factory: () => 3000,
+        });
+
+        expect(isBinding(binding)).toBe(false);
     });
 });

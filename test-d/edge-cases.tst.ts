@@ -173,6 +173,15 @@ test("createContainer rejects rest arguments that are not bindings", () => {
     }).type.toRaiseError();
 });
 
+test("createContainer rejects structural bindings not created by bind", () => {
+    expect(() => {
+        createContainer(tokens, {
+            token: tokens.port,
+            factory: () => 3000,
+        });
+    }).type.toRaiseError();
+});
+
 test("ref rejects missing dependency tokens", () => {
     expect(() => {
         ref();

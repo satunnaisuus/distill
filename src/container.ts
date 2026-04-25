@@ -1,5 +1,5 @@
 import type { AnyBinding } from "./bind";
-import { getBindingDependencies } from "./bind";
+import { getBindingDependencies, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
 import type { DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
@@ -239,6 +239,10 @@ export const createContainer = <
     let runtimeContainer: RuntimeContainer;
 
     for (const binding of bindings) {
+        if (!isBinding(binding)) {
+            throw new Error("Bindings must be created with bind");
+        }
+
         const bindingTokenKey = assertTokenIsInRegistry(binding.token);
 
         if (runtimeBindings.has(bindingTokenKey)) {

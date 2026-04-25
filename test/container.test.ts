@@ -357,16 +357,29 @@ describe("createContainer", () => {
         );
     });
 
+    it("throws when a binding was not created with bind", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+
+        expect(() =>
+            createRuntimeContainer(tokens, {
+                token: tokens.port,
+                factory: () => 3000,
+            }),
+        ).toThrowError("Bindings must be created with bind");
+    });
+
     it("throws when a service resolves itself recursively", () => {
         const tokens = defineTokens({
             service: defineType<unknown>(),
         });
         let container: RuntimeContainerForTest;
 
-        container = createRuntimeContainer(tokens, {
-            token: tokens.service,
-            factory: () => container.resolve(tokens.service),
-        });
+        container = createRuntimeContainer(
+            tokens,
+            bind(tokens.service, () => container.resolve(tokens.service)),
+        );
 
         expect(() => container.resolve(tokens.service)).toThrowError(
             "Circular dependency detected while resolving services: service -> service",
@@ -382,14 +395,8 @@ describe("createContainer", () => {
 
         container = createRuntimeContainer(
             tokens,
-            {
-                token: tokens.serviceA,
-                factory: () => container.resolve(tokens.serviceB),
-            },
-            {
-                token: tokens.serviceB,
-                factory: () => container.resolve(tokens.serviceA),
-            },
+            bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
+            bind(tokens.serviceB, () => container.resolve(tokens.serviceA)),
         );
 
         expect(() => container.resolve(tokens.serviceA)).toThrowError(
@@ -407,18 +414,9 @@ describe("createContainer", () => {
 
         container = createRuntimeContainer(
             tokens,
-            {
-                token: tokens.serviceA,
-                factory: () => container.resolve(tokens.serviceB),
-            },
-            {
-                token: tokens.serviceB,
-                factory: () => container.resolve(tokens.serviceC),
-            },
-            {
-                token: tokens.serviceC,
-                factory: () => container.resolve(tokens.serviceA),
-            },
+            bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
+            bind(tokens.serviceB, () => container.resolve(tokens.serviceC)),
+            bind(tokens.serviceC, () => container.resolve(tokens.serviceA)),
         );
 
         expect(() => container.resolve(tokens.serviceA)).toThrowError(
