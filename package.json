@@ -3,16 +3,23 @@
   "version": "0.0.1",
   "description": "A type-safe DI container for TypeScript.",
   "type": "module",
-  "main": "./src/index.js",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./src/index.js"
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
   },
   "files": [
-    "src",
+    "dist",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepack": "npm run build",
     "test": "node --test"
   },
   "repository": {
@@ -28,5 +35,8 @@
   "homepage": "https://github.com/satunnaisuus/distill#readme",
   "publishConfig": {
     "access": "public"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.3"
   }
 }
