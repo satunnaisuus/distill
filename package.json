@@ -25,7 +25,8 @@
     "lint": "biome lint .",
     "prepack": "npm run build",
     "test": "npm run test:types",
-    "test:types": "npm run build && tstyche"
+    "test:types": "npm run build && tstyche",
+    "prepare": "lefthook install || true"
   },
   "repository": {
     "type": "git",
@@ -43,6 +44,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
+    "lefthook": "^2.1.6",
     "tsdown": "^0.21.10",
     "tstyche": "^7.1.0",
     "typescript": "^6.0.3"

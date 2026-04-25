@@ -1,0 +1,6 @@
+pre-commit:
+  jobs:
+    - name: biome check
+      glob: "*.{js,jsx,ts,tsx,mjs,cjs,mts,cts,json,jsonc,css,graphql,gql,html}"
+      run: npx biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
