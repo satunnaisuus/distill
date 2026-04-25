@@ -24,6 +24,12 @@ type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
 type RegisteredTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
 
+type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extends TBindings["length"]
+    ? {
+          readonly __bindings_must_be_tuple__: true;
+      }
+    : {};
+
 type HasDuplicateBindingToken<
     TBindings extends readonly AnyBinding[],
     TToken extends AnyToken,
@@ -146,4 +152,4 @@ export type ValidateBindings<TBindings extends readonly AnyBinding[], TRegistry 
     [TIndex in keyof TBindings]: TBindings[TIndex] extends AnyBinding
         ? ValidateBinding<TBindings[TIndex], TBindings, RegisteredTokens<TBindings>, RegistryTokens<TRegistry>>
         : TBindings[TIndex];
-};
+} & TupleBindingsError<TBindings>;

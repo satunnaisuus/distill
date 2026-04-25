@@ -61,6 +61,14 @@ test("createContainer rejects invalid bindings passed as readonly tuples", () =>
     }).type.toRaiseError("__missing_dependencies__");
 });
 
+test("createContainer rejects duplicate bindings passed through mutable arrays", () => {
+    const bindings = [bind(tokens.port, () => 3000), bind(tokens.port, () => 4000)];
+
+    expect(() => {
+        createContainer(tokens, ...bindings);
+    }).type.toRaiseError("__bindings_must_be_tuple__");
+});
+
 test("resolve accepts unions of bound tokens and returns the union of service values", () => {
     const container = createContainer(
         tokens,
