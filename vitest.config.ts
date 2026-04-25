@@ -6,5 +6,10 @@ export default defineConfig({
         globals: false,
         include: ["test/**/*.test.ts"],
         exclude: ["dist/**", "node_modules/**", "test-types/**"],
+        coverage: {
+            provider: "v8",
+            reporter: ["text", "lcov"],
+            reportsDirectory: "coverage",
+        },
     },
 });
