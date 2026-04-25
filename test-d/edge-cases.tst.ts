@@ -26,14 +26,20 @@ type Logger = {
 };
 
 type Handler = (message: string) => number;
+type Counter = () => number;
 
 const tokens = defineTokens({
     config: defineType<Config>(),
+    counter: defineType<Counter>(),
     handler: defineType<Handler>(),
     logger: defineType<Logger>(),
     port: defineType<number>(),
     server: defineType<{ readonly port: number }>(),
 });
+
+type ServerBinding = Binding<typeof tokens.server, { readonly config: typeof tokens.config }>;
+type ConfigBinding = Binding<typeof tokens.config>;
+type PortBinding = Binding<typeof tokens.port>;
 
 test("createContainer validates and preserves bindings passed as readonly tuples", () => {
     const bindings = [
@@ -49,6 +55,36 @@ test("createContainer validates and preserves bindings passed as readonly tuples
     expect(container.resolve(tokens.config)).type.toBe<Config>();
 });
 
+test("createContainer validates and preserves bindings passed as typed tuples", () => {
+    const bindings: readonly [ServerBinding, ConfigBinding] = [
+        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+        bind(tokens.config, () => ({ port: 3000 })),
+    ];
+
+    const container = createContainer(tokens, ...bindings);
+
+    expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+    expect(container.resolve(tokens.config)).type.toBe<Config>();
+});
+
+test("createContainer validates and preserves bindings passed with satisfies readonly tuple", () => {
+    const bindings = [
+        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.port, () => 3000),
+    ] satisfies readonly [ServerBinding, ConfigBinding, PortBinding];
+
+    const container = createContainer(tokens, ...bindings);
+
+    expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+    expect(container.resolve(tokens.config)).type.toBe<Config>();
+    expect(container.resolve(tokens.port)).type.toBe<number>();
+});
+
 test("createContainer rejects invalid bindings passed as readonly tuples", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
@@ -61,8 +97,8 @@ test("createContainer rejects invalid bindings passed as readonly tuples", () =>
     }).type.toRaiseError("__missing_dependencies__");
 });
 
-test("createContainer rejects duplicate bindings passed through mutable arrays", () => {
-    const bindings = [bind(tokens.port, () => 3000), bind(tokens.port, () => 4000)];
+test("createContainer rejects valid bindings passed through mutable arrays", () => {
+    const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
 
     expect(() => {
         createContainer(tokens, ...bindings);
@@ -86,6 +122,12 @@ test("bind rejects dependency map values that are not tokens or refs", () => {
     }).type.toRaiseError();
 });
 
+test("bind rejects direct token values that were not created by defineTokens", () => {
+    expect(() => {
+        bind("port", () => 3000);
+    }).type.toRaiseError();
+});
+
 test("bind rejects dependency maps with symbol keys", () => {
     const dependencyKey = Symbol("dependency");
 
@@ -94,9 +136,58 @@ test("bind rejects dependency maps with symbol keys", () => {
     }).type.toRaiseError();
 });
 
+test("bind rejects dependency maps with numeric keys", () => {
+    expect(() => {
+        bind(tokens.port, { 1: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("bind rejects dependency maps without factories", () => {
+    expect(() => {
+        bind(tokens.port, {});
+    }).type.toRaiseError();
+});
+
+test("bind rejects extra arguments for dependency-free factories", () => {
+    expect(() => {
+        bind(tokens.port, () => 3000, {});
+    }).type.toRaiseError();
+});
+
+test("createContainer rejects token registries not created by defineTokens", () => {
+    expect(() => {
+        createContainer(
+            { port: "port" },
+            bind(tokens.port, () => 3000),
+        );
+    }).type.toRaiseError();
+});
+
+test("createContainer rejects rest arguments that are not bindings", () => {
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.port, () => 3000),
+            "config",
+        );
+    }).type.toRaiseError();
+});
+
+test("ref rejects missing dependency tokens", () => {
+    expect(() => {
+        ref();
+    }).type.toRaiseError();
+});
+
 test("ref rejects direct values that are not tokens", () => {
     expect(() => {
         ref("logger");
+    }).type.toRaiseError();
+});
+
+test("ref rejects extra arguments", () => {
+    expect(() => {
+        ref(tokens.logger, {});
     }).type.toRaiseError();
 });
 
@@ -145,6 +236,28 @@ test("createContainer rejects same-key tokens with incompatible value types", ()
     }).type.toRaiseError("__token_not_in_registry__");
 });
 
+test("createContainer rejects same-key tokens with narrower value types", () => {
+    const narrowPortToken = "port" as Token<"port", 3000>;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(narrowPortToken, () => 3000 as const),
+        );
+    }).type.toRaiseError("__token_not_in_registry__");
+});
+
+test("createContainer rejects binding tokens with widened keys", () => {
+    const widenedPortToken: Token<string, number> = tokens.port;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(widenedPortToken, () => 3000),
+        );
+    }).type.toRaiseError("__token_not_in_registry__");
+});
+
 test("createContainer rejects same-key dependency tokens with incompatible value types", () => {
     const stringPortToken = "port" as Token<"port", string>;
 
@@ -155,6 +268,104 @@ test("createContainer rejects same-key dependency tokens with incompatible value
                 port: port.length,
             })),
             bind(tokens.port, () => 3000),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects same-key dependency tokens with narrower value types", () => {
+    const narrowPortToken = "port" as Token<"port", 3000>;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { port: narrowPortToken }, ({ port }) => ({
+                port,
+            })),
+            bind(tokens.port, () => 3000),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects dependency tokens with widened keys", () => {
+    const widenedConfigToken: Token<string, Config> = tokens.config;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { config: widenedConfigToken }, ({ config }) => ({
+                port: config.port,
+            })),
+            bind(tokens.config, () => ({ port: 3000 })),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects ref dependency tokens with widened keys", () => {
+    const widenToken = <TValue>(token: Token<string, TValue>) => token;
+    const widenedLoggerToken = widenToken(tokens.logger);
+
+    expect(widenedLoggerToken).type.toBe<Token<string, Logger>>();
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { logger: ref(widenedLoggerToken) }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.logger, () => ({
+                log() {},
+            })),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects lazy ref dependency tokens with widened keys", () => {
+    const widenToken = <TValue>(token: Token<string, TValue>) => token;
+    const widenedLoggerToken = widenToken(tokens.logger);
+
+    expect(widenedLoggerToken).type.toBe<Token<string, Logger>>();
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { logger: ref(() => widenedLoggerToken) }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.logger, () => ({
+                log() {},
+            })),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects lazy ref dependency tokens with any-typed tokens", () => {
+    const anyTypedToken = tokens.logger as any;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { logger: ref(() => anyTypedToken) }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.logger, () => ({
+                log() {},
+            })),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
+test("createContainer rejects lazy ref dependency tokens with same keys and incompatible value types", () => {
+    const sameKeyWrongValueToken = "logger" as Token<"logger", string>;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { logger: ref(() => sameKeyWrongValueToken) }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.logger, () => ({
+                log() {},
+            })),
         );
     }).type.toRaiseError("__dependencies_not_in_registry__");
 });
@@ -180,6 +391,34 @@ test("bind supports function-valued services", () => {
     expect(container.resolve(tokens.handler)).type.toBe<Handler>();
 });
 
+test("bind supports function-valued services with dependencies", () => {
+    const binding = bind(tokens.handler, { config: tokens.config }, ({ config }) => (message) => {
+        return message.length + config.port;
+    });
+    const container = createContainer(
+        tokens,
+        binding,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+
+    expect<Parameters<typeof binding.factory>[0]["config"]>().type.toBe<Config>();
+    expect<ReturnType<typeof binding.factory>>().type.toBe<Handler>();
+    expect(container.resolve(tokens.handler)).type.toBe<Handler>();
+});
+
+test("bind requires factories for zero-argument function-valued services", () => {
+    const binding = bind(tokens.counter, () => () => 1);
+    const container = createContainer(tokens, binding);
+
+    expect<typeof binding.factory>().type.toBe<() => Counter>();
+    expect<ReturnType<typeof binding.factory>>().type.toBe<Counter>();
+    expect(container.resolve(tokens.counter)).type.toBe<Counter>();
+
+    expect(() => {
+        bind(tokens.counter, () => 1);
+    }).type.toRaiseError();
+});
+
 test("bind supports explicit empty dependency objects", () => {
     const binding = bind(tokens.port, {}, (dependencies) => {
         expect(dependencies).type.toBe<{}>();
@@ -200,4 +439,20 @@ test("defineTokens rejects symbol token keys", () => {
             [serviceKey]: defineType<string>(),
         });
     }).type.toRaiseError("__non_string_token_keys_not_supported__");
+});
+
+test("defineTokens rejects numeric token keys", () => {
+    expect(() => {
+        defineTokens({
+            1: defineType<string>(),
+        });
+    }).type.toRaiseError("__non_string_token_keys_not_supported__");
+});
+
+test("defineTokens rejects values not created by defineType", () => {
+    expect(() => {
+        defineTokens({
+            port: 3000,
+        });
+    }).type.toRaiseError();
 });

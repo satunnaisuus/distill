@@ -93,6 +93,17 @@ test("ref preserves union token value types", () => {
     expect<Parameters<typeof binding.factory>[0]["dependency"]>().type.toBe<Ref<Config | Logger>>();
 });
 
+test("bind preserves mixed eager and ref union dependency parameters", () => {
+    const condition = true as boolean;
+    const dependency = condition ? tokens.config : ref(tokens.logger);
+    const binding = bind(tokens.server, { dependency }, () => ({
+        port: 3000,
+    }));
+
+    expect(dependency).type.toBe<typeof tokens.config | RefToken<typeof tokens.logger>>();
+    expect<Parameters<typeof binding.factory>[0]["dependency"]>().type.toBe<Config | Ref<Logger>>();
+});
+
 test("ref rejects factories that do not return tokens", () => {
     expect(() => {
         ref(() => "logger");

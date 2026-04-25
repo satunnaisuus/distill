@@ -27,18 +27,21 @@ export const getBindingDependencies = (binding: AnyBinding): DependencyMap | und
     return binding[bindingDependenciesBrand];
 };
 
-export function bind<TToken extends AnyToken>(currentToken: TToken, factory: () => TokenValue<TToken>): Binding<TToken>;
+export function bind<TToken extends AnyToken>(
+    currentToken: TToken,
+    factory: () => NoInfer<TokenValue<TToken>>,
+): Binding<TToken>;
 
 export function bind<TToken extends AnyToken, TDependencies extends DependencyMap>(
     currentToken: TToken,
     dependencies: TDependencies,
-    factory: (dependencies: ResolvedDependencies<TDependencies>) => TokenValue<TToken>,
+    factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
 ): Binding<TToken, TDependencies>;
 
 export function bind<TToken extends AnyToken, TDependencies extends DependencyMap>(
     currentToken: TToken,
-    dependenciesOrFactory: TDependencies | (() => TokenValue<TToken>),
-    maybeFactory?: (dependencies: ResolvedDependencies<TDependencies>) => TokenValue<TToken>,
+    dependenciesOrFactory: TDependencies | (() => NoInfer<TokenValue<TToken>>),
+    maybeFactory?: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
 ): Binding<TToken, TDependencies | undefined> {
     if (typeof dependenciesOrFactory === "function") {
         return {

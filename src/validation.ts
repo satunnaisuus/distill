@@ -1,7 +1,7 @@
 import type { AnyBinding, BindingDependencies } from "./bind";
 import type { DependencyMap } from "./dependencies";
 import type { DependencyToken } from "./ref";
-import type { AnyToken, AnyTokenRegistry, RegistryTokens, TokenKey } from "./token";
+import type { AnyToken, AnyTokenRegistry, RegistryTokens, TokenKey, TokensNotIn } from "./token";
 
 type BindingByToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = Extract<
     TBindings[number],
@@ -47,28 +47,26 @@ type HasDuplicateBindingToken<
         : HasDuplicateBindingToken<TRemainingBindings, TToken, TSeen>
     : false;
 
-type DependencyKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> =
+type DependencyTokenKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> =
     BindingDependencies<TBinding> extends infer TDependencies
         ? TDependencies extends DependencyMap
             ? {
-                  [TKey in keyof TDependencies]: [
-                      Exclude<DependencyToken<TDependencies[TKey]>, TAllowedTokens>,
-                  ] extends [never]
-                      ? never
-                      : TKey;
+                  [TKey in keyof TDependencies]: TokenKey<
+                      TokensNotIn<DependencyToken<TDependencies[TKey]>, TAllowedTokens>
+                  >;
               }[keyof TDependencies]
             : never
         : never;
 
-type MissingDependencyKeys<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> = DependencyKeysNotIn<
+type MissingDependencyKeys<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> = DependencyTokenKeysNotIn<
     TBinding,
     TRegisteredTokens
 >;
 
-type DependencyKeysOutsideRegistry<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = DependencyKeysNotIn<
-    TBinding,
-    TRegistryTokens
->;
+type DependencyKeysOutsideRegistry<
+    TBinding extends AnyBinding,
+    TRegistryTokens extends AnyToken,
+> = DependencyTokenKeysNotIn<TBinding, TRegistryTokens>;
 
 type HasCircularDependencyFromToken<
     TBindings extends readonly AnyBinding[],
@@ -91,7 +89,7 @@ type HasCircularDependencyFromToken<
     : true;
 
 type BindingOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = [
-    Exclude<TBinding["token"], TRegistryTokens>,
+    TokensNotIn<TBinding["token"], TRegistryTokens>,
 ] extends [never]
     ? {}
     : {
@@ -148,8 +146,13 @@ type ValidateBinding<
     CircularDependencyError<TBinding, TBindings> &
     UnionBindingTokenError<TBinding>;
 
-export type ValidateBindings<TBindings extends readonly AnyBinding[], TRegistry extends AnyTokenRegistry> = {
-    [TIndex in keyof TBindings]: TBindings[TIndex] extends AnyBinding
-        ? ValidateBinding<TBindings[TIndex], TBindings, RegisteredTokens<TBindings>, RegistryTokens<TRegistry>>
-        : TBindings[TIndex];
-} & TupleBindingsError<TBindings>;
+export type ValidateBindings<
+    TBindings extends readonly AnyBinding[],
+    TRegistry extends AnyTokenRegistry,
+> = number extends TBindings["length"]
+    ? TupleBindingsError<TBindings>
+    : {
+          [TIndex in keyof TBindings]: TBindings[TIndex] extends AnyBinding
+              ? ValidateBinding<TBindings[TIndex], TBindings, RegisteredTokens<TBindings>, RegistryTokens<TRegistry>>
+              : TBindings[TIndex];
+      };

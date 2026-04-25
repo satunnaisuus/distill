@@ -3,7 +3,7 @@ import { getBindingDependencies } from "./bind";
 import type { DependencyMap } from "./dependencies";
 import type { DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
-import type { AnyToken, AnyTokenRegistry, TokenKey, TokenValue } from "./token";
+import type { AnyToken, AnyTokenRegistry, TokenByKey, TokenKey, TokenValue } from "./token";
 import { tokenKey } from "./token";
 import type { ValidateBindings } from "./validation";
 
@@ -13,7 +13,9 @@ type RuntimeContainer = {
 
 type ResolveFn<TBindings extends readonly AnyBinding[]> = [TBindings[number]] extends [never]
     ? (token: never) => never
-    : <TToken extends TBindings[number]["token"]>(token: TToken) => TokenValue<TToken>;
+    : <TToken extends TBindings[number]["token"]>(
+          token: TToken,
+      ) => TokenValue<TokenByKey<TToken, TBindings[number]["token"]>>;
 
 export type Container<TBindings extends readonly AnyBinding[] = []> = {
     resolve: ResolveFn<TBindings>;
