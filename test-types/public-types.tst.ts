@@ -1,5 +1,7 @@
 import {
     type Binding,
+    type BindingLifetime,
+    bind,
     type Container,
     createContainer,
     type DependencyMap,
@@ -15,7 +17,7 @@ import {
 } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger } from "./fixtures/services.js";
-import type { tokens } from "./fixtures/tokens.js";
+import { tokens } from "./fixtures/tokens.js";
 
 test("public helper types preserve their documented type relationships", () => {
     type Definitions = {
@@ -37,6 +39,7 @@ test("public helper types preserve their documented type relationships", () => {
         readonly port: Token<"port", number>;
     }>();
     expect<Dependencies>().type.toBeAssignableTo<DependencyMap>();
+    expect<BindingLifetime>().type.toBe<"singleton" | "scoped" | "transient">();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;
@@ -58,4 +61,88 @@ test("defineTokens and createContainer preserve empty token registries", () => {
     expect(emptyTokens).type.toBe<{}>();
     expect(container.resolve).type.toBe<(token: never) => never>();
     expect<Parameters<typeof container.resolve>[0]>().type.toBe<never>();
+});
+
+test("public Container helper type exposes createScope relationships", () => {
+    const typedContainer: Container<readonly [Binding<typeof tokens.config>], typeof tokens> = createContainer(
+        tokens,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+    const typedScope = typedContainer.createScope(bind(tokens.port, () => 3000));
+
+    expect(typedScope.resolve(tokens.config)).type.toBe<Config>();
+    expect(typedScope.resolve(tokens.port)).type.toBe<number>();
+    expect(() => {
+        typedContainer.createScope(
+            bind(tokens.server, { logger: tokens.logger }, () => ({
+                port: 3000,
+            })),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
+test("public Container helper type preserves nested createScope relationships", () => {
+    const typedContainer: Container<readonly [Binding<typeof tokens.config>], typeof tokens> = createContainer(
+        tokens,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+    const typedScope = typedContainer.createScope(bind(tokens.port, () => 3000));
+    const typedNestedScope = typedScope.createScope(
+        bind(tokens.logger, () => ({
+            log: () => {},
+        })),
+    );
+
+    expect(typedNestedScope.resolve(tokens.config)).type.toBe<Config>();
+    expect(typedNestedScope.resolve(tokens.port)).type.toBe<number>();
+    expect(typedNestedScope.resolve(tokens.logger)).type.toBe<Logger>();
+    expect(() => {
+        typedScope.resolve(tokens.logger);
+    }).type.toRaiseError();
+    expect(() => {
+        typedScope.createScope(
+            bind(tokens.server, { logger: tokens.logger }, () => ({
+                port: 3000,
+            })),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
+test("public Container helper type infers scope boundaries from flattened overrides", () => {
+    type ServiceA = {
+        readonly serviceB: ServiceB;
+    };
+    type ServiceB = {
+        readonly name: string;
+    };
+    type ServiceC = {
+        readonly serviceA: ServiceA;
+    };
+    const scopedTokens = defineTokens({
+        serviceA: defineType<ServiceA>(),
+        serviceB: defineType<ServiceB>(),
+        serviceC: defineType<ServiceC>(),
+    });
+    const serviceABinding = bind.singleton(
+        scopedTokens.serviceA,
+        { serviceB: scopedTokens.serviceB },
+        ({ serviceB }) => ({
+            serviceB,
+        }),
+    );
+    const rootServiceBBinding = bind.singleton(scopedTokens.serviceB, () => ({ name: "root" }));
+    const childServiceBBinding = bind.scoped(scopedTokens.serviceB, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, serviceABinding, rootServiceBBinding).createScope(childServiceBBinding);
+    const typedChild: Container<
+        readonly [typeof serviceABinding, typeof rootServiceBBinding, typeof childServiceBBinding],
+        typeof scopedTokens
+    > = child;
+
+    const grandchild = typedChild.createScope(
+        bind.singleton(scopedTokens.serviceC, { serviceA: scopedTokens.serviceA }, ({ serviceA }) => ({
+            serviceA,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
 });

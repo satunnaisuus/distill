@@ -12,7 +12,8 @@ npm install @satunnaisuus/distill
 
 - End-to-end type inference for tokens, dependency maps, factories, and resolved values.
 - Compile-time checks for missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
-- Lazy service creation with per-container instance caching.
+- Lazy service creation with singleton, scoped, and transient lifetimes.
+- Child scopes for request-local overrides and per-scope service instances.
 - Explicit dependency maps instead of decorators, reflection, or global state.
 - Lazy `ref` dependencies for deferred access and dependency cycles.
 - No runtime dependencies; ESM-first package.
@@ -188,6 +189,44 @@ production.resolve(tokens.reports).createdAt();
 test.resolve(tokens.reports).createdAt();
 ```
 
+### Create request scopes
+
+```ts
+import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+
+type CurrentUser = {
+    readonly id: string;
+};
+
+type AuditLog = {
+    readonly userId: string;
+};
+
+const tokens = defineTokens({
+    currentUser: defineType<CurrentUser>(),
+    auditLog: defineType<AuditLog>(),
+});
+
+const app = createContainer(
+    tokens,
+    bind.scoped(tokens.currentUser, () => {
+        throw new Error("currentUser must be provided by a request scope");
+    }),
+    bind.scoped(tokens.auditLog, { currentUser: tokens.currentUser }, ({ currentUser }) => ({
+        userId: currentUser.id,
+    })),
+);
+
+const request = app.createScope(
+    bind.scoped(tokens.currentUser, () => ({ id: "user-1" })),
+);
+
+request.resolve(tokens.auditLog).userId;
+//    ^? string
+```
+
+Scope bindings can override parent bindings. Scoped instances are cached in the scope that resolves them, so separate request scopes receive separate `auditLog` instances.
+
 ## API
 
 ```ts
@@ -195,10 +234,17 @@ type<T>()
 defineTokens(definitions)
 bind(token, factory)
 bind(token, dependencies, factory)
+bind.singleton(token, factory)
+bind.singleton(token, dependencies, factory)
+bind.scoped(token, factory)
+bind.scoped(token, dependencies, factory)
+bind.transient(token, factory)
+bind.transient(token, dependencies, factory)
 ref(token)
 ref(() => token)
 createContainer(tokens, ...bindings)
 container.resolve(token)
+container.createScope(...bindings)
 ```
 
 ### `type<T>()`
@@ -243,9 +289,9 @@ Creates a binding for a service without declared dependencies.
 const configBinding = bind(tokens.config, () => ({ port: 3000 }));
 ```
 
-The factory is lazy: it is not called when the binding or container is created. It runs the first time the service is resolved.
+The factory is lazy: it is not called when the binding or container is created. It runs when the service is resolved according to the binding lifetime.
 
-The created value is cached per container, so resolving the same token again returns the same instance, including falsy values such as `false`, `0`, `null`, and `undefined`.
+The default `bind(...)` lifetime is singleton. Singleton values are cached in the scope where the binding is registered, so resolving the same token again returns the same instance, including falsy values such as `false`, `0`, `null`, and `undefined`.
 
 The factory return type must be assignable to the token value type. If the service value itself is a function, return that function from the factory:
 
@@ -292,6 +338,26 @@ const container = createContainer(
     bind(tokens.config, () => ({ port: 3000 })),
 );
 ```
+
+### `bind.singleton`, `bind.scoped`, and `bind.transient`
+
+Creates a binding with an explicit lifetime.
+
+```ts
+const dbBinding = bind.singleton(tokens.db, () => createDb());
+const requestUserBinding = bind.scoped(tokens.currentUser, () => currentUser);
+const idBinding = bind.transient(tokens.id, () => crypto.randomUUID());
+```
+
+Lifetimes behave as follows:
+
+- `singleton`: cached in the scope where the binding is registered and shared with child scopes;
+- `scoped`: cached in the scope that resolves the service;
+- `transient`: not cached; the factory runs for every resolution.
+
+`bind(...)` is equivalent to `bind.singleton(...)`.
+
+Singleton bindings cannot depend on scoped bindings. TypeScript reports this at the container or scope definition, including through transitive dependencies.
 
 ### `ref(token)` and `ref(() => token)`
 
@@ -340,10 +406,11 @@ At compile time, `createContainer` validates that:
 - every dependency token has a binding in the container;
 - each token is bound once;
 - eager dependencies do not form a cycle;
+- singleton bindings do not depend on scoped bindings;
 - binding tokens are not unions;
 - spread bindings are passed as a tuple, not a widened array.
 
-Runtime checks cover the same cases for plain JavaScript or TypeScript code that bypasses the type system. Eager circular dependencies are rejected when the container is created. Missing services and recursive resolution cycles are reported when the affected service is resolved or a `ref` value is read.
+Runtime checks cover binding shape, registry membership, duplicate bindings, and eager cycles for plain JavaScript or TypeScript code that bypasses the type system. Missing services and recursive resolution cycles are reported when the affected service is resolved or a `ref` value is read.
 
 When spreading a binding list, preserve tuple information:
 
@@ -358,6 +425,22 @@ const container = createContainer(tokens, ...bindings);
 
 Avoid spreading a plain `Binding[]`; TypeScript cannot validate individual bindings after the tuple has been widened.
 
+### `container.createScope(...bindings)`
+
+Creates a child scope that inherits parent bindings and can add or override bindings.
+
+```ts
+const request = app.createScope(
+    bind.scoped(tokens.currentUser, () => user),
+);
+
+const service = request.resolve(tokens.service);
+```
+
+Scope bindings are validated against the parent container and the token registry. Duplicate bindings inside the same scope are rejected, but a child scope can override a parent binding for the same token.
+
+Singleton bindings are initialized from the scope where they are registered. Scoped and transient bindings resolve their dependencies from the scope that requested them, so parent scoped services can use child overrides.
+
 ### `container.resolve(token)`
 
 Resolves a bound service.
@@ -369,7 +452,7 @@ const config = container.resolve(tokens.config);
 
 Only tokens that have bindings in that container can be resolved at compile time. The return type is inferred from the token.
 
-Resolution is lazy and cached:
+Resolution is lazy. Singleton and scoped bindings are cached according to their lifetime, while transient bindings create a new value on every resolution:
 
 ```ts
 const first = container.resolve(tokens.config);
@@ -385,6 +468,7 @@ Distill also exports helper types for advanced typing:
 ```ts
 import type {
     Binding,
+    BindingLifetime,
     Container,
     DependencyMap,
     Ref,

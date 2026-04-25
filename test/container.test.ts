@@ -8,6 +8,7 @@ import { type as defineType } from "../src/type-descriptor";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
+    readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
 };
 
 const createRuntimeContainer = createContainer as unknown as (
@@ -191,6 +192,326 @@ describe("createContainer", () => {
         expect(factory).toHaveBeenCalledTimes(2);
     });
 
+    it("creates transient services for every resolution", () => {
+        const tokens = defineTokens({
+            counter: defineType<{ readonly id: number }>(),
+        });
+        let nextId = 1;
+        const factory = vi.fn(() => ({ id: nextId++ }));
+
+        const container = createContainer(tokens, bind.transient(tokens.counter, factory));
+
+        expect(container.resolve(tokens.counter)).toEqual({ id: 1 });
+        expect(container.resolve(tokens.counter)).toEqual({ id: 2 });
+        expect(factory).toHaveBeenCalledTimes(2);
+    });
+
+    it("caches scoped services separately for each scope", () => {
+        const tokens = defineTokens({
+            counter: defineType<{ readonly id: number }>(),
+        });
+        let nextId = 1;
+        const factory = vi.fn(() => ({ id: nextId++ }));
+
+        const container = createContainer(tokens, bind.scoped(tokens.counter, factory));
+        const firstScope = container.createScope();
+        const secondScope = container.createScope();
+
+        const rootCounter = container.resolve(tokens.counter);
+        expect(container.resolve(tokens.counter)).toBe(rootCounter);
+
+        const firstScopedCounter = firstScope.resolve(tokens.counter);
+        expect(firstScope.resolve(tokens.counter)).toBe(firstScopedCounter);
+
+        const secondScopedCounter = secondScope.resolve(tokens.counter);
+        expect(secondScope.resolve(tokens.counter)).toBe(secondScopedCounter);
+
+        expect(rootCounter).not.toBe(firstScopedCounter);
+        expect(firstScopedCounter).not.toBe(secondScopedCounter);
+        expect(factory).toHaveBeenCalledTimes(3);
+    });
+
+    it("shares singleton services from their registration scope with child scopes", () => {
+        const tokens = defineTokens({
+            service: defineType<{ readonly id: number }>(),
+        });
+        const service = { id: 1 };
+        const factory = vi.fn(() => service);
+        const container = createContainer(tokens, bind.singleton(tokens.service, factory));
+        const firstScope = container.createScope();
+        const secondScope = container.createScope();
+
+        expect(firstScope.resolve(tokens.service)).toBe(service);
+        expect(secondScope.resolve(tokens.service)).toBe(service);
+        expect(container.resolve(tokens.service)).toBe(service);
+        expect(factory).toHaveBeenCalledTimes(1);
+    });
+
+    it("allows child scopes to override parent bindings", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.config, () => ({ name: "root" })),
+            bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+        );
+        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+
+        expect(container.resolve(tokens.service)).toEqual({ name: "root" });
+        expect(childScope.resolve(tokens.service)).toEqual({ name: "child" });
+    });
+
+    it("resolves ref dependencies from the scope that created the ref", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<{ readonly getName: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.config, () => ({ name: "root" })),
+            bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
+                getName: () => config.value.name,
+            })),
+        );
+        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+
+        expect(container.resolve(tokens.service).getName()).toBe("root");
+        expect(childScope.resolve(tokens.service).getName()).toBe("child");
+    });
+
+    it("initializes singleton dependencies from the singleton registration scope", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.singleton(tokens.config, () => ({ name: "root" })),
+            bind.singleton(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+        );
+        const childScope = container.createScope(bind.singleton(tokens.config, () => ({ name: "child" })));
+
+        expect(childScope.resolve(tokens.service)).toEqual({ name: "root" });
+        expect(container.resolve(tokens.service)).toEqual({ name: "root" });
+        expect(childScope.resolve(tokens.config)).toEqual({ name: "child" });
+    });
+
+    it("allows child scoped overrides to depend on parent singletons that use parent bindings", () => {
+        type ServiceA = {
+            readonly name: string;
+            readonly serviceB?: ServiceB;
+        };
+        type ServiceB = {
+            readonly name: string;
+            readonly serviceA: ServiceA;
+        };
+        const tokens = defineTokens({
+            serviceA: defineType<ServiceA>(),
+            serviceB: defineType<ServiceB>(),
+        });
+        const rootServiceA = { name: "root-a" };
+        const container = createContainer(
+            tokens,
+            bind.singleton(tokens.serviceA, () => rootServiceA),
+            bind.singleton(tokens.serviceB, { serviceA: tokens.serviceA }, ({ serviceA }) => ({
+                name: "root-b",
+                serviceA,
+            })),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
+                name: "child-a",
+                serviceB,
+            })),
+        );
+
+        expect(childScope.resolve(tokens.serviceA)).toEqual({
+            name: "child-a",
+            serviceB: {
+                name: "root-b",
+                serviceA: rootServiceA,
+            },
+        });
+        expect(childScope.resolve(tokens.serviceB).serviceA).toBe(rootServiceA);
+        expect(container.resolve(tokens.serviceA)).toBe(rootServiceA);
+    });
+
+    it("lets nested scopes inherit child overrides while keeping grandchild overrides local", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.config, () => ({ name: "root" })),
+            bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+        );
+        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+        const inheritedGrandchildScope = childScope.createScope();
+        const overriddenGrandchildScope = childScope.createScope(
+            bind.scoped(tokens.config, () => ({ name: "grandchild" })),
+        );
+
+        expect(container.resolve(tokens.service)).toEqual({ name: "root" });
+        expect(childScope.resolve(tokens.service)).toEqual({ name: "child" });
+        expect(inheritedGrandchildScope.resolve(tokens.service)).toEqual({ name: "child" });
+        expect(overriddenGrandchildScope.resolve(tokens.service)).toEqual({ name: "grandchild" });
+        expect(childScope.resolve(tokens.service)).toEqual({ name: "child" });
+        expect(container.resolve(tokens.service)).toEqual({ name: "root" });
+    });
+
+    it("caches scoped services independently across nested scopes", () => {
+        const tokens = defineTokens({
+            counter: defineType<{ readonly id: number }>(),
+        });
+        let nextId = 1;
+        const factory = vi.fn(() => ({ id: nextId++ }));
+
+        const container = createContainer(tokens, bind.scoped(tokens.counter, factory));
+        const childScope = container.createScope();
+        const grandchildScope = childScope.createScope();
+
+        const rootCounter = container.resolve(tokens.counter);
+        const childCounter = childScope.resolve(tokens.counter);
+        const grandchildCounter = grandchildScope.resolve(tokens.counter);
+
+        expect(container.resolve(tokens.counter)).toBe(rootCounter);
+        expect(childScope.resolve(tokens.counter)).toBe(childCounter);
+        expect(grandchildScope.resolve(tokens.counter)).toBe(grandchildCounter);
+        expect(rootCounter).not.toBe(childCounter);
+        expect(childCounter).not.toBe(grandchildCounter);
+        expect(factory).toHaveBeenCalledTimes(3);
+    });
+
+    it("shares child-scope singletons with descendants without exposing them to parent or siblings", () => {
+        const tokens = defineTokens({
+            service: defineType<{ readonly id: number }>(),
+        });
+        const service = { id: 1 };
+        const factory = vi.fn(() => service);
+        const container = createRuntimeContainer(tokens);
+        const siblingScope = container.createScope();
+        const childScope = container.createScope(bind.singleton(tokens.service, factory));
+        const grandchildScope = childScope.createScope();
+
+        expect(childScope.resolve(tokens.service)).toBe(service);
+        expect(grandchildScope.resolve(tokens.service)).toBe(service);
+        expect(factory).toHaveBeenCalledTimes(1);
+        expect(() => container.resolve(tokens.service)).toThrowError(
+            'Service "service" is not registered in the container',
+        );
+        expect(() => siblingScope.resolve(tokens.service)).toThrowError(
+            'Service "service" is not registered in the container',
+        );
+    });
+
+    it("re-resolves eager dependencies for every transient service resolution", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly id: number }>(),
+            service: defineType<{ readonly configId: number }>(),
+        });
+        let nextConfigId = 1;
+        const configFactory = vi.fn(() => ({ id: nextConfigId++ }));
+        const serviceFactory = vi.fn(({ config }: { readonly config: { readonly id: number } }) => ({
+            configId: config.id,
+        }));
+
+        const container = createContainer(
+            tokens,
+            bind.transient(tokens.config, configFactory),
+            bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
+        );
+
+        expect(container.resolve(tokens.service)).toEqual({ configId: 1 });
+        expect(container.resolve(tokens.service)).toEqual({ configId: 2 });
+        expect(serviceFactory).toHaveBeenCalledTimes(2);
+        expect(configFactory).toHaveBeenCalledTimes(2);
+    });
+
+    it("resolves transient services against child overrides on every resolution", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<{ readonly name: string; readonly id: number }>(),
+        });
+        let nextId = 1;
+        const serviceFactory = vi.fn(({ config }: { readonly config: { readonly name: string } }) => ({
+            id: nextId++,
+            name: config.name,
+        }));
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.config, () => ({ name: "root" })),
+            bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
+        );
+        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+
+        expect(container.resolve(tokens.service)).toEqual({ id: 1, name: "root" });
+        expect(childScope.resolve(tokens.service)).toEqual({ id: 2, name: "child" });
+        expect(childScope.resolve(tokens.service)).toEqual({ id: 3, name: "child" });
+        expect(serviceFactory).toHaveBeenCalledTimes(3);
+    });
+
+    it("creates independent ref instances for sibling scopes", () => {
+        type Service = {
+            readonly configRef: object;
+            readonly getConfig: () => { readonly name: string };
+        };
+        const tokens = defineTokens({
+            config: defineType<{ readonly name: string }>(),
+            service: defineType<Service>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.config, () => ({ name: "root" })),
+            bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
+                configRef: config,
+                getConfig: () => config.value,
+            })),
+        );
+        const firstScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "first" })));
+        const secondScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "second" })));
+
+        const firstService = firstScope.resolve(tokens.service);
+        const secondService = secondScope.resolve(tokens.service);
+
+        expect(firstService.configRef).not.toBe(secondService.configRef);
+        expect(firstService.getConfig()).toEqual({ name: "first" });
+        expect(secondService.getConfig()).toEqual({ name: "second" });
+    });
+
+    it("selects lazy ref dependency tokens per scoped service initialization", () => {
+        const tokens = defineTokens({
+            firstLogger: defineType<{ readonly name: "first" }>(),
+            secondLogger: defineType<{ readonly name: "second" }>(),
+            service: defineType<{
+                readonly getLogger: () => { readonly name: "first" } | { readonly name: "second" };
+            }>(),
+        });
+        let selectedToken: typeof tokens.firstLogger | typeof tokens.secondLogger = tokens.firstLogger;
+        const resolveToken = vi.fn(() => selectedToken);
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.firstLogger, () => ({ name: "first" })),
+            bind.scoped(tokens.secondLogger, () => ({ name: "second" })),
+            bind.scoped(tokens.service, { logger: ref(resolveToken) }, ({ logger }) => ({
+                getLogger: () => logger.value,
+            })),
+        );
+
+        const firstScope = container.createScope();
+        const firstService = firstScope.resolve(tokens.service);
+        selectedToken = tokens.secondLogger;
+        const secondScope = container.createScope();
+        const secondService = secondScope.resolve(tokens.service);
+
+        expect(firstService.getLogger()).toEqual({ name: "first" });
+        expect(secondService.getLogger()).toEqual({ name: "second" });
+        expect(firstService.getLogger()).toEqual({ name: "first" });
+        expect(resolveToken).toHaveBeenCalledTimes(2);
+    });
+
     it("throws when a binding token is not in the registry", () => {
         const tokens = defineTokens({
             port: defineType<number>(),
@@ -308,6 +629,122 @@ describe("createContainer", () => {
                 bind(tokens.port, () => 4000),
             ),
         ).toThrowError('Service "port" is already registered in the container');
+    });
+
+    it("throws when the same service is registered twice in a child scope", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const container = createRuntimeContainer(tokens);
+
+        expect(() =>
+            container.createScope(
+                bind(tokens.port, () => 3000),
+                bind(tokens.port, () => 4000),
+            ),
+        ).toThrowError('Service "port" is already registered in the container');
+    });
+
+    it("throws when a child scope binding was not created with bind", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const container = createRuntimeContainer(tokens);
+
+        expect(() =>
+            container.createScope({
+                token: tokens.port,
+                factory: () => 3000,
+            }),
+        ).toThrowError("Bindings must be created with bind");
+    });
+
+    it("throws when a child scope binding token is not in the registry", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const externalToken = "external" as Token<"external", number>;
+        const container = createRuntimeContainer(tokens);
+
+        expect(() => container.createScope(bind(externalToken, () => 3000))).toThrowError(
+            'Token "external" is not registered in the registry',
+        );
+    });
+
+    it("throws when a child scope eager dependency token is not in the registry", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const externalToken = "external" as Token<"external", number>;
+        const container = createRuntimeContainer(tokens);
+
+        expect(() =>
+            container.createScope(bind(tokens.port, { external: externalToken }, ({ external }) => external)),
+        ).toThrowError('Token "external" is not registered in the registry');
+    });
+
+    it("throws when a child scope service depends on a registered token without a visible binding", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly port: number }>(),
+            server: defineType<{ readonly port: number }>(),
+        });
+        const container = createRuntimeContainer(tokens);
+        const childScope = container.createScope(
+            bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
+        );
+
+        expect(() => childScope.resolve(tokens.server)).toThrowError(
+            'Service "config" is not registered in the container',
+        );
+    });
+
+    it("throws when child scope overrides create an eager circular dependency", () => {
+        const tokens = defineTokens({
+            serviceA: defineType<{ readonly name: "a" }>(),
+            serviceB: defineType<{ readonly name: "b" }>(),
+        });
+        const container = createRuntimeContainer(
+            tokens,
+            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+        );
+
+        expect(() =>
+            container.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+        ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
+    });
+
+    it("throws when child scope overrides create a cycle through a transient parent binding", () => {
+        const tokens = defineTokens({
+            serviceA: defineType<{ readonly name: "a" }>(),
+            serviceB: defineType<{ readonly name: "b" }>(),
+        });
+        const container = createRuntimeContainer(
+            tokens,
+            bind.transient(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+        );
+
+        expect(() =>
+            container.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+        ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
+    });
+
+    it("throws when nested scope overrides create an eager circular dependency", () => {
+        const tokens = defineTokens({
+            serviceA: defineType<{ readonly name: "a" }>(),
+            serviceB: defineType<{ readonly name: "b" }>(),
+        });
+        const container = createRuntimeContainer(
+            tokens,
+            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+        );
+        const childScope = container.createScope();
+
+        expect(() =>
+            childScope.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+        ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
 
     it("throws when an eager dependency depends on itself during registration", () => {
@@ -487,6 +924,30 @@ describe("createContainer", () => {
         expect(service.getLogger()).toBe(logger);
         expect(service.getLogger()).toBe(logger);
         expect(loggerFactory).toHaveBeenCalledTimes(1);
+    });
+
+    it("resolves transient ref dependencies lazily without caching their target instances", () => {
+        const tokens = defineTokens({
+            logger: defineType<{ readonly id: number }>(),
+            service: defineType<{ readonly getLogger: () => { readonly id: number } }>(),
+        });
+        let nextLoggerId = 1;
+        const loggerFactory = vi.fn(() => ({ id: nextLoggerId++ }));
+
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
+                getLogger: () => logger.value,
+            })),
+            bind.transient(tokens.logger, loggerFactory),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(loggerFactory).not.toHaveBeenCalled();
+        expect(service.getLogger()).toEqual({ id: 1 });
+        expect(service.getLogger()).toEqual({ id: 2 });
+        expect(loggerFactory).toHaveBeenCalledTimes(2);
     });
 
     it("reuses ref dependency instances for the same target token", () => {

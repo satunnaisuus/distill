@@ -1,5 +1,6 @@
 import { bind, createContainer, defineTokens, type as defineType, ref } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
+import type { Config, Handler, Logger } from "./fixtures/services.js";
 import { tokens } from "./fixtures/tokens.js";
 
 test("bind rejects dependency map values that are not tokens or refs", () => {
@@ -94,6 +95,177 @@ test("bind rejects extra arguments for dependency factories", () => {
     }).type.toRaiseError();
 });
 
+test("lifetime bind variants reject factories returning values outside the token type", () => {
+    expect(() => {
+        bind.singleton(tokens.port, () => "3000");
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, () => "3000");
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, () => "3000");
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject dependency factories returning values outside the token type", () => {
+    expect(() => {
+        bind.singleton(tokens.port, { config: tokens.config }, () => "3000");
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, { config: tokens.config }, () => "3000");
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, { config: tokens.config }, () => "3000");
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject invalid dependency map values", () => {
+    expect(() => {
+        bind.singleton(tokens.port, { invalid: "config" }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, { invalid: "config" }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, { invalid: "config" }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject dependency map values that may be undefined", () => {
+    expect(() => {
+        bind.singleton(tokens.port, { config: undefined as typeof tokens.config | undefined }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, { config: undefined as typeof tokens.config | undefined }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, { config: undefined as typeof tokens.config | undefined }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject optional dependency map values", () => {
+    const dependencies: { readonly config?: typeof tokens.config } = {
+        config: tokens.config,
+    };
+
+    expect(() => {
+        bind.singleton(tokens.port, dependencies, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, dependencies, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, dependencies, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject dependency maps with symbol keys", () => {
+    const dependencyKey = Symbol("dependency");
+
+    expect(() => {
+        bind.singleton(tokens.port, { [dependencyKey]: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, { [dependencyKey]: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, { [dependencyKey]: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject dependency maps with numeric keys", () => {
+    expect(() => {
+        bind.singleton(tokens.port, { 1: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, { 1: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, { 1: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject dependency maps without factories", () => {
+    expect(() => {
+        bind.singleton(tokens.port, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, {});
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject extra arguments for dependency-free factories", () => {
+    expect(() => {
+        bind.singleton(tokens.port, () => 3000, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, () => 3000, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, () => 3000, {});
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject missing arguments", () => {
+    expect(() => {
+        bind.singleton();
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped();
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient();
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject extra arguments for dependency factories", () => {
+    expect(() => {
+        bind.singleton(tokens.port, {}, () => 3000, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, {}, () => 3000, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, {}, () => 3000, {});
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants support function-valued services", () => {
+    const singleton = bind.singleton(tokens.handler, () => (message) => message.length);
+    const scoped = bind.scoped(tokens.handler, () => (message) => message.length);
+    const transient = bind.transient(tokens.handler, () => (message) => message.length);
+
+    expect<ReturnType<typeof singleton.factory>>().type.toBe<Handler>();
+    expect<ReturnType<typeof scoped.factory>>().type.toBe<Handler>();
+    expect<ReturnType<typeof transient.factory>>().type.toBe<Handler>();
+});
+
+test("lifetime bind variants infer dependency factory parameters", () => {
+    const singleton = bind.singleton(tokens.server, { config: tokens.config }, ({ config }) => ({
+        port: config.port,
+    }));
+    const scoped = bind.scoped(tokens.server, { logger: ref(tokens.logger), port: tokens.port }, ({ port }) => ({
+        port,
+    }));
+    const transient = bind.transient(
+        tokens.server,
+        { config: tokens.config, logger: ref(tokens.logger), port: tokens.port },
+        ({ config }) => ({
+            port: config.port,
+        }),
+    );
+
+    expect<Parameters<typeof singleton.factory>[0]["config"]>().type.toBe<Config>();
+    expect<Parameters<typeof scoped.factory>[0]["logger"]["value"]>().type.toBe<Logger>();
+    expect<Parameters<typeof scoped.factory>[0]["port"]>().type.toBe<number>();
+    expect<Parameters<typeof transient.factory>[0]["config"]>().type.toBe<Config>();
+    expect<Parameters<typeof transient.factory>[0]["logger"]["value"]>().type.toBe<Logger>();
+    expect<Parameters<typeof transient.factory>[0]["port"]>().type.toBe<number>();
+});
+
 test("defineTokens rejects missing definitions", () => {
     expect(() => {
         defineTokens();
@@ -128,6 +300,25 @@ test("createContainer rejects rest arguments that are not bindings", () => {
 test("createContainer rejects structural bindings not created by bind", () => {
     expect(() => {
         createContainer(tokens, {
+            token: tokens.port,
+            factory: () => 3000,
+        });
+    }).type.toRaiseError();
+});
+
+test("createScope rejects rest arguments that are not bindings", () => {
+    const container = createContainer(tokens);
+
+    expect(() => {
+        container.createScope("config");
+    }).type.toRaiseError();
+});
+
+test("createScope rejects structural bindings not created by bind", () => {
+    const container = createContainer(tokens);
+
+    expect(() => {
+        container.createScope({
             token: tokens.port,
             factory: () => 3000,
         });

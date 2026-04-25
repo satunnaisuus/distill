@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { bind, getBindingDependencies, isBinding } from "../src/bind";
-import { bindingBrand, bindingDependenciesBrand } from "../src/brands";
+import { bind, getBindingDependencies, getBindingLifetime, isBinding } from "../src/bind";
+import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/brands";
 import { defineTokens } from "../src/token";
 import { type as defineType } from "../src/type-descriptor";
 
@@ -19,6 +19,8 @@ describe("bind", () => {
         expect(binding.factory()).toBe(3000);
         expect(isBinding(binding)).toBe(true);
         expect(Object.hasOwn(binding, bindingBrand)).toBe(true);
+        expect(Object.hasOwn(binding, bindingLifetimeBrand)).toBe(true);
+        expect(getBindingLifetime(binding)).toBe("singleton");
         expect(getBindingDependencies(binding)).toBeUndefined();
         expect(Object.hasOwn(binding, bindingDependenciesBrand)).toBe(false);
     });
@@ -40,8 +42,19 @@ describe("bind", () => {
         expect(binding.factory({ config: { port: 3000 } })).toBe(3000);
         expect(isBinding(binding)).toBe(true);
         expect(Object.hasOwn(binding, bindingBrand)).toBe(true);
+        expect(getBindingLifetime(binding)).toBe("singleton");
         expect(getBindingDependencies(binding)).toBe(dependencies);
         expect(binding[bindingDependenciesBrand]).toBe(dependencies);
+    });
+
+    it("creates explicit singleton, scoped, and transient bindings", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+
+        expect(getBindingLifetime(bind.singleton(tokens.port, () => 3000))).toBe("singleton");
+        expect(getBindingLifetime(bind.scoped(tokens.port, () => 3000))).toBe("scoped");
+        expect(getBindingLifetime(bind.transient(tokens.port, () => 3000))).toBe("transient");
     });
 
     it("throws when dependencies are provided without a factory", () => {
