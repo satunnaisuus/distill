@@ -78,6 +78,14 @@ test("bind rejects dependency map values that are not tokens or refs", () => {
     }).type.toRaiseError();
 });
 
+test("bind rejects dependency maps with symbol keys", () => {
+    const dependencyKey = Symbol("dependency");
+
+    expect(() => {
+        bind(tokens.port, { [dependencyKey]: tokens.config }, () => 3000);
+    }).type.toRaiseError();
+});
+
 test("ref rejects direct values that are not tokens", () => {
     expect(() => {
         ref("logger");
