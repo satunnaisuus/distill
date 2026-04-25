@@ -489,6 +489,38 @@ describe("createContainer", () => {
         expect(loggerFactory).toHaveBeenCalledTimes(1);
     });
 
+    it("reuses ref dependency instances for the same target token", () => {
+        const tokens = defineTokens({
+            logger: defineType<{ readonly log: (message: string) => void }>(),
+            service: defineType<{
+                readonly getLogger: () => { readonly log: (message: string) => void };
+                readonly hasSharedLoggerRef: boolean;
+            }>(),
+        });
+        const logger = { log: vi.fn() };
+        const loggerFactory = vi.fn(() => logger);
+
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { firstLogger: ref(tokens.logger), secondLogger: ref(tokens.logger) },
+                ({ firstLogger, secondLogger }) => ({
+                    getLogger: () => firstLogger.value,
+                    hasSharedLoggerRef: firstLogger === secondLogger,
+                }),
+            ),
+            bind(tokens.logger, loggerFactory),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.hasSharedLoggerRef).toBe(true);
+        expect(loggerFactory).not.toHaveBeenCalled();
+        expect(service.getLogger()).toBe(logger);
+        expect(loggerFactory).toHaveBeenCalledTimes(1);
+    });
+
     it("allows circular dependencies through refs after initialization", () => {
         type ServiceA = {
             readonly getB: () => ServiceB;

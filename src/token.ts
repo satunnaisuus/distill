@@ -87,7 +87,12 @@ export const defineTokens = <const TDefinitions extends TokenDefinitions>(
     const tokens = {} as Tokens<TDefinitions>;
 
     for (const key of Object.keys(definitions) as Array<Extract<keyof TDefinitions, string>>) {
-        tokens[key] = key as Tokens<TDefinitions>[typeof key];
+        Object.defineProperty(tokens, key, {
+            configurable: true,
+            enumerable: true,
+            value: key,
+            writable: true,
+        });
     }
 
     return tokens;

@@ -126,15 +126,22 @@ const createDependencyFactory = (
         const resolvedDependencies: Record<string, unknown> = {};
 
         for (const [key, dependency] of Object.entries(dependencies) as Array<[string, DependencyReference]>) {
+            let resolvedDependency: unknown;
+
             if (isRefDependency(dependency)) {
                 const dependencyToken = dependency.resolveToken();
                 assertTokenIsInRegistry(dependencyToken);
-                resolvedDependencies[key] = getOrCreateRefInstance(dependencyToken);
-
-                continue;
+                resolvedDependency = getOrCreateRefInstance(dependencyToken);
+            } else {
+                resolvedDependency = container.resolve(dependency);
             }
 
-            resolvedDependencies[key] = container.resolve(dependency);
+            Object.defineProperty(resolvedDependencies, key, {
+                configurable: true,
+                enumerable: true,
+                value: resolvedDependency,
+                writable: true,
+            });
         }
 
         return (binding.factory as (dependencies: Record<string, unknown>) => unknown)(resolvedDependencies);
@@ -171,8 +178,8 @@ export const createContainer = <
     const refInstances = new Map<string, Ref<unknown>>();
     const resolvingPath: string[] = [];
 
-    const getCurrentResolutionContext = (): string | undefined => {
-        return resolvingPath.at(-1);
+    const getCurrentResolutionContext = (): string => {
+        return resolvingPath[resolvingPath.length - 1];
     };
 
     const resolveActual = <TToken extends AnyToken>(currentToken: TToken): TokenValue<TToken> => {
@@ -222,9 +229,7 @@ export const createContainer = <
                     const resolutionContext = getCurrentResolutionContext();
 
                     throw new Error(
-                        resolutionContext
-                            ? `Ref dependency "${currentTokenKey}" was accessed before it finished initializing while resolving "${resolutionContext}"`
-                            : `Ref dependency "${currentTokenKey}" was accessed before it finished initializing`,
+                        `Ref dependency "${currentTokenKey}" was accessed before it finished initializing while resolving "${resolutionContext}"`,
                     );
                 }
 
