@@ -11,21 +11,9 @@ type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
 };
 
-type BindingToResolveOverload<TBinding> = TBinding extends {
-    readonly token: infer TToken extends AnyToken;
-}
-    ? (token: TToken) => TokenValue<TToken>
-    : never;
-
-type UnionToIntersection<TUnion> = (TUnion extends unknown ? (value: TUnion) => void : never) extends (
-    value: infer TIntersection,
-) => void
-    ? TIntersection
-    : never;
-
 type ResolveFn<TBindings extends readonly AnyBinding[]> = [TBindings[number]] extends [never]
     ? (token: never) => never
-    : UnionToIntersection<BindingToResolveOverload<TBindings[number]>>;
+    : <TToken extends TBindings[number]["token"]>(token: TToken) => TokenValue<TToken>;
 
 export type Container<TBindings extends readonly AnyBinding[] = []> = {
     resolve: ResolveFn<TBindings>;

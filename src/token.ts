@@ -16,8 +16,17 @@ export type TokenDefinitions = Record<string, AnyTypeDescriptor>;
 export type AnyTokenRegistry = Record<string, AnyToken>;
 export type RegistryTokens<TRegistry extends AnyTokenRegistry> = TRegistry[keyof TRegistry];
 
+type TokenDefinitionKeyError<TDefinitions> = [Exclude<keyof TDefinitions, string>] extends [never]
+    ? {}
+    : {
+          readonly __non_string_token_keys_not_supported__: Exclude<keyof TDefinitions, string>;
+      };
+
 export type Tokens<TDefinitions extends TokenDefinitions> = {
-    [TKey in keyof TDefinitions]: Token<Extract<TKey, string>, TypeValue<TDefinitions[TKey]>>;
+    [TKey in keyof TDefinitions as TKey extends string ? TKey : never]: Token<
+        Extract<TKey, string>,
+        TypeValue<TDefinitions[TKey]>
+    >;
 };
 
 export const tokenKey = <TToken extends AnyToken>(token: TToken): TokenKey<TToken> => {
@@ -25,7 +34,7 @@ export const tokenKey = <TToken extends AnyToken>(token: TToken): TokenKey<TToke
 };
 
 export const defineTokens = <const TDefinitions extends TokenDefinitions>(
-    definitions: TDefinitions,
+    definitions: TDefinitions & TokenDefinitionKeyError<TDefinitions>,
 ): Tokens<TDefinitions> => {
     const tokens = {} as Tokens<TDefinitions>;
 
