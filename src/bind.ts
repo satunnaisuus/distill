@@ -2,15 +2,14 @@ import { bindingDependenciesBrand } from "./brands";
 import type { DependencyMap, ResolvedDependencies } from "./dependencies";
 import type { AnyToken, TokenValue } from "./token";
 
-type BindingFactory<TToken extends AnyToken, TDependencies extends DependencyMap | undefined> =
-    TDependencies extends DependencyMap
-        ? (dependencies: ResolvedDependencies<TDependencies>) => TokenValue<TToken>
-        : () => TokenValue<TToken>;
+type BindingFactory<
+    TToken extends AnyToken,
+    TDependencies extends DependencyMap | undefined,
+> = TDependencies extends DependencyMap
+    ? (dependencies: ResolvedDependencies<TDependencies>) => TokenValue<TToken>
+    : () => TokenValue<TToken>;
 
-export type Binding<
-    TToken extends AnyToken = AnyToken,
-    TDependencies extends DependencyMap | undefined = undefined,
-> = {
+export type Binding<TToken extends AnyToken = AnyToken, TDependencies extends DependencyMap | undefined = undefined> = {
     readonly token: TToken;
     readonly factory: BindingFactory<TToken, TDependencies>;
     readonly [bindingDependenciesBrand]?: TDependencies;
@@ -28,10 +27,7 @@ export const getBindingDependencies = (binding: AnyBinding): DependencyMap | und
     return binding[bindingDependenciesBrand];
 };
 
-export function bind<TToken extends AnyToken>(
-    currentToken: TToken,
-    factory: () => TokenValue<TToken>,
-): Binding<TToken>;
+export function bind<TToken extends AnyToken>(currentToken: TToken, factory: () => TokenValue<TToken>): Binding<TToken>;
 
 export function bind<TToken extends AnyToken, TDependencies extends DependencyMap>(
     currentToken: TToken,

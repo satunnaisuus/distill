@@ -8,33 +8,39 @@ type BindingByToken<TBindings extends readonly AnyBinding[], TToken extends AnyT
     { readonly token: TToken }
 >;
 
-type BindingEagerDependencyTokens<TBinding extends AnyBinding> = BindingDependencies<TBinding> extends infer TDependencies
-    ? TDependencies extends DependencyMap
-        ? Extract<TDependencies[keyof TDependencies], AnyToken>
-        : never
-    : never;
+type BindingEagerDependencyTokens<TBinding extends AnyBinding> =
+    BindingDependencies<TBinding> extends infer TDependencies
+        ? TDependencies extends DependencyMap
+            ? Extract<TDependencies[keyof TDependencies], AnyToken>
+            : never
+        : never;
 
 type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
 type RegisteredTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
 
-type DependencyKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> = (
+type DependencyKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> =
     BindingDependencies<TBinding> extends infer TDependencies
         ? TDependencies extends DependencyMap
             ? {
-                [TKey in keyof TDependencies]: [Exclude<DependencyToken<TDependencies[TKey]>, TAllowedTokens>] extends [never]
-                    ? never
-                    : TKey;
-            }[keyof TDependencies]
+                  [TKey in keyof TDependencies]: [
+                      Exclude<DependencyToken<TDependencies[TKey]>, TAllowedTokens>,
+                  ] extends [never]
+                      ? never
+                      : TKey;
+              }[keyof TDependencies]
             : never
-        : never
-);
+        : never;
 
-type MissingDependencyKeys<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> =
-    DependencyKeysNotIn<TBinding, TRegisteredTokens>;
+type MissingDependencyKeys<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> = DependencyKeysNotIn<
+    TBinding,
+    TRegisteredTokens
+>;
 
-type DependencyKeysOutsideRegistry<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> =
-    DependencyKeysNotIn<TBinding, TRegistryTokens>;
+type DependencyKeysOutsideRegistry<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = DependencyKeysNotIn<
+    TBinding,
+    TRegistryTokens
+>;
 
 type HasCircularDependencyFromToken<
     TBindings extends readonly AnyBinding[],
@@ -45,48 +51,47 @@ type HasCircularDependencyFromToken<
         ? [TBinding] extends [never]
             ? false
             : TBinding extends AnyBinding
-                ? HasTrue<
+              ? HasTrue<
                     BindingEagerDependencyTokens<TBinding> extends infer TDependencyToken
                         ? TDependencyToken extends AnyToken
                             ? HasCircularDependencyFromToken<TBindings, TDependencyToken, TPath | TToken>
                             : false
                         : false
                 >
-                : false
+              : false
         : false
     : true;
 
-type BindingOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = (
-    [Exclude<TBinding["token"], TRegistryTokens>] extends [never]
-        ? {}
-        : {
-            readonly __token_not_in_registry__: TokenKey<TBinding["token"]>;
-        }
-);
+type BindingOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = [
+    Exclude<TBinding["token"], TRegistryTokens>,
+] extends [never]
+    ? {}
+    : {
+          readonly __token_not_in_registry__: TokenKey<TBinding["token"]>;
+      };
 
-type DependenciesOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = (
-    [DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>] extends [never]
-        ? {}
-        : {
-            readonly __dependencies_not_in_registry__: DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>;
-        }
-);
+type DependenciesOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = [
+    DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>,
+] extends [never]
+    ? {}
+    : {
+          readonly __dependencies_not_in_registry__: DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>;
+      };
 
-type MissingDependenciesError<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> = (
-    [MissingDependencyKeys<TBinding, TRegisteredTokens>] extends [never]
-        ? {}
-        : {
-            readonly __missing_dependencies__: MissingDependencyKeys<TBinding, TRegisteredTokens>;
-        }
-);
+type MissingDependenciesError<TBinding extends AnyBinding, TRegisteredTokens extends AnyToken> = [
+    MissingDependencyKeys<TBinding, TRegisteredTokens>,
+] extends [never]
+    ? {}
+    : {
+          readonly __missing_dependencies__: MissingDependencyKeys<TBinding, TRegisteredTokens>;
+      };
 
-type CircularDependencyError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> = (
+type CircularDependencyError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> =
     HasCircularDependencyFromToken<TBindings, TBinding["token"]> extends true
         ? {
-            readonly __circular_dependency__: true;
-        }
-        : {}
-);
+              readonly __circular_dependency__: true;
+          }
+        : {};
 
 type ValidateBinding<
     TBinding extends AnyBinding,

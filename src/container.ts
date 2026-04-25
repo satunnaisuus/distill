@@ -17,9 +17,9 @@ type BindingToResolveOverload<TBinding> = TBinding extends {
     ? (token: TToken) => TokenValue<TToken>
     : never;
 
-type UnionToIntersection<TUnion> = (
-    TUnion extends unknown ? (value: TUnion) => void : never
-) extends (value: infer TIntersection) => void
+type UnionToIntersection<TUnion> = (TUnion extends unknown ? (value: TUnion) => void : never) extends (
+    value: infer TIntersection,
+) => void
     ? TIntersection
     : never;
 
@@ -41,9 +41,7 @@ type RuntimeBinding = {
 type AssertTokenIsInRegistry = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
 type RefResolver = <TToken extends AnyToken>(currentToken: TToken) => Ref<TokenValue<TToken>>;
 
-const createTokenRegistryAssert = <TRegistry extends AnyTokenRegistry>(
-    tokens: TRegistry,
-): AssertTokenIsInRegistry => {
+const createTokenRegistryAssert = <TRegistry extends AnyTokenRegistry>(tokens: TRegistry): AssertTokenIsInRegistry => {
     const registeredTokenKeys = new Set<string>(Object.values(tokens) as string[]);
 
     return <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
@@ -61,21 +59,13 @@ const formatCircularDependencyPath = (path: readonly string[]): string => {
     return path.join(" -> ");
 };
 
-const createCircularDependencyPath = (
-    path: readonly string[],
-    currentTokenKey: string,
-): readonly string[] => {
+const createCircularDependencyPath = (path: readonly string[], currentTokenKey: string): readonly string[] => {
     const cycleStartIndex = path.indexOf(currentTokenKey);
     return [...path.slice(cycleStartIndex), currentTokenKey];
 };
 
-const createCircularDependencyError = (
-    action: "registering" | "resolving",
-    path: readonly string[],
-): Error => {
-    return new Error(
-        `Circular dependency detected while ${action} services: ${formatCircularDependencyPath(path)}`,
-    );
+const createCircularDependencyError = (action: "registering" | "resolving", path: readonly string[]): Error => {
+    return new Error(`Circular dependency detected while ${action} services: ${formatCircularDependencyPath(path)}`);
 };
 
 const assertNoCircularDependencies = (bindings: ReadonlyMap<string, RuntimeBinding>): void => {

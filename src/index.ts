@@ -1,11 +1,11 @@
-export { bind } from "./bind";
 export type { Binding } from "./bind";
-export { createContainer } from "./container";
+export { bind } from "./bind";
 export type { Container } from "./container";
+export { createContainer } from "./container";
 export type { DependencyMap, ResolvedDependencies } from "./dependencies";
-export { ref } from "./ref";
 export type { Ref, RefToken } from "./ref";
-export { defineTokens } from "./token";
+export { ref } from "./ref";
 export type { Token, TokenDefinitions, Tokens } from "./token";
-export { type } from "./type-descriptor";
+export { defineTokens } from "./token";
 export type { TypeDescriptor } from "./type-descriptor";
+export { type } from "./type-descriptor";
