@@ -19,6 +19,23 @@ type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
 type RegisteredTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
 
+type HasDuplicateBindingToken<
+    TBindings extends readonly AnyBinding[],
+    TToken extends AnyToken,
+    TSeen extends boolean = false,
+> = TBindings extends readonly [
+    infer TCurrentBinding extends AnyBinding,
+    ...infer TRemainingBindings extends readonly AnyBinding[],
+]
+    ? [TokenKey<TCurrentBinding["token"]>] extends [TokenKey<TToken>]
+        ? [TokenKey<TToken>] extends [TokenKey<TCurrentBinding["token"]>]
+            ? TSeen extends true
+                ? true
+                : HasDuplicateBindingToken<TRemainingBindings, TToken, true>
+            : HasDuplicateBindingToken<TRemainingBindings, TToken, TSeen>
+        : HasDuplicateBindingToken<TRemainingBindings, TToken, TSeen>
+    : false;
+
 type DependencyKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> =
     BindingDependencies<TBinding> extends infer TDependencies
         ? TDependencies extends DependencyMap
@@ -86,6 +103,13 @@ type MissingDependenciesError<TBinding extends AnyBinding, TRegisteredTokens ext
           readonly __missing_dependencies__: MissingDependencyKeys<TBinding, TRegisteredTokens>;
       };
 
+type DuplicateBindingError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> =
+    HasDuplicateBindingToken<TBindings, TBinding["token"]> extends true
+        ? {
+              readonly __duplicate_binding__: TokenKey<TBinding["token"]>;
+          }
+        : {};
+
 type CircularDependencyError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> =
     HasCircularDependencyFromToken<TBindings, TBinding["token"]> extends true
         ? {
@@ -102,6 +126,7 @@ type ValidateBinding<
     BindingOutsideRegistryError<TBinding, TRegistryTokens> &
     DependenciesOutsideRegistryError<TBinding, TRegistryTokens> &
     MissingDependenciesError<TBinding, TRegisteredTokens> &
+    DuplicateBindingError<TBinding, TBindings> &
     CircularDependencyError<TBinding, TBindings>;
 
 export type ValidateBindings<TBindings extends readonly AnyBinding[], TRegistry extends AnyTokenRegistry> = {

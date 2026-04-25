@@ -4,7 +4,7 @@ export type TypeDescriptor<T> = {
     readonly [typeBrand]: T;
 };
 
-export type AnyTypeDescriptor = TypeDescriptor<any>;
+export type AnyTypeDescriptor = TypeDescriptor<unknown>;
 export type TypeValue<TType extends AnyTypeDescriptor> = TType[typeof typeBrand];
 
 export const type = <T = unknown>(): TypeDescriptor<T> => {
