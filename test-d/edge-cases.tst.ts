@@ -27,13 +27,28 @@ type Logger = {
 
 type Handler = (message: string) => number;
 type Counter = () => number;
+type CallableHandler = {
+    readonly kind: "callable";
+    (message: string): number;
+};
+type Parser = {
+    (input: string): number;
+    (input: number): string;
+};
+
+class InjectableService {
+    readonly status = "ready" as const;
+}
 
 const tokens = defineTokens({
+    callableHandler: defineType<CallableHandler>(),
     config: defineType<Config>(),
     counter: defineType<Counter>(),
     handler: defineType<Handler>(),
     logger: defineType<Logger>(),
+    parser: defineType<Parser>(),
     port: defineType<number>(),
+    serviceConstructor: defineType<typeof InjectableService>(),
     server: defineType<{ readonly port: number }>(),
 });
 
@@ -57,6 +72,20 @@ test("createContainer validates and preserves bindings passed as readonly tuples
 
 test("createContainer validates and preserves bindings passed as typed tuples", () => {
     const bindings: readonly [ServerBinding, ConfigBinding] = [
+        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+        bind(tokens.config, () => ({ port: 3000 })),
+    ];
+
+    const container = createContainer(tokens, ...bindings);
+
+    expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+    expect(container.resolve(tokens.config)).type.toBe<Config>();
+});
+
+test("createContainer validates and preserves bindings passed as mutable tuples", () => {
+    const bindings: [ServerBinding, ConfigBinding] = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
@@ -105,6 +134,14 @@ test("createContainer rejects valid bindings passed through mutable arrays", () 
     }).type.toRaiseError("__bindings_must_be_tuple__");
 });
 
+test("createContainer rejects valid bindings passed through readonly arrays", () => {
+    const bindings: readonly Binding[] = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+
+    expect(() => {
+        createContainer(tokens, ...bindings);
+    }).type.toRaiseError("__bindings_must_be_tuple__");
+});
+
 test("resolve accepts unions of bound tokens and returns the union of service values", () => {
     const container = createContainer(
         tokens,
@@ -119,6 +156,48 @@ test("resolve accepts unions of bound tokens and returns the union of service va
 test("bind rejects dependency map values that are not tokens or refs", () => {
     expect(() => {
         bind(tokens.port, { invalid: "config" }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("bind rejects dependency map values that may be undefined", () => {
+    expect(() => {
+        bind(tokens.port, { config: undefined as typeof tokens.config | undefined }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("bind rejects optional dependency map values", () => {
+    const dependencies: { readonly config?: typeof tokens.config } = {
+        config: tokens.config,
+    };
+
+    expect(() => {
+        bind(tokens.port, dependencies, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("bind rejects union dependency values that include non-tokens", () => {
+    const condition = true as boolean;
+    const dependency = condition ? tokens.config : "config";
+
+    expect(() => {
+        bind(tokens.port, { dependency }, () => 3000);
+    }).type.toRaiseError();
+});
+
+test("ref rejects lazy union dependency values that include non-tokens", () => {
+    const condition = true as boolean;
+
+    expect(() => {
+        ref(() => (condition ? tokens.logger : "logger"));
+    }).type.toRaiseError();
+});
+
+test("ref rejects direct union dependency values that include non-tokens", () => {
+    const condition = true as boolean;
+    const dependency = (condition ? tokens.logger : "logger") as typeof tokens.logger | "logger";
+
+    expect(() => {
+        ref(dependency);
     }).type.toRaiseError();
 });
 
@@ -151,6 +230,30 @@ test("bind rejects dependency maps without factories", () => {
 test("bind rejects extra arguments for dependency-free factories", () => {
     expect(() => {
         bind(tokens.port, () => 3000, {});
+    }).type.toRaiseError();
+});
+
+test("bind rejects missing arguments", () => {
+    expect(() => {
+        bind();
+    }).type.toRaiseError();
+});
+
+test("bind rejects extra arguments for dependency factories", () => {
+    expect(() => {
+        bind(tokens.port, {}, () => 3000, {});
+    }).type.toRaiseError();
+});
+
+test("defineTokens rejects missing definitions", () => {
+    expect(() => {
+        defineTokens();
+    }).type.toRaiseError();
+});
+
+test("createContainer rejects missing token registries", () => {
+    expect(() => {
+        createContainer();
     }).type.toRaiseError();
 });
 
@@ -232,6 +335,15 @@ test("public helper types preserve their documented type relationships", () => {
         typeof tokens.port
     >();
     expect<ReturnType<Container<readonly [Binding<typeof tokens.port>]>["resolve"]>>().type.toBe<number>();
+});
+
+test("defineTokens and createContainer preserve empty token registries", () => {
+    const emptyTokens = defineTokens({});
+    const container = createContainer(emptyTokens);
+
+    expect(emptyTokens).type.toBe<{}>();
+    expect(container.resolve).type.toBe<(token: never) => never>();
+    expect<Parameters<typeof container.resolve>[0]>().type.toBe<never>();
 });
 
 test("createContainer rejects same-key tokens with incompatible value types", () => {
@@ -398,6 +510,55 @@ test("bind supports function-valued services", () => {
     );
 
     expect(container.resolve(tokens.handler)).type.toBe<Handler>();
+});
+
+test("bind supports callable object services", () => {
+    const binding = bind(tokens.callableHandler, () =>
+        Object.assign((message: string) => message.length, { kind: "callable" as const }),
+    );
+    const container = createContainer(tokens, binding);
+    const callableHandler = container.resolve(tokens.callableHandler);
+
+    expect(callableHandler).type.toBe<CallableHandler>();
+    expect(callableHandler("ready")).type.toBe<number>();
+    expect(callableHandler.kind).type.toBe<"callable">();
+});
+
+test("bind supports overloaded function services", () => {
+    const parser = ((input: string | number) => {
+        return typeof input === "string" ? input.length : input.toString();
+    }) as Parser;
+    const binding = bind(tokens.parser, () => parser);
+    const container = createContainer(tokens, binding);
+    const resolvedParser = container.resolve(tokens.parser);
+
+    expect<ReturnType<typeof binding.factory>>().type.toBe<Parser>();
+    expect(resolvedParser("ready")).type.toBe<number>();
+    expect(resolvedParser(3000)).type.toBe<string>();
+
+    expect(() => {
+        bind(tokens.parser, parser);
+    }).type.toRaiseError();
+});
+
+test("bind supports constructor-valued services", () => {
+    const binding = bind(tokens.serviceConstructor, () => InjectableService);
+    const container = createContainer(tokens, binding);
+    const ServiceConstructor = container.resolve(tokens.serviceConstructor);
+
+    expect<ReturnType<typeof binding.factory>>().type.toBe<typeof InjectableService>();
+    expect(ServiceConstructor).type.toBe<typeof InjectableService>();
+    expect(new ServiceConstructor().status).type.toBe<"ready">();
+
+    expect(() => {
+        bind(tokens.serviceConstructor, InjectableService);
+    }).type.toRaiseError();
+});
+
+test("bind rejects direct function-valued services", () => {
+    expect(() => {
+        bind(tokens.handler, (message) => message.length);
+    }).type.toRaiseError();
 });
 
 test("bind supports function-valued services with dependencies", () => {

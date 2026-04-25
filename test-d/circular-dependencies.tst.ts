@@ -266,6 +266,41 @@ test("rejects cycles through eager union dependency tokens", () => {
     }).type.toRaiseError("__circular_dependency__");
 });
 
+test("allows acyclic eager union dependency tokens", () => {
+    type ServiceA = {
+        readonly getNext: () => ServiceB | ServiceC;
+    };
+    type ServiceB = {
+        readonly name: "b";
+    };
+    type ServiceC = {
+        readonly name: "c";
+    };
+    const unionTokens = defineTokens({
+        serviceA: defineType<ServiceA>(),
+        serviceB: defineType<ServiceB>(),
+        serviceC: defineType<ServiceC>(),
+    });
+    const serviceBOrC = unionTokens.serviceB as typeof unionTokens.serviceB | typeof unionTokens.serviceC;
+
+    const container = createContainer(
+        unionTokens,
+        bind(unionTokens.serviceA, { next: serviceBOrC }, ({ next }) => ({
+            getNext: () => next,
+        })),
+        bind(unionTokens.serviceB, () => ({
+            name: "b" as const,
+        })),
+        bind(unionTokens.serviceC, () => ({
+            name: "c" as const,
+        })),
+    );
+
+    expect(container.resolve(unionTokens.serviceA)).type.toBe<ServiceA>();
+    expect(container.resolve(unionTokens.serviceB)).type.toBe<ServiceB>();
+    expect(container.resolve(unionTokens.serviceC)).type.toBe<ServiceC>();
+});
+
 test("allows union dependency tokens when ref breaks the eager path", () => {
     type ServiceA = {
         readonly getNext: () => ServiceB | ServiceC;

@@ -1,5 +1,6 @@
 import {
     bind,
+    createContainer,
     defineTokens,
     type as defineType,
     type Ref,
@@ -35,9 +36,23 @@ test("defineTokens preserves literal token keys and value types", () => {
     expect(tokens.unknown).type.toBe<Token<"unknown", unknown>>();
 });
 
+test("bind and resolve preserve unknown service types", () => {
+    const binding = bind(tokens.unknown, () => ({ port: 3000 }));
+    const container = createContainer(tokens, binding);
+
+    expect<ReturnType<typeof binding.factory>>().type.toBe<unknown>();
+    expect(container.resolve(tokens.unknown)).type.toBe<unknown>();
+});
+
 test("bind rejects factories returning values outside the token type", () => {
     expect(() => {
         bind(tokens.port, () => "3000");
+    }).type.toRaiseError();
+});
+
+test("bind rejects dependency factories returning values outside the token type", () => {
+    expect(() => {
+        bind(tokens.port, { config: tokens.config }, () => "3000");
     }).type.toRaiseError();
 });
 
@@ -64,6 +79,18 @@ test("bind rejects incorrectly annotated eager dependency parameters", () => {
     }).type.toRaiseError();
 });
 
+test("bind rejects dependency factories requiring undeclared dependency parameters", () => {
+    expect(() => {
+        bind(
+            tokens.server,
+            { config: tokens.config },
+            ({ config }: { readonly config: Config; readonly logger: Logger }) => ({
+                port: config.port,
+            }),
+        );
+    }).type.toRaiseError();
+});
+
 test("bind rejects incorrectly annotated ref dependency parameters", () => {
     expect(() => {
         bind(tokens.server, { logger: ref(tokens.logger) }, ({ logger }: { readonly logger: Logger }) => {
@@ -84,6 +111,18 @@ test("ref preserves direct and lazy token types", () => {
 test("ref preserves union token value types", () => {
     const selectedToken = tokens.config as typeof tokens.config | typeof tokens.logger;
     const dependency = ref(() => selectedToken);
+    const binding = bind(tokens.server, { dependency }, () => ({
+        port: 3000,
+    }));
+
+    expect(dependency).type.toBe<RefToken<typeof tokens.config | typeof tokens.logger>>();
+    expect(dependency.resolveToken()).type.toBe<typeof tokens.config | typeof tokens.logger>();
+    expect<Parameters<typeof binding.factory>[0]["dependency"]>().type.toBe<Ref<Config | Logger>>();
+});
+
+test("ref preserves direct union token value types", () => {
+    const selectedToken = tokens.config as typeof tokens.config | typeof tokens.logger;
+    const dependency = ref(selectedToken);
     const binding = bind(tokens.server, { dependency }, () => ({
         port: 3000,
     }));

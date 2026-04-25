@@ -2,6 +2,20 @@ import { bindingBrand, bindingDependenciesBrand } from "./brands";
 import type { DependencyMap, ResolvedDependencies } from "./dependencies";
 import type { AnyToken, TokenValue } from "./token";
 
+type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
+type UndefinedDependencyKeys<TDependencies> = {
+    [TKey in keyof TDependencies]-?: IsAny<TDependencies[TKey]> extends true
+        ? never
+        : undefined extends TDependencies[TKey]
+          ? TKey
+          : never;
+}[keyof TDependencies];
+type DefinedDependencyMap<TDependencies> = [UndefinedDependencyKeys<TDependencies>] extends [never]
+    ? unknown
+    : {
+          readonly __dependency_values_must_be_defined__: UndefinedDependencyKeys<TDependencies>;
+      };
+
 type BindingFactory<
     TToken extends AnyToken,
     TDependencies extends DependencyMap | undefined,
@@ -40,7 +54,7 @@ export function bind<TToken extends AnyToken>(
 
 export function bind<TToken extends AnyToken, TDependencies extends DependencyMap>(
     currentToken: TToken,
-    dependencies: TDependencies,
+    dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
     factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
 ): Binding<TToken, TDependencies>;
 

@@ -1,4 +1,12 @@
-import { bind, createContainer, defineTokens, type as defineType, ref, type Token } from "@satunnaisuus/distill";
+import {
+    bind,
+    createContainer,
+    defineTokens,
+    type as defineType,
+    type Ref,
+    ref,
+    type Token,
+} from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 
 const tokens = defineTokens({
@@ -11,6 +19,7 @@ const tokens = defineTokens({
 const externalToken = "external" as Token<"external", number>;
 const anyValuePortToken = "port" as Token<"port", any>;
 const anyKeyPortToken = "port" as Token<any, number>;
+const anyKeyAnyValuePortToken = "port" as Token<any, any>;
 const wideAnyValueToken = "port" as Token<string, any>;
 
 test("rejects binding tokens outside the registry", () => {
@@ -165,6 +174,17 @@ test("rejects ref dependency tokens without bindings", () => {
     }).type.toRaiseError("__missing_dependencies__");
 });
 
+test("rejects lazy ref dependency tokens without bindings", () => {
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { logger: ref(() => tokens.logger) }, () => ({
+                port: 3000,
+            })),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
 test("missing dependency errors report every missing token key", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config, logger: ref(tokens.logger) }, () => ({
@@ -255,6 +275,59 @@ test("resolve preserves bound service value types", () => {
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
+test("allows legitimate any service tokens from defineType", () => {
+    const anyTokens = defineTokens({
+        consumer: defineType<{ readonly eager: any; readonly lazy: any }>(),
+        service: defineType<any>(),
+    });
+    const serviceBinding = bind(anyTokens.service, () => ({ port: 3000 }));
+    const consumerBinding = bind(
+        anyTokens.consumer,
+        { eager: anyTokens.service, lazy: ref(anyTokens.service) },
+        ({ eager, lazy }) => ({
+            eager,
+            lazy: lazy.value,
+        }),
+    );
+    const container = createContainer(anyTokens, consumerBinding, serviceBinding);
+
+    expect(anyTokens.service).type.toBe<Token<"service", any>>();
+    expect<ReturnType<typeof serviceBinding.factory>>().type.toBe<any>();
+    expect<Parameters<typeof consumerBinding.factory>[0]["eager"]>().type.toBe<any>();
+    expect<Parameters<typeof consumerBinding.factory>[0]["lazy"]>().type.toBe<Ref<any>>();
+    expect(container.resolve(anyTokens.service)).type.toBe<any>();
+    expect(container.resolve(anyTokens.consumer)).type.toBe<{ readonly eager: any; readonly lazy: any }>();
+});
+
+test("rejects raw any tokens used as bindings, dependencies, and refs", () => {
+    const anyToken = tokens.port as any;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(anyToken, () => 3000),
+        );
+    }).type.toRaiseError("__token_not_in_registry__");
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { port: anyToken }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.port, () => 3000),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.server, { port: ref(anyToken) }, () => ({
+                port: 3000,
+            })),
+            bind(tokens.port, () => 3000),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
 test("bind and resolve preserve falsy literal service value types", () => {
     const literalTokens = defineTokens({
         disabled: defineType<false>(),
@@ -296,6 +369,23 @@ test("bind and resolve distinguish undefined service values from void", () => {
     }).type.toRaiseError();
 });
 
+test("bind and resolve preserve never service value types", () => {
+    const neverTokens = defineTokens({
+        impossible: defineType<never>(),
+    });
+    const impossibleBinding = bind(neverTokens.impossible, () => {
+        throw new Error("impossible");
+    });
+    const container = createContainer(neverTokens, impossibleBinding);
+
+    expect<ReturnType<typeof impossibleBinding.factory>>().type.toBe<never>();
+    expect(container.resolve(neverTokens.impossible)).type.toBe<never>();
+
+    expect(() => {
+        bind(neverTokens.impossible, () => undefined);
+    }).type.toRaiseError();
+});
+
 test("resolve uses bound value types for same-key tokens with narrower aliases", () => {
     const narrowPortToken = "port" as Token<"port", 3000>;
     const container = createContainer(
@@ -306,7 +396,7 @@ test("resolve uses bound value types for same-key tokens with narrower aliases",
     expect(container.resolve(narrowPortToken)).type.toBe<number>();
 });
 
-test("resolve rejects same-key tokens with incompatible value types", () => {
+test("resolve rejects forged tokens with incompatible or unsafe branded parts", () => {
     const stringPortToken = "port" as Token<"port", string>;
     const unknownPortToken = "port" as Token<"port", unknown>;
     const anyPortToken = "port" as Token<"port", any>;
@@ -326,6 +416,9 @@ test("resolve rejects same-key tokens with incompatible value types", () => {
     }).type.toRaiseError();
     expect(() => {
         container.resolve(anyKeyPortToken);
+    }).type.toRaiseError();
+    expect(() => {
+        container.resolve(anyKeyAnyValuePortToken);
     }).type.toRaiseError();
     expect(() => {
         container.resolve(wideAnyValueToken);
@@ -361,6 +454,17 @@ test("resolve rejects registered tokens without bindings", () => {
 
     expect(() => {
         container.resolve(tokens.logger);
+    }).type.toRaiseError();
+});
+
+test("resolve rejects tokens outside the registry", () => {
+    const container = createContainer(
+        tokens,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+
+    expect(() => {
+        container.resolve(externalToken);
     }).type.toRaiseError();
 });
 
@@ -431,6 +535,18 @@ test("rejects union ref dependency tokens when any variant is outside the regist
     }).type.toRaiseError("__dependencies_not_in_registry__");
 });
 
+test("rejects lazy union ref dependency tokens when any variant is outside the registry", () => {
+    const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.port, { dependency: ref(() => configOrExternalToken) }, () => 3000),
+            bind(tokens.config, () => ({ port: 3000 })),
+        );
+    }).type.toRaiseError("__dependencies_not_in_registry__");
+});
+
 test("rejects union dependency tokens when any variant has no binding", () => {
     const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
 
@@ -450,6 +566,18 @@ test("rejects union ref dependency tokens when any variant has no binding", () =
         createContainer(
             tokens,
             bind(tokens.port, { dependency: ref(configOrLoggerToken) }, () => 3000),
+            bind(tokens.config, () => ({ port: 3000 })),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
+test("rejects lazy union ref dependency tokens when any variant has no binding", () => {
+    const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
+
+    expect(() => {
+        createContainer(
+            tokens,
+            bind(tokens.port, { dependency: ref(() => configOrLoggerToken) }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
     }).type.toRaiseError("__missing_dependencies__");
