@@ -1,81 +1,79 @@
-import type { AnyBinding, BindingDependencies } from "./bind";
-import type { DependencyMap } from "./dependencies";
+import type { AnyBinding } from "./bind";
 import type {
-    BindingDependencyScopes,
+    BindingContextInScopes,
     BindingDependencyTokens,
     BindingEagerDependencyTokens,
-    BindingResolution,
+    BindingResolutionContext,
     BindingScopes,
     HasBindingLifetime,
+    HasBindingToken,
     HasResolutionNode,
-    HasTrue,
     ResolutionNode,
-    ResolveBindingInScopes,
+    ResolveBindingContextInScopes,
+    SameTokenKey,
 } from "./graph";
-import type { DependencyToken } from "./ref";
 import type { AnyToken, AnyTokenRegistry, RegistryTokens, TokenKey, TokensNotIn } from "./token";
+import type { HasTrue, IfNever, IsUnion } from "./type-utils";
 
-type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
-
-type IsUnion<TValue, TUnion = TValue> =
-    IsAny<TValue> extends true ? false : TValue extends unknown ? ([TUnion] extends [TValue] ? false : true) : false;
-
-type HasCircularDependencyFromResolvedBinding<
+type HasCircularDependencyFromTokens<
     TScopes extends BindingScopes,
-    TToken extends AnyToken,
+    TTokens extends AnyToken,
     TPath extends ResolutionNode,
-    TBinding extends AnyBinding,
-    TOwnerScopes extends BindingScopes,
-> =
-    BindingDependencyScopes<TBinding, TOwnerScopes, TScopes> extends infer TDependencyScopes extends BindingScopes
-        ? TDependencyScopes extends BindingScopes
-            ? ResolutionNode<TToken, TOwnerScopes, TDependencyScopes> extends infer TCurrentNode extends ResolutionNode
-                ? HasResolutionNode<TPath, TCurrentNode> extends true
-                    ? true
-                    : HasTrue<
-                          BindingEagerDependencyTokens<TBinding> extends infer TDependencyToken
-                              ? TDependencyToken extends AnyToken
-                                  ? HasCircularDependencyFromToken<
-                                        TDependencyScopes,
-                                        TDependencyToken,
-                                        TPath | TCurrentNode
-                                    >
-                                  : false
-                              : false
-                      >
-                : false
-            : false
-        : false;
+> = HasCircularDependencyFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath>;
 
-type HasScopedDependencyFromResolvedBinding<
+type HasCircularDependencyFromResolution<TResolution, TPath extends ResolutionNode> = HasTrue<
+    TResolution extends BindingResolutionContext
+        ? HasResolutionNode<TPath, TResolution["node"]> extends true
+            ? true
+            : HasCircularDependencyFromTokens<
+                  TResolution["dependencyScopes"],
+                  BindingEagerDependencyTokens<TResolution["binding"]>,
+                  TPath | TResolution["node"]
+              >
+        : false
+>;
+
+type HasCircularDependencyFromBinding<
     TScopes extends BindingScopes,
-    TToken extends AnyToken,
-    TPath extends ResolutionNode,
     TBinding extends AnyBinding,
-    TOwnerScopes extends BindingScopes,
-> =
-    HasBindingLifetime<TBinding, "scoped"> extends true
-        ? true
-        : BindingDependencyScopes<TBinding, TOwnerScopes, TScopes> extends infer TDependencyScopes extends BindingScopes
-          ? TDependencyScopes extends BindingScopes
-              ? ResolutionNode<TToken, TOwnerScopes, TDependencyScopes> extends infer TCurrentNode extends
-                    ResolutionNode
-                  ? HasResolutionNode<TPath, TCurrentNode> extends true
-                      ? false
-                      : HasTrue<
-                            BindingDependencyTokens<TBinding> extends infer TDependencyToken
-                                ? TDependencyToken extends AnyToken
-                                    ? HasScopedDependencyFromToken<
-                                          TDependencyScopes,
-                                          TDependencyToken,
-                                          TPath | TCurrentNode
-                                      >
-                                    : false
-                                : false
-                        >
-                  : false
-              : false
-          : false;
+> = HasCircularDependencyFromResolution<BindingContextInScopes<TScopes, TBinding>, never>;
+
+type HasScopedDependencyFromTokens<
+    TScopes extends BindingScopes,
+    TTokens extends AnyToken,
+    TPath extends ResolutionNode,
+> = HasScopedDependencyFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath>;
+
+type HasScopedDependencyFromResolution<TResolution, TPath extends ResolutionNode> = HasTrue<
+    TResolution extends BindingResolutionContext
+        ? HasBindingLifetime<TResolution["binding"], "scoped"> extends true
+            ? true
+            : HasResolutionNode<TPath, TResolution["node"]> extends true
+              ? false
+              : HasScopedDependencyFromTokens<
+                    TResolution["dependencyScopes"],
+                    BindingDependencyTokens<TResolution["binding"]>,
+                    TPath | TResolution["node"]
+                >
+        : false
+>;
+
+type HasScopedDependencyFromBinding<
+    TScopes extends BindingScopes,
+    TBinding extends AnyBinding,
+> = HasScopedDependencyFromTokens<TScopes, BindingDependencyTokens<TBinding>, never>;
+
+type MissingDependencyKeysFromTokens<
+    TScopes extends BindingScopes,
+    TTokens extends AnyToken,
+    TPath extends ResolutionNode,
+> = TTokens extends AnyToken
+    ? MissingDependencyKeysFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath, TokenKey<TTokens>>
+    : never;
+
+type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
+
+type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
 
 type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extends TBindings["length"]
     ? {
@@ -86,168 +84,67 @@ type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extend
 type HasDuplicateBindingToken<
     TBindings extends readonly AnyBinding[],
     TToken extends AnyToken,
-    TSeen extends boolean = false,
 > = TBindings extends readonly [
     infer TCurrentBinding extends AnyBinding,
     ...infer TRemainingBindings extends readonly AnyBinding[],
 ]
-    ? [TokenKey<TCurrentBinding["token"]>] extends [TokenKey<TToken>]
-        ? [TokenKey<TToken>] extends [TokenKey<TCurrentBinding["token"]>]
-            ? TSeen extends true
-                ? true
-                : HasDuplicateBindingToken<TRemainingBindings, TToken, true>
-            : HasDuplicateBindingToken<TRemainingBindings, TToken, TSeen>
-        : HasDuplicateBindingToken<TRemainingBindings, TToken, TSeen>
+    ? SameTokenKey<TCurrentBinding["token"], TToken> extends true
+        ? HasBindingToken<TRemainingBindings, TToken>
+        : HasDuplicateBindingToken<TRemainingBindings, TToken>
     : false;
 
-type DependencyTokenKeysNotIn<TBinding extends AnyBinding, TAllowedTokens extends AnyToken> =
-    BindingDependencies<TBinding> extends infer TDependencies
-        ? TDependencies extends DependencyMap
-            ? {
-                  [TKey in keyof TDependencies]: TokenKey<
-                      TokensNotIn<DependencyToken<TDependencies[TKey]>, TAllowedTokens>
-                  >;
-              }[keyof TDependencies]
-            : never
-        : never;
-
 type MissingDependencyKeysFromResolvedBinding<
-    TScopes extends BindingScopes,
-    TToken extends AnyToken,
+    TResolution extends BindingResolutionContext,
     TPath extends ResolutionNode,
-    TBinding extends AnyBinding,
-    TOwnerScopes extends BindingScopes,
 > =
-    BindingDependencyScopes<TBinding, TOwnerScopes, TScopes> extends infer TDependencyScopes extends BindingScopes
-        ? TDependencyScopes extends BindingScopes
-            ? ResolutionNode<TToken, TOwnerScopes, TDependencyScopes> extends infer TCurrentNode extends ResolutionNode
-                ? HasResolutionNode<TPath, TCurrentNode> extends true
-                    ? never
-                    : BindingDependencyTokens<TBinding> extends infer TDependencyToken
-                      ? TDependencyToken extends AnyToken
-                          ? MissingDependencyKeysFromToken<TDependencyScopes, TDependencyToken, TPath | TCurrentNode>
-                          : never
-                      : never
-                : never
-            : never
-        : never;
+    HasResolutionNode<TPath, TResolution["node"]> extends true
+        ? never
+        : MissingDependencyKeysFromTokens<
+              TResolution["dependencyScopes"],
+              BindingDependencyTokens<TResolution["binding"]>,
+              TPath | TResolution["node"]
+          >;
 
-type MissingDependencyKeysFromToken<
+type MissingDependencyKeysFromResolution<TResolution, TPath extends ResolutionNode, TWhenMissing = never> = IfNever<
+    TResolution,
+    TWhenMissing,
+    TResolution extends BindingResolutionContext ? MissingDependencyKeysFromResolvedBinding<TResolution, TPath> : never
+>;
+
+export type MissingDependencyKeysFromToken<
     TScopes extends BindingScopes,
     TToken extends AnyToken,
-    TPath extends ResolutionNode,
-> =
-    ResolveBindingInScopes<TScopes, TToken> extends infer TResolution
-        ? [TResolution] extends [never]
-            ? TokenKey<TToken>
-            : TResolution extends BindingResolution<infer TBinding, infer TOwnerScopes>
-              ? TBinding extends AnyBinding
-                  ? MissingDependencyKeysFromResolvedBinding<TScopes, TToken, TPath, TBinding, TOwnerScopes>
-                  : never
-              : never
-        : never;
+    TPath extends ResolutionNode = never,
+> = MissingDependencyKeysFromTokens<TScopes, TToken, TPath>;
 
 type MissingDependencyKeysFromBinding<
     TScopes extends BindingScopes,
     TBinding extends AnyBinding,
-> = TBinding extends AnyBinding
-    ? ResolveBindingInScopes<TScopes, TBinding["token"]> extends infer TResolution
-        ? [TResolution] extends [never]
-            ? never
-            : TResolution extends BindingResolution<AnyBinding, infer TOwnerScopes>
-              ? MissingDependencyKeysFromResolvedBinding<TScopes, TBinding["token"], never, TBinding, TOwnerScopes>
-              : never
-        : never
-    : never;
+> = MissingDependencyKeysFromResolution<BindingContextInScopes<TScopes, TBinding>, never>;
 
-type DependencyKeysOutsideRegistry<
+type DependencyKeysOutsideRegistry<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = TokenKey<
+    TokensNotIn<BindingDependencyTokens<TBinding>, TRegistryTokens>
+>;
+
+type BindingOutsideRegistryError<
     TBinding extends AnyBinding,
     TRegistryTokens extends AnyToken,
-> = DependencyTokenKeysNotIn<TBinding, TRegistryTokens>;
-
-type HasCircularDependencyFromSingleToken<
-    TScopes extends BindingScopes,
-    TToken extends AnyToken,
-    TPath extends ResolutionNode,
-> =
-    ResolveBindingInScopes<TScopes, TToken> extends infer TResolution
-        ? [TResolution] extends [never]
-            ? false
-            : HasTrue<
-                  TResolution extends BindingResolution<infer TBinding, infer TOwnerScopes>
-                      ? TBinding extends AnyBinding
-                          ? HasCircularDependencyFromResolvedBinding<TScopes, TToken, TPath, TBinding, TOwnerScopes>
-                          : false
-                      : false
-              >
-        : false;
-
-type HasCircularDependencyFromBinding<TScopes extends BindingScopes, TBinding extends AnyBinding> = HasTrue<
-    TBinding extends AnyBinding
-        ? ResolveBindingInScopes<TScopes, TBinding["token"]> extends infer TResolution
-            ? [TResolution] extends [never]
-                ? false
-                : TResolution extends BindingResolution<AnyBinding, infer TOwnerScopes>
-                  ? HasCircularDependencyFromResolvedBinding<TScopes, TBinding["token"], never, TBinding, TOwnerScopes>
-                  : false
-            : false
-        : false
->;
-
-type HasScopedDependencyFromToken<
-    TScopes extends BindingScopes,
-    TToken extends AnyToken,
-    TPath extends ResolutionNode = never,
-> = TToken extends AnyToken ? HasScopedDependencyFromSingleToken<TScopes, TToken, TPath> : false;
-
-type HasCircularDependencyFromToken<
-    TScopes extends BindingScopes,
-    TToken extends AnyToken,
-    TPath extends ResolutionNode = never,
-> = TToken extends AnyToken ? HasCircularDependencyFromSingleToken<TScopes, TToken, TPath> : false;
-
-type HasScopedDependencyFromSingleToken<
-    TScopes extends BindingScopes,
-    TToken extends AnyToken,
-    TPath extends ResolutionNode,
-> =
-    ResolveBindingInScopes<TScopes, TToken> extends infer TResolution
-        ? [TResolution] extends [never]
-            ? false
-            : HasTrue<
-                  TResolution extends BindingResolution<infer TBinding, infer TOwnerScopes>
-                      ? TBinding extends AnyBinding
-                          ? HasScopedDependencyFromResolvedBinding<TScopes, TToken, TPath, TBinding, TOwnerScopes>
-                          : false
-                      : false
-              >
-        : false;
-
-type HasScopedDependencyFromBinding<TScopes extends BindingScopes, TBinding extends AnyBinding> = HasTrue<
-    TBinding extends AnyBinding
-        ? BindingDependencyTokens<TBinding> extends infer TDependencyToken
-            ? TDependencyToken extends AnyToken
-                ? HasScopedDependencyFromToken<TScopes, TDependencyToken>
-                : false
-            : false
-        : false
->;
-
-type BindingOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = [
+> = ValidationErrorUnlessNever<
     TokensNotIn<TBinding["token"], TRegistryTokens>,
-] extends [never]
-    ? {}
-    : {
-          readonly __token_not_in_registry__: TokenKey<TBinding["token"]>;
-      };
+    {
+        readonly __token_not_in_registry__: TokenKey<TBinding["token"]>;
+    }
+>;
 
-type DependenciesOutsideRegistryError<TBinding extends AnyBinding, TRegistryTokens extends AnyToken> = [
+type DependenciesOutsideRegistryError<
+    TBinding extends AnyBinding,
+    TRegistryTokens extends AnyToken,
+> = ValidationErrorUnlessNever<
     DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>,
-] extends [never]
-    ? {}
-    : {
-          readonly __dependencies_not_in_registry__: DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>;
-      };
+    {
+        readonly __dependencies_not_in_registry__: DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>;
+    }
+>;
 
 type SingletonMissingDependencyKeys<
     TBinding extends AnyBinding,
@@ -258,27 +155,29 @@ type SingletonMissingDependencyKeys<
         : never
     : never;
 
-type MissingDependenciesError<TBinding extends AnyBinding, TGraphScopes extends BindingScopes> = [
+type MissingDependenciesError<
+    TBinding extends AnyBinding,
+    TGraphScopes extends BindingScopes,
+> = ValidationErrorUnlessNever<
     SingletonMissingDependencyKeys<TBinding, TGraphScopes>,
-] extends [never]
-    ? {}
-    : {
-          readonly __missing_dependencies__: SingletonMissingDependencyKeys<TBinding, TGraphScopes>;
-      };
+    {
+        readonly __missing_dependencies__: SingletonMissingDependencyKeys<TBinding, TGraphScopes>;
+    }
+>;
 
-type DuplicateBindingError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> =
-    HasDuplicateBindingToken<TBindings, TBinding["token"]> extends true
-        ? {
-              readonly __duplicate_binding__: TokenKey<TBinding["token"]>;
-          }
-        : {};
+type DuplicateBindingError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> = ValidationErrorIf<
+    HasDuplicateBindingToken<TBindings, TBinding["token"]>,
+    {
+        readonly __duplicate_binding__: TokenKey<TBinding["token"]>;
+    }
+>;
 
-type CircularDependencyError<TBinding extends AnyBinding, TScopes extends BindingScopes> =
-    HasCircularDependencyFromBinding<TScopes, TBinding> extends true
-        ? {
-              readonly __circular_dependency__: true;
-          }
-        : {};
+type CircularDependencyError<TBinding extends AnyBinding, TScopes extends BindingScopes> = ValidationErrorIf<
+    HasCircularDependencyFromBinding<TScopes, TBinding>,
+    {
+        readonly __circular_dependency__: true;
+    }
+>;
 
 type HasScopedDependencyInSingleton<TBinding extends AnyBinding, TScopes extends BindingScopes> = HasTrue<
     TBinding extends AnyBinding
@@ -288,19 +187,19 @@ type HasScopedDependencyInSingleton<TBinding extends AnyBinding, TScopes extends
         : false
 >;
 
-type ScopedDependencyInSingletonError<TBinding extends AnyBinding, TScopes extends BindingScopes> =
-    HasScopedDependencyInSingleton<TBinding, TScopes> extends true
-        ? {
-              readonly __scoped_dependency_in_singleton__: true;
-          }
-        : {};
+type ScopedDependencyInSingletonError<TBinding extends AnyBinding, TScopes extends BindingScopes> = ValidationErrorIf<
+    HasScopedDependencyInSingleton<TBinding, TScopes>,
+    {
+        readonly __scoped_dependency_in_singleton__: true;
+    }
+>;
 
-type UnionBindingTokenError<TBinding extends AnyBinding> =
-    IsUnion<TBinding["token"]> extends true
-        ? {
-              readonly __union_binding_token__: TokenKey<TBinding["token"]>;
-          }
-        : {};
+type UnionBindingTokenError<TBinding extends AnyBinding> = ValidationErrorIf<
+    IsUnion<TBinding["token"]>,
+    {
+        readonly __union_binding_token__: TokenKey<TBinding["token"]>;
+    }
+>;
 
 type ValidateBinding<
     TBinding extends AnyBinding,
@@ -316,30 +215,25 @@ type ValidateBinding<
     ScopedDependencyInSingletonError<TBinding, TGraphScopes> &
     UnionBindingTokenError<TBinding>;
 
-export type ValidateBindings<
+type ValidateBindingTuple<
     TBindings extends readonly AnyBinding[],
     TRegistry extends AnyTokenRegistry,
+    TGraphScopes extends BindingScopes,
 > = number extends TBindings["length"]
     ? TupleBindingsError<TBindings>
     : {
           [TIndex in keyof TBindings]: TBindings[TIndex] extends AnyBinding
-              ? ValidateBinding<TBindings[TIndex], TBindings, readonly [TBindings], RegistryTokens<TRegistry>>
+              ? ValidateBinding<TBindings[TIndex], TBindings, TGraphScopes, RegistryTokens<TRegistry>>
               : TBindings[TIndex];
       };
+
+export type ValidateBindings<
+    TBindings extends readonly AnyBinding[],
+    TRegistry extends AnyTokenRegistry,
+> = ValidateBindingTuple<TBindings, TRegistry, readonly [TBindings]>;
 
 export type ValidateScopeBindings<
     TScopeBindings extends readonly AnyBinding[],
     TRegistry extends AnyTokenRegistry,
     TParentScopes extends BindingScopes,
-> = number extends TScopeBindings["length"]
-    ? TupleBindingsError<TScopeBindings>
-    : {
-          [TIndex in keyof TScopeBindings]: TScopeBindings[TIndex] extends AnyBinding
-              ? ValidateBinding<
-                    TScopeBindings[TIndex],
-                    TScopeBindings,
-                    readonly [...TParentScopes, TScopeBindings],
-                    RegistryTokens<TRegistry>
-                >
-              : TScopeBindings[TIndex];
-      };
+> = ValidateBindingTuple<TScopeBindings, TRegistry, readonly [...TParentScopes, TScopeBindings]>;

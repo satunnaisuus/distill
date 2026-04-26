@@ -1,7 +1,7 @@
 import { tokenBrand } from "./brands";
 import type { AnyTypeDescriptor, TypeValue } from "./type-descriptor";
+import type { HasTrue, IsAny, IsExact } from "./type-utils";
 
-type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
 type TokenRuntimeKey<TKey> = IsAny<TKey> extends true ? string : TKey extends string ? TKey : never;
 
 export type Token<TKey = string, TValue = unknown> = TokenRuntimeKey<TKey> & {
@@ -27,19 +27,6 @@ export type TokenKey<TToken extends AnyToken> = TToken[typeof tokenBrand]["key"]
 export type TokenDefinitions = Record<string, AnyTypeDescriptor>;
 export type AnyTokenRegistry = Record<string, AnyToken>;
 export type RegistryTokens<TRegistry extends AnyTokenRegistry> = TRegistry[keyof TRegistry];
-
-type IsExact<TActual, TExpected> =
-    IsAny<TActual> extends true
-        ? IsAny<TExpected>
-        : IsAny<TExpected> extends true
-          ? false
-          : [TActual] extends [TExpected]
-            ? [TExpected] extends [TActual]
-                ? true
-                : false
-            : false;
-
-type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
 type IsExactToken<TToken extends AnyToken, TCandidate extends AnyToken> =
     IsExact<TokenKey<TToken>, TokenKey<TCandidate>> extends true

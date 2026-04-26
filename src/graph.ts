@@ -2,49 +2,28 @@ import type { AnyBinding, BindingDependencies, BindingLifetime, BindingLifetimeO
 import type { DependencyMap } from "./dependencies";
 import type { DependencyToken } from "./ref";
 import type { AnyToken, TokenKey } from "./token";
+import type { HasTrue, IfNever, IsExact } from "./type-utils";
 
-export type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> = [TokenKey<TLeftToken>] extends [
-    TokenKey<TRightToken>,
-]
-    ? [TokenKey<TRightToken>] extends [TokenKey<TLeftToken>]
-        ? true
-        : false
-    : false;
+export type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> = IsExact<
+    TokenKey<TLeftToken>,
+    TokenKey<TRightToken>
+>;
 
 export type BindingScopes = readonly (readonly AnyBinding[])[];
+
+export type BindingTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
 
 export type BindingByToken<
     TBindings extends readonly AnyBinding[],
     TToken extends AnyToken,
-> = TBindings extends readonly [
-    ...infer TRemainingBindings extends readonly AnyBinding[],
-    infer TCurrentBinding extends AnyBinding,
-]
-    ? SameTokenKey<TCurrentBinding["token"], TToken> extends true
-        ? TCurrentBinding
-        : BindingByToken<TRemainingBindings, TToken>
-    : never;
+    TBinding extends AnyBinding = TBindings[number],
+> = TBinding extends AnyBinding ? (SameTokenKey<TBinding["token"], TToken> extends true ? TBinding : never) : never;
 
-export type BindingResolution<
-    TBinding extends AnyBinding = AnyBinding,
-    TOwnerScopes extends BindingScopes = BindingScopes,
-> = {
-    readonly binding: TBinding;
-    readonly ownerScopes: TOwnerScopes;
-};
-
-export type ResolveBindingInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TScopes extends readonly [
-    ...infer TRemainingScopes extends BindingScopes,
-    infer TCurrentScope extends readonly AnyBinding[],
-]
-    ? BindingByToken<TCurrentScope, TToken> extends infer TBinding
-        ? [TBinding] extends [never]
-            ? ResolveBindingInScopes<TRemainingScopes, TToken>
-            : TBinding extends AnyBinding
-              ? BindingResolution<TBinding, TScopes>
-              : never
-        : never
-    : never;
+export type HasBindingToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = IfNever<
+    BindingByToken<TBindings, TToken>,
+    false,
+    true
+>;
 
 export type ResolutionNode<
     TToken extends AnyToken = AnyToken,
@@ -56,57 +35,89 @@ export type ResolutionNode<
     readonly resolutionScopes: TResolutionScopes;
 };
 
-export type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
-export type HasFalse<TValue> = Extract<TValue, false> extends never ? false : true;
-
-export type HasBindingLifetime<TBinding extends AnyBinding, TLifetime extends BindingLifetime> = [
-    Extract<BindingLifetimeOf<TBinding>, TLifetime>,
-] extends [never]
-    ? false
-    : true;
+export type HasBindingLifetime<TBinding extends AnyBinding, TLifetime extends BindingLifetime> =
+    TLifetime extends BindingLifetimeOf<TBinding> ? true : false;
 
 export type BindingDependencyScopes<
     TBinding extends AnyBinding,
     TOwnerScopes extends BindingScopes,
     TResolutionScopes extends BindingScopes,
 > =
-    HasBindingLifetime<TBinding, "singleton"> extends true
-        ? Exclude<BindingLifetimeOf<TBinding>, "singleton"> extends never
+    "singleton" extends BindingLifetimeOf<TBinding>
+        ? BindingLifetimeOf<TBinding> extends "singleton"
             ? TOwnerScopes
             : TOwnerScopes | TResolutionScopes
         : TResolutionScopes;
 
-type SameScopes<TLeftScopes extends BindingScopes, TRightScopes extends BindingScopes> = [TLeftScopes] extends [
-    TRightScopes,
-]
-    ? [TRightScopes] extends [TLeftScopes]
-        ? true
-        : false
-    : false;
+export type BindingResolutionContext<
+    TToken extends AnyToken = AnyToken,
+    TBinding extends AnyBinding = AnyBinding,
+    TOwnerScopes extends BindingScopes = BindingScopes,
+    TResolutionScopes extends BindingScopes = BindingScopes,
+    TDependencyScopes extends BindingScopes = BindingDependencyScopes<TBinding, TOwnerScopes, TResolutionScopes>,
+> = {
+    readonly binding: TBinding;
+    readonly dependencyScopes: TDependencyScopes;
+    readonly node: ResolutionNode<TToken, TOwnerScopes, TDependencyScopes>;
+};
 
-type SameResolutionNode<TLeftNode extends ResolutionNode, TRightNode extends ResolutionNode> =
-    SameTokenKey<TLeftNode["token"], TRightNode["token"]> extends true
-        ? SameScopes<TLeftNode["ownerScopes"], TRightNode["ownerScopes"]> extends true
-            ? SameScopes<TLeftNode["resolutionScopes"], TRightNode["resolutionScopes"]> extends true
-                ? true
-                : false
-            : false
-        : false;
+export type ResolveBindingContextInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TResolutionScopes extends BindingScopes = TScopes,
+> = TToken extends AnyToken ? ResolveTokenContextInScopes<TScopes, TToken, TResolutionScopes> : never;
+
+type ResolveTokenContextInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TResolutionScopes extends BindingScopes,
+> = TScopes extends readonly [
+    ...infer TRemainingScopes extends BindingScopes,
+    infer TCurrentScope extends readonly AnyBinding[],
+]
+    ? IfNever<
+          BindingByToken<TCurrentScope, TToken>,
+          ResolveTokenContextInScopes<TRemainingScopes, TToken, TResolutionScopes>,
+          BindingResolutionContext<TToken, BindingByToken<TCurrentScope, TToken>, TScopes, TResolutionScopes>
+      >
+    : never;
+
+export type BindingContextInScopes<
+    TScopes extends BindingScopes,
+    TBinding extends AnyBinding,
+> = TBinding extends AnyBinding
+    ? ResolveBindingContextInScopes<TScopes, TBinding["token"]> extends BindingResolutionContext<
+          AnyToken,
+          AnyBinding,
+          infer TOwnerScopes
+      >
+        ? BindingResolutionContext<TBinding["token"], TBinding, TOwnerScopes, TScopes>
+        : never
+    : never;
+
+type ResolutionNodeIdentity<TNode extends ResolutionNode> = readonly [
+    TokenKey<TNode["token"]>,
+    TNode["ownerScopes"],
+    TNode["resolutionScopes"],
+];
+
+type SameResolutionNode<TLeftNode extends ResolutionNode, TRightNode extends ResolutionNode> = IsExact<
+    ResolutionNodeIdentity<TLeftNode>,
+    ResolutionNodeIdentity<TRightNode>
+>;
 
 export type HasResolutionNode<TPath extends ResolutionNode, TNode extends ResolutionNode> = HasTrue<
     TPath extends ResolutionNode ? SameResolutionNode<TPath, TNode> : false
 >;
 
-export type BindingEagerDependencyTokens<TBinding extends AnyBinding> =
-    BindingDependencies<TBinding> extends infer TDependencies
-        ? TDependencies extends DependencyMap
-            ? Extract<TDependencies[keyof TDependencies], AnyToken>
-            : never
-        : never;
+type BindingDependencyValues<
+    TBinding extends AnyBinding,
+    TDependencies = BindingDependencies<TBinding>,
+> = TDependencies extends DependencyMap ? TDependencies[keyof TDependencies] : never;
 
-export type BindingDependencyTokens<TBinding extends AnyBinding> =
-    BindingDependencies<TBinding> extends infer TDependencies
-        ? TDependencies extends DependencyMap
-            ? DependencyToken<TDependencies[keyof TDependencies]>
-            : never
-        : never;
+export type BindingEagerDependencyTokens<TBinding extends AnyBinding> = Extract<
+    BindingDependencyValues<TBinding>,
+    AnyToken
+>;
+
+export type BindingDependencyTokens<TBinding extends AnyBinding> = DependencyToken<BindingDependencyValues<TBinding>>;

@@ -1,10 +1,10 @@
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "./brands";
 import type { DependencyMap, ResolvedDependencies } from "./dependencies";
 import type { AnyToken, TokenValue } from "./token";
+import type { IfNever, IsAny } from "./type-utils";
 
 export type BindingLifetime = "singleton" | "scoped" | "transient";
 
-type IsAny<TValue> = 0 extends 1 & TValue ? true : false;
 type UndefinedDependencyKeys<TDependencies> = {
     [TKey in keyof TDependencies]-?: IsAny<TDependencies[TKey]> extends true
         ? never
@@ -12,11 +12,13 @@ type UndefinedDependencyKeys<TDependencies> = {
           ? TKey
           : never;
 }[keyof TDependencies];
-type DefinedDependencyMap<TDependencies> = [UndefinedDependencyKeys<TDependencies>] extends [never]
-    ? unknown
-    : {
-          readonly __dependency_values_must_be_defined__: UndefinedDependencyKeys<TDependencies>;
-      };
+type DefinedDependencyMap<TDependencies, TUndefinedKeys = UndefinedDependencyKeys<TDependencies>> = IfNever<
+    TUndefinedKeys,
+    unknown,
+    {
+        readonly __dependency_values_must_be_defined__: TUndefinedKeys;
+    }
+>;
 
 type BindingFactory<
     TToken extends AnyToken,
