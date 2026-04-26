@@ -280,6 +280,38 @@ test("createScope allows scoped overrides to depend on parent singletons that us
     expect(scope.resolve(scopedTokens.serviceB)).type.toBe<ServiceB>();
 });
 
+test("nested scopes preserve parent singleton owners after child overrides", () => {
+    type ServiceA = {
+        readonly name: string;
+    };
+    type ServiceB = {
+        readonly serviceA: ServiceA;
+    };
+    type ServiceC = {
+        readonly serviceB: ServiceB;
+    };
+    const scopedTokens = defineTokens({
+        serviceA: defineType<ServiceA>(),
+        serviceB: defineType<ServiceB>(),
+        serviceC: defineType<ServiceC>(),
+    });
+    const child = createContainer(
+        scopedTokens,
+        bind.singleton(scopedTokens.serviceA, () => ({ name: "root" })),
+        bind.singleton(scopedTokens.serviceB, { serviceA: scopedTokens.serviceA }, ({ serviceA }) => ({
+            serviceA,
+        })),
+    ).createScope(bind.scoped(scopedTokens.serviceA, () => ({ name: "child" })));
+
+    const grandchild = child.createScope(
+        bind.singleton(scopedTokens.serviceC, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
+            serviceB,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
+});
+
 test("createScope allows circular dependencies when a ref breaks the same-scope eager path", () => {
     type ServiceA = {
         readonly getB: () => ServiceB;
@@ -924,6 +956,31 @@ test("createContainer preserves correlated lifetime and dependencies in union bi
     );
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
+test("createContainer validates singleton missing dependencies per union binding branch", () => {
+    const useSingleton = true as boolean;
+    const serverBinding = useSingleton
+        ? bind.singleton(tokens.server, { logger: tokens.logger }, () => ({
+              port: 3000,
+          }))
+        : bind.transient(tokens.server, { config: tokens.config }, ({ config }) => ({
+              port: config.port,
+          }));
+
+    const app = createContainer(
+        tokens,
+        serverBinding,
+        bind.singleton(tokens.logger, () => ({
+            log: () => {},
+        })),
+    );
+    const scope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
+
+    expect(() => {
+        app.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(scope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
 test("createContainer rejects singleton bindings that depend on scoped bindings through ref", () => {

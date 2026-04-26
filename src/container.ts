@@ -6,8 +6,10 @@ import type {
     BindingDependencyTokens,
     BindingResolution,
     BindingScopes,
+    HasBindingLifetime,
     HasFalse,
     HasResolutionNode,
+    HasTrue,
     ResolutionNode,
     ResolveBindingInScopes,
     SameTokenKey,
@@ -112,6 +114,19 @@ type HasBindingTokenInScopes<TScopes extends BindingScopes, TToken extends AnyTo
         : HasBindingTokenInScopes<TRemainingScopes, TToken>
     : false;
 
+type SplitScopeAfterBindingToken<
+    TBindings extends readonly AnyBinding[],
+    TToken extends AnyToken,
+    TBefore extends readonly AnyBinding[] = readonly [],
+> = TBindings extends readonly [
+    infer TCurrentBinding extends AnyBinding,
+    ...infer TRemainingBindings extends readonly AnyBinding[],
+]
+    ? SameTokenKey<TCurrentBinding["token"], TToken> extends true
+        ? readonly [readonly [...TBefore, TCurrentBinding], TRemainingBindings]
+        : SplitScopeAfterBindingToken<TRemainingBindings, TToken, readonly [...TBefore, TCurrentBinding]>
+    : readonly [TBindings, readonly []];
+
 type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
     ...infer TRemainingScopes extends BindingScopes,
     infer TCurrentScope extends readonly AnyBinding[],
@@ -119,10 +134,63 @@ type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends An
     ? readonly [...TRemainingScopes, readonly [...TCurrentScope, TBinding]]
     : readonly [readonly [TBinding]];
 
-type AppendInferredBindingScope<TScopes extends BindingScopes, TBinding extends AnyBinding> =
-    HasBindingTokenInScopes<TScopes, TBinding["token"]> extends true
-        ? readonly [...TScopes, readonly [TBinding]]
-        : AppendBindingToLastScope<TScopes, TBinding>;
+type AppendBindingToNewScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = readonly [
+    ...TScopes,
+    readonly [TBinding],
+];
+
+type LastBinding<TBindings extends readonly AnyBinding[]> = TBindings extends readonly [
+    ...infer _TRemainingBindings extends readonly AnyBinding[],
+    infer TLastBinding extends AnyBinding,
+]
+    ? TLastBinding
+    : never;
+
+type HasSingletonDependencyOnToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = HasTrue<
+    TBindings[number] extends infer TBinding extends AnyBinding
+        ? HasBindingLifetime<TBinding, "singleton"> extends true
+            ? BindingDependencyTokens<TBinding> extends infer TDependencyToken
+                ? TDependencyToken extends AnyToken
+                    ? SameTokenKey<TDependencyToken, TToken>
+                    : false
+                : false
+            : false
+        : false
+>;
+
+type ShouldSplitLastScopeForOverride<
+    TKeptScope extends readonly AnyBinding[],
+    TMovedBindings extends readonly AnyBinding[],
+    TBinding extends AnyBinding,
+> =
+    HasBindingLifetime<LastBinding<TKeptScope>, "scoped"> extends true
+        ? HasSingletonDependencyOnToken<TMovedBindings, TBinding["token"]>
+        : false;
+
+type AppendOverrideBinding<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
+    ...infer TRemainingScopes extends BindingScopes,
+    infer TCurrentScope extends readonly AnyBinding[],
+]
+    ? SplitScopeAfterBindingToken<TCurrentScope, TBinding["token"]> extends readonly [
+          infer TKeptScope extends readonly AnyBinding[],
+          infer TMovedBindings extends readonly AnyBinding[],
+      ]
+        ? ShouldSplitLastScopeForOverride<TKeptScope, TMovedBindings, TBinding> extends true
+            ? readonly [...TRemainingScopes, TKeptScope, readonly [...TMovedBindings, TBinding]]
+            : AppendBindingToNewScope<TScopes, TBinding>
+        : never
+    : readonly [readonly [TBinding]];
+
+type AppendInferredBindingScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
+    ...infer TRemainingScopes extends BindingScopes,
+    infer TCurrentScope extends readonly AnyBinding[],
+]
+    ? HasBindingToken<TCurrentScope, TBinding["token"]> extends true
+        ? AppendOverrideBinding<TScopes, TBinding>
+        : HasBindingTokenInScopes<TRemainingScopes, TBinding["token"]> extends true
+          ? AppendBindingToNewScope<TScopes, TBinding>
+          : AppendBindingToLastScope<TScopes, TBinding>
+    : readonly [readonly [TBinding]];
 
 type InferBindingScopes<
     TBindings extends readonly AnyBinding[],
@@ -142,7 +210,7 @@ type CreateScopeFn<
     TScopes extends BindingScopes,
 > = <const TScopeBindings extends readonly AnyBinding[]>(
     ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TRegistry, TScopes>
-) => Container<readonly [...TBindings, ...TScopeBindings], TRegistry, readonly [...TScopes, TScopeBindings]>;
+) => Container<readonly [...TBindings, ...TScopeBindings], TRegistry>;
 
 export type Container<
     TBindings extends readonly AnyBinding[] = [],
@@ -525,7 +593,7 @@ export const createContainer = <
 >(
     tokens: TRegistry,
     ...bindings: TBindings & ValidateBindings<TBindings, TRegistry>
-): Container<TBindings, TRegistry> => {
+): Container<TBindings, TRegistry, readonly [TBindings]> => {
     const assertTokenIsInRegistry = createTokenRegistryAssert(tokens);
     const rootScope = createRuntimeScope({
         assertTokenIsInRegistry,
@@ -534,5 +602,5 @@ export const createContainer = <
 
     registerBindings(rootScope, bindings);
 
-    return createContainerForScope(rootScope) as unknown as Container<TBindings, TRegistry>;
+    return createContainerForScope(rootScope) as unknown as Container<TBindings, TRegistry, readonly [TBindings]>;
 };

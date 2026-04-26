@@ -249,15 +249,22 @@ type DependenciesOutsideRegistryError<TBinding extends AnyBinding, TRegistryToke
           readonly __dependencies_not_in_registry__: DependencyKeysOutsideRegistry<TBinding, TRegistryTokens>;
       };
 
+type SingletonMissingDependencyKeys<
+    TBinding extends AnyBinding,
+    TGraphScopes extends BindingScopes,
+> = TBinding extends AnyBinding
+    ? HasBindingLifetime<TBinding, "singleton"> extends true
+        ? MissingDependencyKeysFromBinding<TGraphScopes, TBinding>
+        : never
+    : never;
+
 type MissingDependenciesError<TBinding extends AnyBinding, TGraphScopes extends BindingScopes> = [
-    HasBindingLifetime<TBinding, "singleton">,
-] extends [true]
-    ? [MissingDependencyKeysFromBinding<TGraphScopes, TBinding>] extends [never]
-        ? {}
-        : {
-              readonly __missing_dependencies__: MissingDependencyKeysFromBinding<TGraphScopes, TBinding>;
-          }
-    : {};
+    SingletonMissingDependencyKeys<TBinding, TGraphScopes>,
+] extends [never]
+    ? {}
+    : {
+          readonly __missing_dependencies__: SingletonMissingDependencyKeys<TBinding, TGraphScopes>;
+      };
 
 type DuplicateBindingError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> =
     HasDuplicateBindingToken<TBindings, TBinding["token"]> extends true

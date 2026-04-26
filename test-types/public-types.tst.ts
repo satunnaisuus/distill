@@ -173,3 +173,105 @@ test("public Container helper type infers scope boundaries from flattened overri
 
     expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
 });
+
+test("public Container helper type accepts flattened child bindings before overrides", () => {
+    type Config = {
+        readonly name: string;
+    };
+    type Service = {
+        readonly name: string;
+    };
+    type Consumer = {
+        readonly service: Service;
+    };
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        service: defineType<Service>(),
+        consumer: defineType<Consumer>(),
+    });
+    const rootConfigBinding = bind.scoped(scopedTokens.config, () => ({ name: "root" }));
+    const childServiceBinding = bind.singleton(scopedTokens.service, { config: scopedTokens.config }, ({ config }) => ({
+        name: config.name,
+    }));
+    const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, rootConfigBinding).createScope(childServiceBinding, childConfigBinding);
+    const typedChild: Container<
+        readonly [typeof rootConfigBinding, typeof childServiceBinding, typeof childConfigBinding],
+        typeof scopedTokens
+    > = child;
+
+    const grandchild = typedChild.createScope(
+        bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
+            service,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
+});
+
+test("public Container helper type accepts flattened child bindings with union dependencies before overrides", () => {
+    type Config = {
+        readonly name: string;
+    };
+    type Logger = {
+        readonly log: () => void;
+    };
+    type Service = {
+        readonly dependency: Config | Logger;
+    };
+    type Consumer = {
+        readonly service: Service;
+    };
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        logger: defineType<Logger>(),
+        service: defineType<Service>(),
+        consumer: defineType<Consumer>(),
+    });
+    const configOrLogger = scopedTokens.config as typeof scopedTokens.config | typeof scopedTokens.logger;
+    const rootConfigBinding = bind.scoped(scopedTokens.config, () => ({ name: "root" }));
+    const rootLoggerBinding = bind.singleton(scopedTokens.logger, () => ({ log: () => {} }));
+    const childServiceBinding = bind.singleton(
+        scopedTokens.service,
+        { dependency: configOrLogger },
+        ({ dependency }) => ({
+            dependency,
+        }),
+    );
+    const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, rootConfigBinding, rootLoggerBinding).createScope(
+        childServiceBinding,
+        childConfigBinding,
+    );
+    const typedChild: Container<
+        readonly [
+            typeof rootConfigBinding,
+            typeof rootLoggerBinding,
+            typeof childServiceBinding,
+            typeof childConfigBinding,
+        ],
+        typeof scopedTokens
+    > = child;
+
+    const grandchild = typedChild.createScope(
+        bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
+            service,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
+});
+
+test("public Container helper type accepts flattened child bindings without overrides", () => {
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        port: defineType<number>(),
+    });
+    const configBinding = bind.scoped(scopedTokens.config, () => ({ port: 3000 }));
+    const portBinding = bind.scoped(scopedTokens.port, () => 3000);
+    const child = createContainer(scopedTokens, configBinding).createScope(portBinding);
+    const typedChild: Container<readonly [typeof configBinding, typeof portBinding], typeof scopedTokens> = child;
+
+    expect(typedChild.resolve(scopedTokens.config)).type.toBe<Config>();
+    expect(typedChild.resolve(scopedTokens.port)).type.toBe<number>();
+});
