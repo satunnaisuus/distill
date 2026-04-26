@@ -2,15 +2,12 @@ import type { AnyBinding } from "./bind";
 import { type BindingLifetime, getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
 import type {
-    BindingByToken,
     BindingDependencyScopes,
     BindingDependencyTokens,
     BindingResolution,
     BindingScopes,
-    HasBindingLifetime,
     HasFalse,
     HasResolutionNode,
-    HasTrue,
     ResolutionNode,
     ResolveBindingInScopes,
     SameTokenKey,
@@ -115,19 +112,6 @@ type HasBindingTokenInScopes<TScopes extends BindingScopes, TToken extends AnyTo
         : HasBindingTokenInScopes<TRemainingScopes, TToken>
     : false;
 
-type SplitScopeAfterBindingToken<
-    TBindings extends readonly AnyBinding[],
-    TToken extends AnyToken,
-    TBefore extends readonly AnyBinding[] = readonly [],
-> = TBindings extends readonly [
-    infer TCurrentBinding extends AnyBinding,
-    ...infer TRemainingBindings extends readonly AnyBinding[],
-]
-    ? SameTokenKey<TCurrentBinding["token"], TToken> extends true
-        ? readonly [readonly [...TBefore, TCurrentBinding], TRemainingBindings]
-        : SplitScopeAfterBindingToken<TRemainingBindings, TToken, readonly [...TBefore, TCurrentBinding]>
-    : readonly [TBindings, readonly []];
-
 type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
     ...infer TRemainingScopes extends BindingScopes,
     infer TCurrentScope extends readonly AnyBinding[],
@@ -140,127 +124,14 @@ type AppendBindingToNewScope<TScopes extends BindingScopes, TBinding extends Any
     readonly [TBinding],
 ];
 
-type LastBinding<TBindings extends readonly AnyBinding[]> = TBindings extends readonly [
-    ...infer _TRemainingBindings extends readonly AnyBinding[],
-    infer TLastBinding extends AnyBinding,
-]
-    ? TLastBinding
-    : never;
-
-type HasTokenInPath<TPath extends AnyToken, TToken extends AnyToken> = HasTrue<
-    TPath extends AnyToken ? SameTokenKey<TPath, TToken> : false
->;
-
-type HasDependencyTokenPathToToken<
-    TBindings extends readonly AnyBinding[],
-    TDependencyToken extends AnyToken,
-    TTargetToken extends AnyToken,
-    TPath extends AnyToken,
-> =
-    SameTokenKey<TDependencyToken, TTargetToken> extends true
-        ? true
-        : HasTokenInPath<TPath, TDependencyToken> extends true
-          ? false
-          : BindingByToken<TBindings, TDependencyToken> extends infer TDependencyBinding
-            ? [TDependencyBinding] extends [never]
-                ? false
-                : TDependencyBinding extends AnyBinding
-                  ? HasBindingDependencyPathToToken<
-                        TBindings,
-                        TDependencyBinding,
-                        TTargetToken,
-                        TPath | TDependencyToken
-                    >
-                  : false
-            : false;
-
-type HasBindingDependencyPathToToken<
-    TBindings extends readonly AnyBinding[],
+type AppendInferredBindingScope<
+    TScopes extends BindingScopes,
     TBinding extends AnyBinding,
-    TTargetToken extends AnyToken,
-    TPath extends AnyToken = never,
-> = HasTrue<
-    TBinding extends AnyBinding
-        ? BindingDependencyTokens<TBinding> extends infer TDependencyToken
-            ? TDependencyToken extends AnyToken
-                ? HasDependencyTokenPathToToken<TBindings, TDependencyToken, TTargetToken, TPath>
-                : false
-            : false
-        : false
->;
-
-type HasSingletonDependencyOnBinding<
-    TBindings extends readonly AnyBinding[],
-    TCurrentBinding extends AnyBinding,
-> = HasTrue<
-    TBindings[number] extends infer TBinding
-        ? TBinding extends AnyBinding
-            ? HasBindingLifetime<TBinding, "singleton"> extends true
-                ? SameTokenKey<TBinding["token"], TCurrentBinding["token"]> extends true
-                    ? true
-                    : HasBindingDependencyPathToToken<TBindings, TBinding, TCurrentBinding["token"]>
-                : false
-            : false
-        : false
->;
-
-type IsNeededForSingletonDependencyOnToken<
-    TBindings extends readonly AnyBinding[],
-    TBinding extends AnyBinding,
-    TToken extends AnyToken,
-> =
-    HasBindingDependencyPathToToken<TBindings, TBinding, TToken> extends true
-        ? HasSingletonDependencyOnBinding<TBindings, TBinding>
-        : false;
-
-type SplitBeforeSingletonDependencyOnToken<
-    TBindings extends readonly AnyBinding[],
-    TToken extends AnyToken,
-    TBefore extends readonly AnyBinding[] = readonly [],
-> = TBindings extends readonly [
-    infer TCurrentBinding extends AnyBinding,
-    ...infer TRemainingBindings extends readonly AnyBinding[],
-]
-    ? IsNeededForSingletonDependencyOnToken<TBindings, TCurrentBinding, TToken> extends true
-        ? readonly [TBefore, TBindings]
-        : SplitBeforeSingletonDependencyOnToken<TRemainingBindings, TToken, readonly [...TBefore, TCurrentBinding]>
-    : readonly [TBefore, readonly []];
-
-type AppendOverrideBinding<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
-    ...infer TRemainingScopes extends BindingScopes,
-    infer TCurrentScope extends readonly AnyBinding[],
-]
-    ? SplitScopeAfterBindingToken<TCurrentScope, TBinding["token"]> extends readonly [
-          infer TKeptScope extends readonly AnyBinding[],
-          infer TBindingsAfterOverride extends readonly AnyBinding[],
-      ]
-        ? HasBindingLifetime<LastBinding<TKeptScope>, "scoped"> extends true
-            ? SplitBeforeSingletonDependencyOnToken<TBindingsAfterOverride, TBinding["token"]> extends readonly [
-                  infer TUnmovedBindings extends readonly AnyBinding[],
-                  infer TMovedBindings extends readonly AnyBinding[],
-              ]
-                ? TMovedBindings extends readonly []
-                    ? AppendBindingToNewScope<TScopes, TBinding>
-                    : readonly [
-                          ...TRemainingScopes,
-                          readonly [...TKeptScope, ...TUnmovedBindings],
-                          readonly [...TMovedBindings, TBinding],
-                      ]
-                : never
-            : AppendBindingToNewScope<TScopes, TBinding>
-        : never
-    : readonly [readonly [TBinding]];
-
-type AppendInferredBindingScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
-    ...infer TRemainingScopes extends BindingScopes,
-    infer TCurrentScope extends readonly AnyBinding[],
-]
-    ? HasBindingToken<TCurrentScope, TBinding["token"]> extends true
-        ? AppendOverrideBinding<TScopes, TBinding>
-        : HasBindingTokenInScopes<TRemainingScopes, TBinding["token"]> extends true
-          ? AppendBindingToNewScope<TScopes, TBinding>
-          : AppendBindingToLastScope<TScopes, TBinding>
-    : readonly [readonly [TBinding]];
+> = TScopes extends readonly []
+    ? readonly [readonly [TBinding]]
+    : HasBindingTokenInScopes<TScopes, TBinding["token"]> extends true
+      ? AppendBindingToNewScope<TScopes, TBinding>
+      : AppendBindingToLastScope<TScopes, TBinding>;
 
 type InferBindingScopes<
     TBindings extends readonly AnyBinding[],

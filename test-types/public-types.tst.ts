@@ -174,7 +174,7 @@ test("public Container helper type infers scope boundaries from flattened overri
     expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
 });
 
-test("public Container helper type accepts flattened child bindings before overrides", () => {
+test("public Container helper type requires explicit scope boundaries for child bindings before overrides", () => {
     type Config = {
         readonly name: string;
     };
@@ -195,9 +195,19 @@ test("public Container helper type accepts flattened child bindings before overr
     }));
     const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
     const child = createContainer(scopedTokens, rootConfigBinding).createScope(childServiceBinding, childConfigBinding);
+
+    expect(() => {
+        const _flattenedChild: Container<
+            readonly [typeof rootConfigBinding, typeof childServiceBinding, typeof childConfigBinding],
+            typeof scopedTokens
+        > = child;
+        _flattenedChild;
+    }).type.toRaiseError();
+
     const typedChild: Container<
         readonly [typeof rootConfigBinding, typeof childServiceBinding, typeof childConfigBinding],
-        typeof scopedTokens
+        typeof scopedTokens,
+        readonly [readonly [typeof rootConfigBinding], readonly [typeof childServiceBinding, typeof childConfigBinding]]
     > = child;
 
     const grandchild = typedChild.createScope(
@@ -209,7 +219,7 @@ test("public Container helper type accepts flattened child bindings before overr
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
 
-test("public Container helper type accepts transitive flattened child bindings before overrides", () => {
+test("public Container helper type accepts explicit transitive child scope boundaries before overrides", () => {
     type Config = {
         readonly name: string;
     };
@@ -248,7 +258,11 @@ test("public Container helper type accepts transitive flattened child bindings b
             typeof childServiceBinding,
             typeof childConfigBinding,
         ],
-        typeof scopedTokens
+        typeof scopedTokens,
+        readonly [
+            readonly [typeof rootConfigBinding],
+            readonly [typeof childPortBinding, typeof childServiceBinding, typeof childConfigBinding],
+        ]
     > = child;
 
     const grandchild = typedChild.createScope(
@@ -295,7 +309,7 @@ test("public Container helper type preserves parent singleton owners before chil
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
 
-test("public Container helper type accepts flattened child bindings with union dependencies before overrides", () => {
+test("public Container helper type accepts explicit child scope boundaries with union dependencies before overrides", () => {
     type Config = {
         readonly name: string;
     };
@@ -336,7 +350,11 @@ test("public Container helper type accepts flattened child bindings with union d
             typeof childServiceBinding,
             typeof childConfigBinding,
         ],
-        typeof scopedTokens
+        typeof scopedTokens,
+        readonly [
+            readonly [typeof rootConfigBinding, typeof rootLoggerBinding],
+            readonly [typeof childServiceBinding, typeof childConfigBinding],
+        ]
     > = child;
 
     const grandchild = typedChild.createScope(

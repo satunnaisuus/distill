@@ -483,3 +483,32 @@ import type {
 ```
 
 Most applications only need the functions. The types are useful when sharing binding tuples between modules, writing helpers that accept token registries, or exposing container-related types from your own library.
+
+When annotating containers manually, prefer preserving the container type returned by `createContainer` and `createScope`.
+`Container<FlatBindings, Registry>` can infer basic scope boundaries from a flat binding tuple, but it cannot reliably
+reconstruct every child scope from that tuple alone. For example, a child binding that appears before a child override is
+ambiguous without the original `createScope` boundary:
+
+```ts
+const rootConfig = bind.scoped(tokens.config, () => ({ name: "root" }));
+const childPort = bind.transient(tokens.port, () => ({ value: 3000 }));
+const childConfig = bind.singleton(tokens.config, () => ({ name: "child" }));
+
+const child = createContainer(tokens, rootConfig).createScope(childPort, childConfig);
+
+// Avoid: the flat tuple does not say that childPort and childConfig were added together.
+const typedChild: Container<
+    readonly [typeof rootConfig, typeof childPort, typeof childConfig],
+    typeof tokens
+> = child;
+```
+
+If you need to write the type explicitly for a scoped container, pass the third `TScopes` parameter:
+
+```ts
+const typedChild: Container<
+    readonly [typeof rootConfig, typeof childPort, typeof childConfig],
+    typeof tokens,
+    readonly [readonly [typeof rootConfig], readonly [typeof childPort, typeof childConfig]]
+> = child;
+```
