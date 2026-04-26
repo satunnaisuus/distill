@@ -98,6 +98,72 @@ test("scoped and transient bindings can depend on scoped bindings", () => {
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
+test("parent scoped services can depend on dependencies supplied by child scopes", () => {
+    type Request = { readonly id: string };
+    type Service = { readonly request: Request };
+
+    const scopedTokens = defineTokens({
+        request: defineType<Request>(),
+        service: defineType<Service>(),
+        transientService: defineType<Service>(),
+        transientServiceWithRef: defineType<Service>(),
+    });
+
+    const app = createContainer(
+        scopedTokens,
+        bind.scoped(scopedTokens.service, { request: scopedTokens.request }, ({ request }) => ({ request })),
+    );
+    const requestScope = app.createScope(bind.scoped(scopedTokens.request, () => ({ id: "request-1" })));
+
+    expect(() => {
+        app.resolve(scopedTokens.service);
+    }).type.toRaiseError();
+    expect(requestScope.resolve(scopedTokens.service)).type.toBe<Service>();
+
+    const appWithRef = createContainer(
+        scopedTokens,
+        bind.scoped(scopedTokens.service, { request: ref(scopedTokens.request) }, ({ request }) => ({
+            request: request.value,
+        })),
+    );
+    const refRequestScope = appWithRef.createScope(bind.scoped(scopedTokens.request, () => ({ id: "request-1" })));
+
+    expect(() => {
+        appWithRef.resolve(scopedTokens.service);
+    }).type.toRaiseError();
+    expect(refRequestScope.resolve(scopedTokens.service)).type.toBe<Service>();
+
+    const transientApp = createContainer(
+        scopedTokens,
+        bind.transient(scopedTokens.transientService, { request: scopedTokens.request }, ({ request }) => ({
+            request,
+        })),
+    );
+    const transientRequestScope = transientApp.createScope(
+        bind.scoped(scopedTokens.request, () => ({ id: "request-1" })),
+    );
+
+    expect(() => {
+        transientApp.resolve(scopedTokens.transientService);
+    }).type.toRaiseError();
+    expect(transientRequestScope.resolve(scopedTokens.transientService)).type.toBe<Service>();
+
+    const transientAppWithRef = createContainer(
+        scopedTokens,
+        bind.transient(scopedTokens.transientServiceWithRef, { request: ref(scopedTokens.request) }, ({ request }) => ({
+            request: request.value,
+        })),
+    );
+    const transientRefRequestScope = transientAppWithRef.createScope(
+        bind.scoped(scopedTokens.request, () => ({ id: "request-1" })),
+    );
+
+    expect(() => {
+        transientAppWithRef.resolve(scopedTokens.transientServiceWithRef);
+    }).type.toRaiseError();
+    expect(transientRefRequestScope.resolve(scopedTokens.transientServiceWithRef)).type.toBe<Service>();
+});
+
 test("createScope allows scope bindings to override parent bindings", () => {
     const app = createContainer(
         tokens,
@@ -460,49 +526,160 @@ test("createScope rejects lazy ref dependency tokens outside the registry", () =
     }).type.toRaiseError("__dependencies_not_in_registry__");
 });
 
-test("createScope rejects scope bindings with missing dependencies", () => {
+test("createScope allows missing scoped dependencies to be supplied by descendant scopes", () => {
     const app = createContainer(
         tokens,
         bind.scoped(tokens.port, () => 3000),
     );
+    const scope = app.createScope(
+        bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+    );
+    const childScope = scope.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
 
     expect(() => {
-        app.createScope(
-            bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
-                port: config.port,
-            })),
-        );
-    }).type.toRaiseError("__missing_dependencies__");
+        scope.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(childScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
-test("createScope rejects ref dependency tokens without visible bindings", () => {
+test("nested scopes can supply missing dependencies for parent scoped services", () => {
     const app = createContainer(
         tokens,
-        bind.scoped(tokens.port, () => 3000),
+        bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
     );
+    const childScope = app.createScope();
+    const grandchildScope = childScope.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
 
     expect(() => {
-        app.createScope(
-            bind.scoped(tokens.server, { logger: ref(tokens.logger) }, () => ({
-                port: 3000,
-            })),
-        );
-    }).type.toRaiseError("__missing_dependencies__");
+        app.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(() => {
+        childScope.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(grandchildScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
-test("createScope rejects lazy ref dependency tokens without visible bindings", () => {
+test("descendant scopes can complete overridden dependency chains", () => {
+    const app = createContainer(
+        tokens,
+        bind.scoped(tokens.port, () => 3000),
+        bind.scoped(tokens.server, { port: tokens.port }, ({ port }) => ({
+            port,
+        })),
+    );
+    const childScope = app.createScope(
+        bind.scoped(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+    );
+    const grandchildScope = childScope.createScope(bind.scoped(tokens.config, () => ({ port: 4000 })));
+
+    expect(app.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+    expect(() => {
+        childScope.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(grandchildScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
+test("descendant scopes can supply every variant of union dependencies", () => {
+    type RequestA = { readonly kind: "a" };
+    type RequestB = { readonly kind: "b" };
+    type Service = { readonly request: RequestA | RequestB };
+
+    const scopedTokens = defineTokens({
+        requestA: defineType<RequestA>(),
+        requestB: defineType<RequestB>(),
+        service: defineType<Service>(),
+        serviceWithRef: defineType<Service>(),
+        transientService: defineType<Service>(),
+    });
+    const requestToken = scopedTokens.requestA as typeof scopedTokens.requestA | typeof scopedTokens.requestB;
+    const app = createContainer(
+        scopedTokens,
+        bind.scoped(scopedTokens.service, { request: requestToken }, ({ request }) => ({
+            request,
+        })),
+        bind.scoped(scopedTokens.serviceWithRef, { request: ref(requestToken) }, ({ request }) => ({
+            request: request.value,
+        })),
+        bind.transient(scopedTokens.transientService, { request: requestToken }, ({ request }) => ({
+            request,
+        })),
+    );
+    const partialScope = app.createScope(bind.scoped(scopedTokens.requestA, () => ({ kind: "a" as const })));
+    const fullScope = partialScope.createScope(bind.scoped(scopedTokens.requestB, () => ({ kind: "b" as const })));
+
+    expect(() => {
+        app.resolve(scopedTokens.service);
+    }).type.toRaiseError();
+    expect(() => {
+        partialScope.resolve(scopedTokens.service);
+    }).type.toRaiseError();
+    expect(fullScope.resolve(scopedTokens.service)).type.toBe<Service>();
+    expect(fullScope.resolve(scopedTokens.serviceWithRef)).type.toBe<Service>();
+    expect(fullScope.resolve(scopedTokens.transientService)).type.toBe<Service>();
+});
+
+test("createScope allows missing scoped ref dependencies to be supplied by descendant scopes", () => {
     const app = createContainer(
         tokens,
         bind.scoped(tokens.port, () => 3000),
     );
+    const scope = app.createScope(
+        bind.scoped(tokens.server, { logger: ref(tokens.logger) }, () => ({
+            port: 3000,
+        })),
+    );
+    const childScope = scope.createScope(
+        bind.scoped(tokens.logger, () => ({
+            log: () => {},
+        })),
+    );
 
     expect(() => {
-        app.createScope(
-            bind.scoped(tokens.server, { logger: ref(() => tokens.logger) }, () => ({
-                port: 3000,
-            })),
-        );
-    }).type.toRaiseError("__missing_dependencies__");
+        scope.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(childScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
+test("createScope allows missing lazy scoped ref dependencies to be supplied by descendant scopes", () => {
+    const app = createContainer(
+        tokens,
+        bind.scoped(tokens.port, () => 3000),
+    );
+    const scope = app.createScope(
+        bind.scoped(tokens.server, { logger: ref(() => tokens.logger) }, () => ({
+            port: 3000,
+        })),
+    );
+    const childScope = scope.createScope(
+        bind.scoped(tokens.logger, () => ({
+            log: () => {},
+        })),
+    );
+
+    expect(() => {
+        scope.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(childScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
+test("scope resolve requires transitive ref dependencies to be visible", () => {
+    const app = createContainer(
+        tokens,
+        bind.scoped(tokens.server, { port: ref(tokens.port) }, ({ port }) => ({
+            port: port.value,
+        })),
+        bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+    );
+    const childScope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
+
+    expect(() => {
+        app.resolve(tokens.server);
+    }).type.toRaiseError();
+    expect(childScope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
 test("createScope rejects union binding tokens", () => {

@@ -76,6 +76,30 @@ test("rejects lazy ref dependency tokens without bindings", () => {
     }).type.toRaiseError("__missing_dependencies__");
 });
 
+test("rejects singleton bindings with transitive missing dependencies", () => {
+    expect(() => {
+        createContainer(
+            tokens,
+            bind.singleton(tokens.server, { port: tokens.port }, ({ port }) => ({
+                port,
+            })),
+            bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
+test("rejects singleton bindings with transitive ref missing dependencies", () => {
+    expect(() => {
+        createContainer(
+            tokens,
+            bind.singleton(tokens.server, { port: ref(tokens.port) }, () => ({
+                port: 3000,
+            })),
+            bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
 test("missing dependency errors report every missing token key", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config, logger: ref(tokens.logger) }, () => ({

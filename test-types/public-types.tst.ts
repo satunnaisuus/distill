@@ -108,6 +108,33 @@ test("public Container helper type preserves nested createScope relationships", 
     }).type.toRaiseError("__missing_dependencies__");
 });
 
+test("public Container helper type exposes descendant-supplied dependencies through createScope", () => {
+    type Request = {
+        readonly id: string;
+    };
+    type Service = {
+        readonly request: Request;
+    };
+    const scopedTokens = defineTokens({
+        request: defineType<Request>(),
+        service: defineType<Service>(),
+    });
+    const serviceBinding = bind.scoped(scopedTokens.service, { request: scopedTokens.request }, ({ request }) => ({
+        request,
+    }));
+    const requestBinding = bind.scoped(scopedTokens.request, () => ({ id: "request-1" }));
+    const typedContainer: Container<readonly [typeof serviceBinding], typeof scopedTokens> = createContainer(
+        scopedTokens,
+        serviceBinding,
+    );
+    const typedScope = typedContainer.createScope(requestBinding);
+
+    expect(() => {
+        typedContainer.resolve(scopedTokens.service);
+    }).type.toRaiseError();
+    expect(typedScope.resolve(scopedTokens.service)).type.toBe<Service>();
+});
+
 test("public Container helper type infers scope boundaries from flattened overrides", () => {
     type ServiceA = {
         readonly serviceB: ServiceB;

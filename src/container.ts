@@ -1,6 +1,17 @@
 import type { AnyBinding } from "./bind";
 import { type BindingLifetime, getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
+import type {
+    BindingDependencyScopes,
+    BindingDependencyTokens,
+    BindingResolution,
+    BindingScopes,
+    HasFalse,
+    HasResolutionNode,
+    ResolutionNode,
+    ResolveBindingInScopes,
+    SameTokenKey,
+} from "./graph";
 import type { DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
 import type { AnyToken, AnyTokenRegistry, TokenByKey, TokenKey, TokenValue } from "./token";
@@ -12,21 +23,76 @@ type RuntimeContainer = {
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
 };
 
-type ResolveFn<TBindings extends readonly AnyBinding[]> = [TBindings[number]] extends [never]
+type CanResolveTokensInScopes<TScopes extends BindingScopes, TTokens extends AnyToken, TPath extends ResolutionNode> = [
+    TTokens,
+] extends [never]
+    ? true
+    : HasFalse<TTokens extends AnyToken ? CanResolveTokenInScopes<TScopes, TTokens, TPath> : false> extends true
+      ? false
+      : true;
+
+type CanResolveFromResolvedBinding<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TPath extends ResolutionNode,
+    TBinding extends AnyBinding,
+    TOwnerScopes extends BindingScopes,
+> =
+    BindingDependencyScopes<TBinding, TOwnerScopes, TScopes> extends infer TDependencyScopes extends BindingScopes
+        ? TDependencyScopes extends BindingScopes
+            ? ResolutionNode<TToken, TOwnerScopes, TDependencyScopes> extends infer TCurrentNode extends ResolutionNode
+                ? HasResolutionNode<TPath, TCurrentNode> extends true
+                    ? true
+                    : CanResolveTokensInScopes<
+                          TDependencyScopes,
+                          BindingDependencyTokens<TBinding>,
+                          TPath | TCurrentNode
+                      >
+                : false
+            : false
+        : false;
+
+type CanResolveSingleTokenInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TPath extends ResolutionNode,
+> =
+    ResolveBindingInScopes<TScopes, TToken> extends infer TResolution
+        ? [TResolution] extends [never]
+            ? false
+            : HasFalse<
+                    TResolution extends BindingResolution<infer TBinding, infer TOwnerScopes>
+                        ? TBinding extends AnyBinding
+                            ? CanResolveFromResolvedBinding<TScopes, TToken, TPath, TBinding, TOwnerScopes>
+                            : false
+                        : false
+                > extends true
+              ? false
+              : true
+        : false;
+
+type CanResolveTokenInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TPath extends ResolutionNode = never,
+> = TToken extends AnyToken ? CanResolveSingleTokenInScopes<TScopes, TToken, TPath> : false;
+
+type VisibleTokensInScopes<TScopes extends BindingScopes> = TScopes[number][number]["token"];
+
+type ResolvableTokensInScopes<TScopes extends BindingScopes> =
+    VisibleTokensInScopes<TScopes> extends infer TToken extends AnyToken
+        ? TToken extends AnyToken
+            ? CanResolveTokenInScopes<TScopes, TToken> extends true
+                ? TToken
+                : never
+            : never
+        : never;
+
+type ResolveFn<TScopes extends BindingScopes> = [ResolvableTokensInScopes<TScopes>] extends [never]
     ? (token: never) => never
-    : <TToken extends TBindings[number]["token"]>(
+    : <TToken extends ResolvableTokensInScopes<TScopes>>(
           token: TToken,
-      ) => TokenValue<TokenByKey<TToken, TBindings[number]["token"]>>;
-
-type BindingScopes = readonly (readonly AnyBinding[])[];
-
-type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> = [TokenKey<TLeftToken>] extends [
-    TokenKey<TRightToken>,
-]
-    ? [TokenKey<TRightToken>] extends [TokenKey<TLeftToken>]
-        ? true
-        : false
-    : false;
+      ) => TokenValue<TokenByKey<TToken, ResolvableTokensInScopes<TScopes>>>;
 
 type HasBindingToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = TBindings extends readonly [
     infer TCurrentBinding extends AnyBinding,
@@ -75,7 +141,7 @@ type CreateScopeFn<
     TRegistry extends AnyTokenRegistry,
     TScopes extends BindingScopes,
 > = <const TScopeBindings extends readonly AnyBinding[]>(
-    ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TRegistry, TBindings, TScopes>
+    ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TRegistry, TScopes>
 ) => Container<readonly [...TBindings, ...TScopeBindings], TRegistry, readonly [...TScopes, TScopeBindings]>;
 
 export type Container<
@@ -83,7 +149,7 @@ export type Container<
     TRegistry extends AnyTokenRegistry = AnyTokenRegistry,
     TScopes extends BindingScopes = InferBindingScopes<TBindings>,
 > = {
-    resolve: ResolveFn<TBindings>;
+    resolve: ResolveFn<TScopes>;
     createScope: CreateScopeFn<TBindings, TRegistry, TScopes>;
 };
 

@@ -281,6 +281,91 @@ describe("createContainer", () => {
         expect(childScope.resolve(tokens.service).getName()).toBe("child");
     });
 
+    it("resolves parent scoped dependencies supplied only by child scopes", () => {
+        const tokens = defineTokens({
+            request: defineType<{ readonly id: string }>(),
+            requestHolder: defineType<{ readonly requestId: string }>(),
+            service: defineType<{ readonly requestId: string }>(),
+            serviceWithRef: defineType<{ readonly requestId: string }>(),
+            serviceWithTransitiveRef: defineType<{ readonly requestId: string }>(),
+            transientService: defineType<{ readonly requestId: string }>(),
+            transientServiceWithRef: defineType<{ readonly requestId: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
+            bind.scoped(tokens.serviceWithRef, { request: ref(tokens.request) }, ({ request }) => ({
+                requestId: request.value.id,
+            })),
+            bind.scoped(tokens.serviceWithTransitiveRef, { holder: ref(tokens.requestHolder) }, ({ holder }) => ({
+                requestId: holder.value.requestId,
+            })),
+            bind.transient(tokens.requestHolder, { request: tokens.request }, ({ request }) => ({
+                requestId: request.id,
+            })),
+            bind.transient(tokens.transientService, { request: tokens.request }, ({ request }) => ({
+                requestId: request.id,
+            })),
+            bind.transient(tokens.transientServiceWithRef, { request: ref(tokens.request) }, ({ request }) => ({
+                requestId: request.value.id,
+            })),
+        );
+        const childScope = container.createScope(bind.scoped(tokens.request, () => ({ id: "request-1" })));
+
+        expect(() => (container as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
+            'Service "request" is not registered in the container',
+        );
+        expect(childScope.resolve(tokens.service)).toEqual({ requestId: "request-1" });
+        expect(childScope.resolve(tokens.serviceWithRef)).toEqual({ requestId: "request-1" });
+        expect(childScope.resolve(tokens.serviceWithTransitiveRef)).toEqual({ requestId: "request-1" });
+        expect(childScope.resolve(tokens.transientService)).toEqual({ requestId: "request-1" });
+        expect(childScope.resolve(tokens.transientServiceWithRef)).toEqual({ requestId: "request-1" });
+    });
+
+    it("resolves parent scoped dependencies supplied only by grandchild scopes", () => {
+        const tokens = defineTokens({
+            request: defineType<{ readonly id: string }>(),
+            service: defineType<{ readonly requestId: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
+        );
+        const childScope = container.createScope();
+        const grandchildScope = childScope.createScope(bind.scoped(tokens.request, () => ({ id: "request-1" })));
+
+        expect(() => (container as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
+            'Service "request" is not registered in the container',
+        );
+        expect(() => (childScope as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
+            'Service "request" is not registered in the container',
+        );
+        expect(grandchildScope.resolve(tokens.service)).toEqual({ requestId: "request-1" });
+    });
+
+    it("resolves parent services through descendant-completed override chains", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly port: number }>(),
+            port: defineType<number>(),
+            service: defineType<{ readonly port: number }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.port, () => 3000),
+            bind.scoped(tokens.service, { port: tokens.port }, ({ port }) => ({ port })),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+        );
+        const grandchildScope = childScope.createScope(bind.scoped(tokens.config, () => ({ port: 4000 })));
+
+        expect(container.resolve(tokens.service)).toEqual({ port: 3000 });
+        expect(() => (childScope as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
+            'Service "config" is not registered in the container',
+        );
+        expect(grandchildScope.resolve(tokens.service)).toEqual({ port: 4000 });
+    });
+
     it("initializes singleton dependencies from the singleton registration scope", () => {
         const tokens = defineTokens({
             config: defineType<{ readonly name: string }>(),

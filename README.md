@@ -1,6 +1,6 @@
 # Distill
 
-Distill is a small, type-safe dependency injection container for TypeScript. It uses typed tokens and explicit factory bindings so TypeScript can catch missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles at compile time.
+Distill is a small, type-safe dependency injection container for TypeScript. It uses typed tokens and explicit factory bindings so TypeScript can catch unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles at compile time.
 
 ## Installation
 
@@ -11,7 +11,7 @@ npm install @satunnaisuus/distill
 ## Features
 
 - End-to-end type inference for tokens, dependency maps, factories, and resolved values.
-- Compile-time checks for missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
+- Compile-time checks for unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
 - Lazy service creation with singleton, scoped, and transient lifetimes.
 - Child scopes for request-local overrides and per-scope service instances.
 - Explicit dependency maps instead of decorators, reflection, or global state.
@@ -77,7 +77,7 @@ const container = createContainer(
 container.resolve(tokens.server).start();
 ```
 
-The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports missing bindings, out-of-registry dependencies, and eager cycles at the container definition.
+The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports out-of-registry dependencies, singleton missing bindings, and eager cycles at the container definition. Scoped and transient services with unresolved dependencies are omitted from `resolve` until a scope supplies those dependencies.
 
 ### Defer work with `ref`
 
@@ -209,9 +209,6 @@ const tokens = defineTokens({
 
 const app = createContainer(
     tokens,
-    bind.scoped(tokens.currentUser, () => {
-        throw new Error("currentUser must be provided by a request scope");
-    }),
     bind.scoped(tokens.auditLog, { currentUser: tokens.currentUser }, ({ currentUser }) => ({
         userId: currentUser.id,
     })),
@@ -403,12 +400,16 @@ At compile time, `createContainer` validates that:
 
 - every binding token belongs to the provided registry;
 - every dependency token belongs to the registry;
-- every dependency token has a binding in the container;
+- singleton dependency graphs have visible bindings;
 - each token is bound once;
 - eager dependencies do not form a cycle;
 - singleton bindings do not depend on scoped bindings;
 - binding tokens are not unions;
 - spread bindings are passed as a tuple, not a widened array.
+
+Scoped and transient bindings may depend on tokens supplied by a descendant scope. The parent `resolve` type only accepts
+services whose dependencies are visible in that scope; the descendant `resolve` type includes the service once the needed
+bindings are supplied.
 
 Runtime checks cover binding shape, registry membership, duplicate bindings, and eager cycles for plain JavaScript or TypeScript code that bypasses the type system. Missing services and recursive resolution cycles are reported when the affected service is resolved or a `ref` value is read.
 
@@ -439,7 +440,7 @@ const service = request.resolve(tokens.service);
 
 Scope bindings are validated against the parent container and the token registry. Duplicate bindings inside the same scope are rejected, but a child scope can override a parent binding for the same token.
 
-Singleton bindings are initialized from the scope where they are registered. Scoped and transient bindings resolve their dependencies from the scope that requested them, so parent scoped services can use child overrides.
+Singleton bindings are initialized from the scope where they are registered. Scoped and transient bindings resolve their dependencies from the scope that requested them, so parent scoped services can use child bindings and overrides.
 
 ### `container.resolve(token)`
 
@@ -450,7 +451,7 @@ const config = container.resolve(tokens.config);
 //    ^? { readonly port: number }
 ```
 
-Only tokens that have bindings in that container can be resolved at compile time. The return type is inferred from the token.
+Only tokens with bindings and currently visible dependencies can be resolved at compile time. The return type is inferred from the token.
 
 Resolution is lazy. Singleton and scoped bindings are cached according to their lifetime, while transient bindings create a new value on every resolution:
 
