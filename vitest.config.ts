@@ -10,6 +10,9 @@ export default defineConfig({
             provider: "v8",
             reporter: ["text", "lcov"],
             reportsDirectory: "coverage",
+            thresholds: {
+                100: true,
+            },
         },
     },
 });

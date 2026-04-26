@@ -9,12 +9,31 @@ import { type as defineType } from "../src/type-descriptor";
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
+    readonly dispose: () => Promise<void>;
+    readonly disposed: boolean;
+};
+
+type Deferred = {
+    readonly promise: Promise<void>;
+    readonly resolve: () => void;
 };
 
 const createRuntimeContainer = createContainer as unknown as (
     tokens: Record<string, unknown>,
     ...bindings: readonly unknown[]
 ) => RuntimeContainerForTest;
+
+const createDeferred = (): Deferred => {
+    let resolveDeferred!: () => void;
+    const promise = new Promise<void>((resolve) => {
+        resolveDeferred = resolve;
+    });
+
+    return {
+        promise,
+        resolve: resolveDeferred,
+    };
+};
 
 describe("createContainer", () => {
     it("resolves a service without dependencies", () => {
@@ -108,6 +127,29 @@ describe("createContainer", () => {
         const service = container.resolve(tokens.service);
 
         expect(service.port).toBe(3000);
+        expect(loggerFactory).not.toHaveBeenCalled();
+        expect(service.getLogger()).toBe(logger);
+        expect(loggerFactory).toHaveBeenCalledTimes(1);
+    });
+
+    it("creates ref dependencies for non-disposable transient services without disposal tracking", () => {
+        const tokens = defineTokens({
+            logger: defineType<{ readonly log: (message: string) => void }>(),
+            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        });
+        const logger = { log: vi.fn() };
+        const loggerFactory = vi.fn(() => logger);
+
+        const container = createContainer(
+            tokens,
+            bind.transient(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
+                getLogger: () => logger.value,
+            })),
+            bind(tokens.logger, loggerFactory),
+        );
+
+        const service = container.resolve(tokens.service);
+
         expect(loggerFactory).not.toHaveBeenCalled();
         expect(service.getLogger()).toBe(logger);
         expect(loggerFactory).toHaveBeenCalledTimes(1);
@@ -538,6 +580,1389 @@ describe("createContainer", () => {
         expect(serviceFactory).toHaveBeenCalledTimes(3);
     });
 
+    it("does not create disposable bindings during dispose without prior resolve", async () => {
+        const tokens = defineTokens({
+            service: defineType<{ readonly id: "service" }>(),
+        });
+        const factory = vi.fn(() => ({ id: "service" as const }));
+        const disposer = vi.fn();
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, factory, {
+                dispose: disposer,
+            }),
+        );
+
+        expect(container.disposed).toBe(false);
+
+        await container.dispose();
+
+        expect(factory).not.toHaveBeenCalled();
+        expect(disposer).not.toHaveBeenCalled();
+        expect(container.disposed).toBe(true);
+    });
+
+    it("finishes tracking an in-flight resolution before a factory-requested dispose runs", async () => {
+        const events: string[] = [];
+        let factoryDisposePromise: Promise<void> | undefined;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly id: "resource" }>(),
+            service: defineType<{ readonly resource: { readonly id: "resource" } }>(),
+        });
+        let disposeContainer = () => Promise.resolve();
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { resource: tokens.resource },
+                ({ resource }) => {
+                    factoryDisposePromise = disposeContainer();
+                    events.push("factory");
+
+                    return { resource };
+                },
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+            bind(tokens.resource, () => ({ id: "resource" }), {
+                dispose: () => events.push("resource"),
+            }),
+        );
+        disposeContainer = () => container.dispose();
+
+        expect(container.resolve(tokens.service)).toEqual({ resource: { id: "resource" } });
+        expect(container.disposed).toBe(true);
+        expect(events).toEqual(["factory"]);
+        expect(factoryDisposePromise).toBeDefined();
+
+        await expect(factoryDisposePromise as Promise<void>).resolves.toBeUndefined();
+
+        expect(events).toEqual(["factory", "service", "resource"]);
+    });
+
+    it("disposes only instances owned by the disposed scope", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            db: defineType<{ readonly id: "db" }>(),
+            rootService: defineType<{ readonly id: "root" }>(),
+            requestService: defineType<{ readonly id: "request" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.singleton(tokens.db, () => ({ id: "db" }), { dispose: () => events.push("db") }),
+            bind.scoped(tokens.rootService, { db: tokens.db }, () => ({ id: "root" }), {
+                dispose: () => events.push("root"),
+            }),
+            bind.scoped(tokens.requestService, { db: tokens.db }, () => ({ id: "request" }), {
+                dispose: () => events.push("request"),
+            }),
+        );
+        const childScope = container.createScope();
+
+        childScope.resolve(tokens.requestService);
+        container.resolve(tokens.rootService);
+
+        await childScope.dispose();
+        await childScope.dispose();
+
+        expect(events).toEqual(["request"]);
+        expect(childScope.disposed).toBe(true);
+        expect(container.disposed).toBe(false);
+
+        await container.dispose();
+
+        expect(events).toEqual(["request", "root", "db"]);
+        expect(container.disposed).toBe(true);
+    });
+
+    it("disposes child-owned singletons first resolved from grandchild scopes", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly id: "service" }>(),
+        });
+        const factory = vi.fn(() => ({ id: "service" as const }));
+        const container = createContainer(tokens);
+        const childScope = container.createScope(
+            bind.singleton(tokens.service, factory, {
+                dispose: () => events.push("service"),
+            }),
+        );
+        const grandchildScope = childScope.createScope();
+
+        const service = grandchildScope.resolve(tokens.service);
+
+        expect(childScope.resolve(tokens.service)).toBe(service);
+        expect(factory).toHaveBeenCalledTimes(1);
+        expect(events).toEqual([]);
+
+        await childScope.dispose();
+
+        expect(events).toEqual(["service"]);
+        expect(container.disposed).toBe(false);
+        expect(childScope.disposed).toBe(true);
+        expect(grandchildScope.disposed).toBe(true);
+
+        await container.dispose();
+
+        expect(events).toEqual(["service"]);
+        expect(container.disposed).toBe(true);
+    });
+
+    it("cascades dispose to child scopes before disposing parent instances", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.service, () => ({ name: "child" }), { dispose: () => events.push("child") }),
+        );
+        const grandchildScope = childScope.createScope(
+            bind.scoped(tokens.service, () => ({ name: "grandchild" }), {
+                dispose: () => events.push("grandchild"),
+            }),
+        );
+
+        container.resolve(tokens.service);
+        childScope.resolve(tokens.service);
+        grandchildScope.resolve(tokens.service);
+
+        await container.dispose();
+
+        expect(events).toEqual(["grandchild", "child", "root"]);
+        expect(container.disposed).toBe(true);
+        expect(childScope.disposed).toBe(true);
+        expect(grandchildScope.disposed).toBe(true);
+        expect(() => container.resolve(tokens.service)).toThrowError("Container has been disposed");
+        expect(() => container.createScope()).toThrowError("Container has been disposed");
+    });
+
+    it("disposes sibling child scopes in reverse creation order", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.service, () => ({ name: "root" })),
+        );
+        const firstScope = container.createScope(
+            bind.scoped(tokens.service, () => ({ name: "first" }), { dispose: () => events.push("first") }),
+        );
+        const secondScope = container.createScope(
+            bind.scoped(tokens.service, () => ({ name: "second" }), { dispose: () => events.push("second") }),
+        );
+
+        secondScope.resolve(tokens.service);
+        firstScope.resolve(tokens.service);
+
+        await container.dispose();
+
+        expect(events).toEqual(["second", "first"]);
+        expect(firstScope.disposed).toBe(true);
+        expect(secondScope.disposed).toBe(true);
+    });
+
+    it("cascades direct child scope dispose to grandchild scopes without disposing parent", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.service, () => ({ name: "child" }), { dispose: () => events.push("child") }),
+        );
+        const grandchildScope = childScope.createScope(
+            bind.scoped(tokens.service, () => ({ name: "grandchild" }), {
+                dispose: () => events.push("grandchild"),
+            }),
+        );
+
+        const rootService = container.resolve(tokens.service);
+        childScope.resolve(tokens.service);
+        grandchildScope.resolve(tokens.service);
+
+        await childScope.dispose();
+
+        expect(events).toEqual(["grandchild", "child"]);
+        expect(container.disposed).toBe(false);
+        expect(childScope.disposed).toBe(true);
+        expect(grandchildScope.disposed).toBe(true);
+        expect(container.resolve(tokens.service)).toBe(rootService);
+
+        await container.dispose();
+
+        expect(events).toEqual(["grandchild", "child", "root"]);
+        expect(container.disposed).toBe(true);
+    });
+
+    it("tracks disposable transient instances in the resolution scope", async () => {
+        const disposedIds: number[] = [];
+        const tokens = defineTokens({
+            resource: defineType<{ readonly id: number }>(),
+        });
+        let nextId = 1;
+        const container = createContainer(
+            tokens,
+            bind.transient(tokens.resource, () => ({ id: nextId++ }), {
+                dispose: (resource) => disposedIds.push(resource.id),
+            }),
+        );
+        const childScope = container.createScope();
+
+        childScope.resolve(tokens.resource);
+        childScope.resolve(tokens.resource);
+
+        await childScope.dispose();
+        await container.dispose();
+
+        expect(disposedIds).toEqual([2, 1]);
+    });
+
+    it("keeps unrelated later transient instances in reverse creation order when disposing eager dependents", async () => {
+        const events: string[] = [];
+        let nextResourceId = 1;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly id: number }>(),
+            service: defineType<{ readonly resource: { readonly id: number } }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, { resource: tokens.resource }, ({ resource }) => ({ resource }), {
+                dispose: () => events.push("service"),
+            }),
+            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
+                dispose: (resource) => events.push(`resource:${resource.id}`),
+            }),
+        );
+
+        expect(container.resolve(tokens.service).resource).toEqual({ id: 1 });
+        expect(container.resolve(tokens.resource)).toEqual({ id: 2 });
+
+        await container.dispose();
+
+        expect(events).toEqual(["resource:2", "service", "resource:1"]);
+    });
+
+    it("disposes lazily resolved ref dependencies after their consumers", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            dependency: defineType<{ readonly name: "dependency" }>(),
+            service: defineType<{ readonly getDependency: () => { readonly name: "dependency" } }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { dependency: ref(tokens.dependency) },
+                ({ dependency }) => ({
+                    getDependency: () => dependency.value,
+                }),
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+            bind(tokens.dependency, () => ({ name: "dependency" }), {
+                dispose: () => events.push("dependency"),
+            }),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.getDependency()).toEqual({ name: "dependency" });
+
+        await container.dispose();
+
+        expect(events).toEqual(["service", "dependency"]);
+    });
+
+    it("lets a disposer read an already resolved ref dependency before the dependency is disposed", async () => {
+        const events: string[] = [];
+        let dependencyDisposed = false;
+        const tokens = defineTokens({
+            dependency: defineType<{ readonly read: () => string }>(),
+            service: defineType<{ readonly readDependency: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { dependency: ref(tokens.dependency) },
+                ({ dependency }) => ({
+                    readDependency: () => dependency.value.read(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readDependency()}`),
+                },
+            ),
+            bind(
+                tokens.dependency,
+                () => ({
+                    read: () => {
+                        if (dependencyDisposed) {
+                            throw new Error("Dependency was disposed");
+                        }
+
+                        return "open";
+                    },
+                }),
+                {
+                    dispose: () => {
+                        dependencyDisposed = true;
+                        events.push("dependency");
+                    },
+                },
+            ),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.readDependency()).toBe("open");
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:open", "dependency"]);
+    });
+
+    it("wraps an unresolved ref read by a disposer without creating the target", async () => {
+        const targetFactory = vi.fn(() => ({ name: "target" as const }));
+        const tokens = defineTokens({
+            service: defineType<{ readonly readTarget: () => string }>(),
+            target: defineType<{ readonly name: "target" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { target: ref(tokens.target) },
+                ({ target }) => ({
+                    readTarget: () => target.value.name,
+                }),
+                {
+                    dispose: (service) => {
+                        service.readTarget();
+                    },
+                },
+            ),
+            bind(tokens.target, targetFactory),
+        );
+
+        container.resolve(tokens.service);
+
+        let disposeError: unknown;
+
+        try {
+            await container.dispose();
+        } catch (error) {
+            disposeError = error;
+        }
+
+        expect(disposeError).toBeInstanceOf(AggregateError);
+        expect((disposeError as AggregateError).errors).toHaveLength(1);
+        expect(((disposeError as AggregateError).errors[0] as Error).message).toBe("Container has been disposed");
+        expect(targetFactory).not.toHaveBeenCalled();
+    });
+
+    it("propagates disposable ref dependency tracking through non-disposable eager wrappers", async () => {
+        const events: string[] = [];
+        let resourceDisposed = false;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly read: () => string }>(),
+            wrapper: defineType<{ readonly readResource: () => string }>(),
+            service: defineType<{ readonly readWrappedResource: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { wrapper: tokens.wrapper },
+                ({ wrapper }) => ({
+                    readWrappedResource: () => wrapper.readResource(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
+                },
+            ),
+            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => ({
+                readResource: () => resource.value.read(),
+            })),
+            bind(
+                tokens.resource,
+                () => ({
+                    read: () => {
+                        if (resourceDisposed) {
+                            throw new Error("Resource was disposed");
+                        }
+
+                        return "open";
+                    },
+                }),
+                {
+                    dispose: () => {
+                        resourceDisposed = true;
+                        events.push("resource");
+                    },
+                },
+            ),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.readWrappedResource()).toBe("open");
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:open", "resource"]);
+    });
+
+    it("preserves disposal order through cached non-disposable ref wrappers first read by disposers", async () => {
+        const events: string[] = [];
+        let resourceDisposed = false;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly read: () => string }>(),
+            wrapper: defineType<{ readonly readResource: () => string }>(),
+            service: defineType<{ readonly readWrappedResource: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => ({
+                readResource: () => resource.value.read(),
+            })),
+            bind(
+                tokens.service,
+                { wrapper: ref(tokens.wrapper) },
+                ({ wrapper }) => ({
+                    readWrappedResource: () => wrapper.value.readResource(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
+                },
+            ),
+            bind(
+                tokens.resource,
+                () => ({
+                    read: () => {
+                        if (resourceDisposed) {
+                            throw new Error("Resource was disposed");
+                        }
+
+                        return "open";
+                    },
+                }),
+                {
+                    dispose: () => {
+                        resourceDisposed = true;
+                        events.push("resource");
+                    },
+                },
+            ),
+        );
+
+        expect(container.resolve(tokens.wrapper).readResource).toBeTypeOf("function");
+        expect(container.resolve(tokens.service).readWrappedResource).toBeTypeOf("function");
+        expect(container.resolve(tokens.resource).read()).toBe("open");
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:open", "resource"]);
+    });
+
+    it("preserves disposal order through cyclic cached non-disposable ref wrappers", async () => {
+        const events: string[] = [];
+        let resourceDisposed = false;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly read: () => string }>(),
+            wrapperA: defineType<{ readonly readResource: () => string }>(),
+            wrapperB: defineType<{ readonly getWrapperA: () => { readonly readResource: () => string } }>(),
+            service: defineType<{ readonly readWrappedResource: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.wrapperA,
+                { wrapperB: ref(tokens.wrapperB), resource: ref(tokens.resource) },
+                ({ resource }) => ({
+                    readResource: () => resource.value.read(),
+                }),
+            ),
+            bind(tokens.wrapperB, { wrapperA: ref(tokens.wrapperA) }, ({ wrapperA }) => ({
+                getWrapperA: () => wrapperA.value,
+            })),
+            bind(
+                tokens.service,
+                { wrapperA: ref(tokens.wrapperA) },
+                ({ wrapperA }) => ({
+                    readWrappedResource: () => wrapperA.value.readResource(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
+                },
+            ),
+            bind(
+                tokens.resource,
+                () => ({
+                    read: () => {
+                        if (resourceDisposed) {
+                            throw new Error("Resource was disposed");
+                        }
+
+                        return "open";
+                    },
+                }),
+                {
+                    dispose: () => {
+                        resourceDisposed = true;
+                        events.push("resource");
+                    },
+                },
+            ),
+        );
+
+        expect(container.resolve(tokens.wrapperA).readResource).toBeTypeOf("function");
+        expect(container.resolve(tokens.wrapperB).getWrapperA).toBeTypeOf("function");
+        expect(container.resolve(tokens.service).readWrappedResource).toBeTypeOf("function");
+        expect(container.resolve(tokens.resource).read()).toBe("open");
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:open", "resource"]);
+    });
+
+    it("does not expand parent-owned cached wrappers while disposing child ref dependents", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            wrapper: defineType<{ readonly read: () => string }>(),
+            service: defineType<{ readonly readWrapper: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.wrapper, () => ({
+                read: () => "root",
+            })),
+        );
+        const childScope = container.createScope(
+            bind.scoped(
+                tokens.service,
+                { wrapper: ref(tokens.wrapper) },
+                ({ wrapper }) => ({
+                    readWrapper: () => wrapper.value.read(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readWrapper()}`),
+                },
+            ),
+        );
+
+        expect(container.resolve(tokens.wrapper).read()).toBe("root");
+        expect(childScope.resolve(tokens.service).readWrapper).toBeTypeOf("function");
+
+        await expect(childScope.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:root"]);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+    });
+
+    it("lets child disposers read parent-owned cached refs during parent cascade", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            wrapper: defineType<{ readonly read: () => string }>(),
+            service: defineType<{ readonly readWrapper: () => string }>(),
+        });
+        const wrapperFactory = vi.fn(() => ({
+            read: () => "root",
+        }));
+        const container = createContainer(tokens, bind(tokens.wrapper, wrapperFactory));
+        let childScope: RuntimeContainerForTest;
+
+        childScope = container.createScope(
+            bind.scoped(
+                tokens.service,
+                { wrapper: ref(tokens.wrapper) },
+                ({ wrapper }) => ({
+                    readWrapper: () => wrapper.value.read(),
+                }),
+                {
+                    dispose: (service) => {
+                        events.push(`disposed:${container.disposed}:${childScope.disposed}`);
+                        events.push(`service:${service.readWrapper()}`);
+                    },
+                },
+            ),
+        );
+
+        expect(container.resolve(tokens.wrapper).read()).toBe("root");
+        expect(childScope.resolve(tokens.service).readWrapper).toBeTypeOf("function");
+        expect(wrapperFactory).toHaveBeenCalledTimes(1);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["disposed:true:true", "service:root"]);
+        expect(wrapperFactory).toHaveBeenCalledTimes(1);
+        expect(childScope.disposed).toBe(true);
+    });
+
+    it("ignores self ref dependencies when disposing", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly getSelf: () => { readonly getSelf: () => unknown } }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { self: ref(tokens.service) },
+                ({ self }) => ({
+                    getSelf: () => self.value,
+                }),
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.getSelf()).toBe(service);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service"]);
+    });
+
+    it("deduplicates propagated ref dependencies through shared non-disposable wrappers", async () => {
+        const events: string[] = [];
+        let resourceDisposed = false;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly read: () => string }>(),
+            wrapper: defineType<{ readonly readResource: () => string }>(),
+            shared: defineType<{ readonly readResource: () => string }>(),
+            firstConsumer: defineType<{ readonly readResource: () => string }>(),
+            secondConsumer: defineType<{ readonly readResource: () => string }>(),
+            service: defineType<{ readonly readResource: () => string }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { firstConsumer: tokens.firstConsumer, secondConsumer: tokens.secondConsumer },
+                ({ firstConsumer }) => ({
+                    readResource: () => firstConsumer.readResource(),
+                }),
+                {
+                    dispose: (service) => events.push(`service:${service.readResource()}`),
+                },
+            ),
+            bind(tokens.firstConsumer, { shared: tokens.shared }, ({ shared }) => ({
+                readResource: () => shared.readResource(),
+            })),
+            bind(tokens.secondConsumer, { shared: tokens.shared }, ({ shared }) => ({
+                readResource: () => shared.readResource(),
+            })),
+            bind(tokens.shared, { wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
+                readResource: () => wrapper.value.readResource(),
+            })),
+            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => {
+                const resolvedResource = resource.value;
+
+                return {
+                    readResource: () => resolvedResource.read(),
+                };
+            }),
+            bind(
+                tokens.resource,
+                () => ({
+                    read: () => {
+                        if (resourceDisposed) {
+                            throw new Error("Resource was disposed");
+                        }
+
+                        return "open";
+                    },
+                }),
+                {
+                    dispose: () => {
+                        resourceDisposed = true;
+                        events.push("resource");
+                    },
+                },
+            ),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.readResource()).toBe("open");
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["service:open", "resource"]);
+    });
+
+    it("deduplicates repeated disposable ref dependencies while reusing the same ref instance", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            dependency: defineType<{ readonly name: "dependency" }>(),
+            service: defineType<{
+                readonly hasSharedDependencyRef: boolean;
+                readonly readDependency: () => { readonly name: "dependency" };
+            }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { firstDependency: ref(tokens.dependency), secondDependency: ref(tokens.dependency) },
+                ({ firstDependency, secondDependency }) => ({
+                    hasSharedDependencyRef: firstDependency === secondDependency,
+                    readDependency: () => firstDependency.value,
+                }),
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+            bind(tokens.dependency, () => ({ name: "dependency" }), {
+                dispose: () => events.push("dependency"),
+            }),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.hasSharedDependencyRef).toBe(true);
+        expect(service.readDependency()).toEqual({ name: "dependency" });
+
+        await container.dispose();
+
+        expect(events).toEqual(["service", "dependency"]);
+    });
+
+    it("disposes transient ref dependency instances after their consumer", async () => {
+        const events: string[] = [];
+        let nextResourceId = 1;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly id: number }>(),
+            service: defineType<{ readonly getResource: () => { readonly id: number } }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { resource: ref(tokens.resource) },
+                ({ resource }) => ({
+                    getResource: () => resource.value,
+                }),
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
+                dispose: (resource) => events.push(`resource:${resource.id}`),
+            }),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.getResource()).toEqual({ id: 1 });
+        expect(service.getResource()).toEqual({ id: 2 });
+
+        await container.dispose();
+
+        expect(events).toEqual(["service", "resource:2", "resource:1"]);
+    });
+
+    it("keeps unrelated later transient instances in reverse creation order when disposing ref dependents", async () => {
+        const events: string[] = [];
+        let nextResourceId = 1;
+        const tokens = defineTokens({
+            resource: defineType<{ readonly id: number }>(),
+            service: defineType<{ readonly getResource: () => { readonly id: number } }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { resource: ref(tokens.resource) },
+                ({ resource }) => ({
+                    getResource: () => resource.value,
+                }),
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
+                dispose: (resource) => events.push(`resource:${resource.id}`),
+            }),
+        );
+
+        const service = container.resolve(tokens.service);
+
+        expect(service.getResource()).toEqual({ id: 1 });
+        expect(container.resolve(tokens.resource)).toEqual({ id: 2 });
+
+        await container.dispose();
+
+        expect(events).toEqual(["resource:2", "service", "resource:1"]);
+    });
+
+    it("disposes ref dependency cycles without recursing indefinitely", async () => {
+        type ServiceA = {
+            readonly getB: () => ServiceB;
+        };
+        type ServiceB = {
+            readonly getA: () => ServiceA;
+        };
+        const events: string[] = [];
+        const tokens = defineTokens({
+            serviceA: defineType<ServiceA>(),
+            serviceB: defineType<ServiceB>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.serviceA,
+                { serviceB: ref(tokens.serviceB) },
+                ({ serviceB }) => ({
+                    getB: () => serviceB.value,
+                }),
+                { dispose: () => events.push("serviceA") },
+            ),
+            bind(
+                tokens.serviceB,
+                { serviceA: ref(tokens.serviceA) },
+                ({ serviceA }) => ({
+                    getA: () => serviceA.value,
+                }),
+                { dispose: () => events.push("serviceB") },
+            ),
+        );
+
+        const serviceA = container.resolve(tokens.serviceA);
+        const serviceB = serviceA.getB();
+
+        expect(serviceB.getA()).toBe(serviceA);
+
+        await container.dispose();
+
+        expect(events).toEqual(["serviceA", "serviceB"]);
+    });
+
+    it("collects dispose errors while still disposing every owned instance", async () => {
+        const calls: string[] = [];
+        const firstError = new Error("first dispose failed");
+        const secondError = new Error("second dispose failed");
+        const tokens = defineTokens({
+            first: defineType<{ readonly name: "first" }>(),
+            second: defineType<{ readonly name: "second" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.first, () => ({ name: "first" }), {
+                dispose: () => {
+                    calls.push("first");
+                    throw firstError;
+                },
+            }),
+            bind(tokens.second, () => ({ name: "second" }), {
+                dispose: async () => {
+                    calls.push("second");
+                    throw secondError;
+                },
+            }),
+        );
+
+        container.resolve(tokens.first);
+        container.resolve(tokens.second);
+
+        let disposeError: unknown;
+
+        try {
+            await container.dispose();
+        } catch (error) {
+            disposeError = error;
+        }
+
+        expect(disposeError).toBeInstanceOf(AggregateError);
+        expect((disposeError as AggregateError).errors).toEqual([secondError, firstError]);
+        expect(calls).toEqual(["second", "first"]);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(calls).toEqual(["second", "first"]);
+    });
+
+    it("clears refs and cached instances after failed disposal", async () => {
+        const disposeError = new Error("dispose failed");
+        const dependency = { name: "dependency" as const };
+        const tokens = defineTokens({
+            dependency: defineType<{ readonly name: "dependency" }>(),
+            service: defineType<{
+                readonly dependencyRef: { readonly value: { readonly name: "dependency" } };
+            }>(),
+        });
+        const dependencyFactory = vi.fn(() => dependency);
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { dependency: ref(tokens.dependency) },
+                ({ dependency }) => ({
+                    dependencyRef: dependency,
+                }),
+                {
+                    dispose: () => {
+                        throw disposeError;
+                    },
+                },
+            ),
+            bind(tokens.dependency, dependencyFactory),
+        );
+
+        const service = container.resolve(tokens.service);
+        const savedDependencyRef = service.dependencyRef;
+
+        expect(savedDependencyRef.value).toBe(dependency);
+        expect(savedDependencyRef.value).toBe(dependency);
+        expect(dependencyFactory).toHaveBeenCalledTimes(1);
+
+        let aggregateError: unknown;
+
+        try {
+            await container.dispose();
+        } catch (error) {
+            aggregateError = error;
+        }
+
+        expect(aggregateError).toBeInstanceOf(AggregateError);
+        expect((aggregateError as AggregateError).errors).toEqual([disposeError]);
+        expect(container.disposed).toBe(true);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(() => savedDependencyRef.value).toThrowError("Container has been disposed");
+        expect(dependencyFactory).toHaveBeenCalledTimes(1);
+    });
+
+    it("flattens AggregateError thrown by a direct disposer", async () => {
+        const firstError = new Error("first nested dispose failed");
+        const secondError = new Error("second nested dispose failed");
+        const disposeError = new AggregateError([firstError, secondError], "nested dispose failures");
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: () => {
+                    throw disposeError;
+                },
+            }),
+        );
+
+        container.resolve(tokens.service);
+
+        let aggregateError: unknown;
+
+        try {
+            await container.dispose();
+        } catch (error) {
+            aggregateError = error;
+        }
+
+        expect(aggregateError).toBeInstanceOf(AggregateError);
+        expect((aggregateError as AggregateError).errors).toEqual([firstError, secondError]);
+    });
+
+    it("flattens failed child scope disposal errors while still disposing parent instances", async () => {
+        const calls: string[] = [];
+        const firstError = new Error("first child dispose failed");
+        const secondError = new Error("second child dispose failed");
+        const tokens = defineTokens({
+            firstChild: defineType<{ readonly name: "first" }>(),
+            secondChild: defineType<{ readonly name: "second" }>(),
+            root: defineType<{ readonly name: "root" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.root, () => ({ name: "root" }), {
+                dispose: () => calls.push("root"),
+            }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.firstChild, () => ({ name: "first" }), {
+                dispose: () => {
+                    calls.push("firstChild");
+                    throw firstError;
+                },
+            }),
+            bind.scoped(tokens.secondChild, () => ({ name: "second" }), {
+                dispose: () => {
+                    calls.push("secondChild");
+                    throw secondError;
+                },
+            }),
+        );
+
+        container.resolve(tokens.root);
+        childScope.resolve(tokens.firstChild);
+        childScope.resolve(tokens.secondChild);
+
+        let disposeError: unknown;
+
+        try {
+            await container.dispose();
+        } catch (error) {
+            disposeError = error;
+        }
+
+        expect(disposeError).toBeInstanceOf(AggregateError);
+        expect((disposeError as AggregateError).errors).toEqual([secondError, firstError]);
+        expect(calls).toEqual(["secondChild", "firstChild", "root"]);
+        expect(container.disposed).toBe(true);
+        expect(childScope.disposed).toBe(true);
+    });
+
+    it("resolves repeated dispose calls as no-ops while a disposer is active", async () => {
+        const disposeStarted = vi.fn();
+        const disposeFinished = vi.fn();
+        const disposeDeferred = createDeferred();
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    disposeStarted();
+                    await disposeDeferred.promise;
+                    disposeFinished();
+                },
+            }),
+        );
+
+        container.resolve(tokens.service);
+
+        const firstDispose = container.dispose();
+        const secondDispose = container.dispose();
+
+        expect(secondDispose).not.toBe(firstDispose);
+        expect(disposeStarted).toHaveBeenCalledTimes(1);
+        expect(disposeFinished).not.toHaveBeenCalled();
+
+        await expect(secondDispose).resolves.toBeUndefined();
+
+        disposeDeferred.resolve();
+
+        await expect(firstDispose).resolves.toBeUndefined();
+        expect(disposeFinished).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns the in-flight dispose promise before disposal enters a disposer", async () => {
+        let firstDisposePromise: Promise<void> | undefined;
+        let secondDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        let disposeContainer = () => Promise.resolve();
+        const container = createContainer(
+            tokens,
+            bind(
+                tokens.service,
+                () => {
+                    firstDisposePromise = disposeContainer();
+                    secondDisposePromise = disposeContainer();
+                    events.push("factory");
+
+                    return { name: "service" };
+                },
+                {
+                    dispose: () => events.push("service"),
+                },
+            ),
+        );
+        disposeContainer = () => container.dispose();
+
+        expect(container.resolve(tokens.service)).toEqual({ name: "service" });
+        expect(secondDisposePromise).toBe(firstDisposePromise);
+
+        await expect(firstDisposePromise as Promise<void>).resolves.toBeUndefined();
+        expect(events).toEqual(["factory", "service"]);
+    });
+
+    it("resolves synchronous reentrant dispose calls as no-ops", async () => {
+        let reentrantDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        let disposeContainer = () => Promise.resolve();
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: () => {
+                    reentrantDisposePromise = disposeContainer();
+                    events.push("service");
+
+                    return reentrantDisposePromise;
+                },
+            }),
+        );
+        disposeContainer = () => container.dispose();
+
+        container.resolve(tokens.service);
+
+        const disposePromise = container.dispose();
+
+        expect(reentrantDisposePromise).toBeDefined();
+        expect(reentrantDisposePromise).not.toBe(disposePromise);
+
+        await expect(reentrantDisposePromise as Promise<void>).resolves.toBeUndefined();
+        await expect(disposePromise).resolves.toBeUndefined();
+        expect(events).toEqual(["service"]);
+    });
+
+    it("resolves awaited same-scope reentrant dispose calls as no-ops", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        let disposeContainer = () => Promise.resolve();
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    events.push("before");
+                    await disposeContainer();
+                    events.push("after");
+                },
+            }),
+        );
+        disposeContainer = () => container.dispose();
+
+        container.resolve(tokens.service);
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["before", "after"]);
+    });
+
+    it("keeps same-scope reentrant disposal active after awaited disposer work", async () => {
+        let reentrantDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        let disposeContainer = () => Promise.resolve();
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    events.push("before");
+                    await Promise.resolve();
+                    reentrantDisposePromise = disposeContainer();
+                    await reentrantDisposePromise;
+                    events.push("after");
+                },
+            }),
+        );
+        disposeContainer = () => container.dispose();
+
+        container.resolve(tokens.service);
+
+        const disposeResult = await Promise.race([
+            container.dispose().then(() => "settled" as const),
+            new Promise<"timeout">((resolve) => {
+                setTimeout(() => resolve("timeout"), 50);
+            }),
+        ]);
+
+        expect(disposeResult).toBe("settled");
+        await expect(reentrantDisposePromise as Promise<void>).resolves.toBeUndefined();
+        expect(events).toEqual(["before", "after"]);
+    });
+
+    it("resolves reentrant parent dispose calls from child disposers during parent cascade", async () => {
+        let reentrantParentDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            child: defineType<{ readonly name: "child" }>(),
+            root: defineType<{ readonly name: "root" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.root, () => ({ name: "root" }), {
+                dispose: () => events.push("root"),
+            }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.child, () => ({ name: "child" }), {
+                dispose: () => {
+                    events.push("child");
+                    reentrantParentDisposePromise = container.dispose();
+
+                    return reentrantParentDisposePromise;
+                },
+            }),
+        );
+
+        container.resolve(tokens.root);
+        childScope.resolve(tokens.child);
+
+        const disposePromise = container.dispose();
+
+        expect(reentrantParentDisposePromise).toBeDefined();
+        expect(reentrantParentDisposePromise).not.toBe(disposePromise);
+
+        await expect(disposePromise).resolves.toBeUndefined();
+        await expect(reentrantParentDisposePromise as Promise<void>).resolves.toBeUndefined();
+        expect(events).toEqual(["child", "root"]);
+        expect(container.disposed).toBe(true);
+        expect(childScope.disposed).toBe(true);
+    });
+
+    it("keeps ancestor reentrant disposal active after awaited child disposer work", async () => {
+        let reentrantParentDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            child: defineType<{ readonly name: "child" }>(),
+            root: defineType<{ readonly name: "root" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.root, () => ({ name: "root" }), {
+                dispose: () => events.push("root"),
+            }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.child, () => ({ name: "child" }), {
+                dispose: async () => {
+                    events.push("child:before");
+                    await Promise.resolve();
+                    reentrantParentDisposePromise = container.dispose();
+                    await reentrantParentDisposePromise;
+                    events.push("child:after");
+                },
+            }),
+        );
+
+        container.resolve(tokens.root);
+        childScope.resolve(tokens.child);
+
+        const disposeResult = await Promise.race([
+            container.dispose().then(() => "settled" as const),
+            new Promise<"timeout">((resolve) => {
+                setTimeout(() => resolve("timeout"), 50);
+            }),
+        ]);
+
+        expect(disposeResult).toBe("settled");
+        await expect(reentrantParentDisposePromise as Promise<void>).resolves.toBeUndefined();
+        expect(events).toEqual(["child:before", "child:after", "root"]);
+        expect(container.disposed).toBe(true);
+        expect(childScope.disposed).toBe(true);
+    });
+
+    it("resolves parent disposal from child disposers that cascade back into the in-flight child", async () => {
+        const events: string[] = [];
+        const tokens = defineTokens({
+            child: defineType<{ readonly name: "child" }>(),
+            root: defineType<{ readonly name: "root" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind.scoped(tokens.root, () => ({ name: "root" }), {
+                dispose: () => events.push("root"),
+            }),
+        );
+        const childScope = container.createScope(
+            bind.scoped(tokens.child, () => ({ name: "child" }), {
+                dispose: () => {
+                    events.push("child");
+
+                    return container.dispose();
+                },
+            }),
+        );
+
+        container.resolve(tokens.root);
+        childScope.resolve(tokens.child);
+
+        await expect(childScope.dispose()).resolves.toBeUndefined();
+        expect(events).toEqual(["child", "root"]);
+        expect(container.disposed).toBe(true);
+        expect(childScope.disposed).toBe(true);
+    });
+
+    it("keeps unrelated in-flight dispose calls awaitable from active disposers", async () => {
+        const otherDisposeDeferred = createDeferred();
+        let nestedOtherDisposePromise: Promise<void> | undefined;
+        const events: string[] = [];
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        const otherContainer = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    events.push("other:start");
+                    await otherDisposeDeferred.promise;
+                    events.push("other:end");
+                },
+            }),
+        );
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    events.push("current:start");
+                    nestedOtherDisposePromise = otherContainer.dispose();
+                    otherDisposeDeferred.resolve();
+                    await nestedOtherDisposePromise;
+                    events.push("current:end");
+                },
+            }),
+        );
+
+        otherContainer.resolve(tokens.service);
+        container.resolve(tokens.service);
+
+        const otherDisposePromise = otherContainer.dispose();
+
+        await expect(container.dispose()).resolves.toBeUndefined();
+        await expect(otherDisposePromise).resolves.toBeUndefined();
+        expect(nestedOtherDisposePromise).toBe(otherDisposePromise);
+        expect(events).toEqual(["other:start", "current:start", "other:end", "current:end"]);
+    });
+
+    it("marks the container disposed and blocks public APIs during in-flight disposal", async () => {
+        const disposeStarted = vi.fn();
+        const disposeFinished = vi.fn();
+        const disposeDeferred = createDeferred();
+        const tokens = defineTokens({
+            service: defineType<{ readonly name: "service" }>(),
+        });
+        const container = createContainer(
+            tokens,
+            bind(tokens.service, () => ({ name: "service" }), {
+                dispose: async () => {
+                    disposeStarted();
+                    await disposeDeferred.promise;
+                    disposeFinished();
+                },
+            }),
+        );
+
+        container.resolve(tokens.service);
+
+        const disposePromise = container.dispose();
+
+        expect(container.disposed).toBe(true);
+        expect(disposeStarted).toHaveBeenCalledTimes(1);
+        expect(disposeFinished).not.toHaveBeenCalled();
+        expect(() => container.resolve(tokens.service)).toThrowError("Container has been disposed");
+        expect(() => container.createScope()).toThrowError("Container has been disposed");
+
+        disposeDeferred.resolve();
+
+        await expect(disposePromise).resolves.toBeUndefined();
+        expect(disposeFinished).toHaveBeenCalledTimes(1);
+    });
+
     it("creates independent ref instances for sibling scopes", () => {
         type Service = {
             readonly configRef: object;
@@ -663,6 +2088,32 @@ describe("createContainer", () => {
             bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
+        );
+
+        const service = container.resolve(tokens.service) as {
+            readonly getLogger: () => { readonly log: (message: string) => void };
+        };
+
+        expect(() => service.getLogger()).toThrowError('Service "logger" is not registered in the container');
+    });
+
+    it("throws when a disposable ref dependency target is registered but has no binding", () => {
+        const tokens = defineTokens({
+            logger: defineType<{ readonly log: (message: string) => void }>(),
+            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        });
+        const container = createRuntimeContainer(
+            tokens,
+            bind(
+                tokens.service,
+                { logger: ref(tokens.logger) },
+                ({ logger }) => ({
+                    getLogger: () => logger.value,
+                }),
+                {
+                    dispose: vi.fn(),
+                },
+            ),
         );
 
         const service = container.resolve(tokens.service) as {
@@ -890,6 +2341,30 @@ describe("createContainer", () => {
                 factory: () => 3000,
             }),
         ).toThrowError("Bindings must be created with bind");
+    });
+
+    it("throws when bind receives a non-function dispose option at runtime", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+
+        expect(() => bind(tokens.port, () => 3000, { dispose: "not a function" } as never)).toThrowError(
+            "Dispose option must be a function",
+        );
+        expect(() => bind(tokens.port, {}, () => 3000, { dispose: "not a function" } as never)).toThrowError(
+            "Dispose option must be a function",
+        );
+    });
+
+    it("throws when a registered binding has a non-function dispose value", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const binding = bind(tokens.port, () => 3000);
+
+        (binding as { dispose?: unknown }).dispose = "not a function";
+
+        expect(() => createRuntimeContainer(tokens, binding)).toThrowError("Dispose option must be a function");
     });
 
     it("throws when a service resolves itself recursively", () => {

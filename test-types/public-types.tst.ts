@@ -1,10 +1,12 @@
 import {
     type Binding,
     type BindingLifetime,
+    type BindingOptions,
     bind,
     type Container,
     createContainer,
     type DependencyMap,
+    type Disposer,
     defineTokens,
     type as defineType,
     type Ref,
@@ -40,6 +42,8 @@ test("public helper types preserve their documented type relationships", () => {
     }>();
     expect<Dependencies>().type.toBeAssignableTo<DependencyMap>();
     expect<BindingLifetime>().type.toBe<"singleton" | "scoped" | "transient">();
+    expect<Disposer<number>>().type.toBe<(value: number) => void | Promise<void>>();
+    expect<BindingOptions<number>>().type.toBe<{ readonly dispose?: Disposer<number> }>();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;
@@ -52,6 +56,8 @@ test("public helper types preserve their documented type relationships", () => {
         typeof tokens.port
     >();
     expect<ReturnType<Container<readonly [Binding<typeof tokens.port>]>["resolve"]>>().type.toBe<number>();
+    expect<ReturnType<Container["dispose"]>>().type.toBe<Promise<void>>();
+    expect<Container["disposed"]>().type.toBe<boolean>();
 });
 
 test("defineTokens and createContainer preserve empty token registries", () => {

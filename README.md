@@ -14,6 +14,7 @@ npm install @satunnaisuus/distill
 - Compile-time checks for unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
 - Lazy service creation with singleton, scoped, and transient lifetimes.
 - Child scopes for request-local overrides and per-scope service instances.
+- Async resource disposal for containers and scopes.
 - Explicit dependency maps instead of decorators, reflection, or global state.
 - Lazy `ref` dependencies for deferred access and dependency cycles.
 - No runtime dependencies; ESM-first package.
@@ -224,24 +225,79 @@ request.resolve(tokens.auditLog).userId;
 
 Scope bindings can override parent bindings. Scoped instances are cached in the scope that resolves them, so separate request scopes receive separate `auditLog` instances.
 
+### Dispose resources
+
+```ts
+import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+
+type Db = {
+    readonly close: () => Promise<void>;
+    readonly createUnitOfWork: () => UnitOfWork;
+};
+
+type UnitOfWork = {
+    readonly rollback: () => Promise<void>;
+};
+
+type Service = {
+    readonly run: () => Promise<void>;
+};
+
+const tokens = defineTokens({
+    db: defineType<Db>(),
+    unitOfWork: defineType<UnitOfWork>(),
+    service: defineType<Service>(),
+});
+
+const app = createContainer(
+    tokens,
+    bind.singleton(tokens.db, () => createDb(), {
+        dispose: (db) => db.close(),
+    }),
+    bind.scoped(tokens.service, { unitOfWork: tokens.unitOfWork }, ({ unitOfWork }) => ({
+        run: async () => {
+            // use unitOfWork
+        },
+    })),
+);
+
+const request = app.createScope(
+    bind.scoped(tokens.unitOfWork, { db: tokens.db }, ({ db }) => db.createUnitOfWork(), {
+        dispose: (unitOfWork) => unitOfWork.rollback(),
+    }),
+);
+
+try {
+    await request.resolve(tokens.service).run();
+} finally {
+    await request.dispose();
+}
+
+await app.dispose();
+```
+
+Disposing a scope closes only instances owned by that scope. The request scope closes its `unitOfWork`; the app container closes the root `db`. Parent disposal cascades to child scopes before closing parent-owned instances.
+
 ## API
 
 ```ts
 type<T>()
 defineTokens(definitions)
-bind(token, factory)
-bind(token, dependencies, factory)
-bind.singleton(token, factory)
-bind.singleton(token, dependencies, factory)
-bind.scoped(token, factory)
-bind.scoped(token, dependencies, factory)
-bind.transient(token, factory)
-bind.transient(token, dependencies, factory)
+bind(token, factory, options?)
+bind(token, dependencies, factory, options?)
+bind.singleton(token, factory, options?)
+bind.singleton(token, dependencies, factory, options?)
+bind.scoped(token, factory, options?)
+bind.scoped(token, dependencies, factory, options?)
+bind.transient(token, factory, options?)
+bind.transient(token, dependencies, factory, options?)
 ref(token)
 ref(() => token)
 createContainer(tokens, ...bindings)
 container.resolve(token)
 container.createScope(...bindings)
+container.dispose()
+container.disposed
 ```
 
 ### `type<T>()`
@@ -278,7 +334,7 @@ tokens.config === "config";
 
 Each returned token keeps its literal key and declared value type. Token keys must be string keys, and definition values must be created with `type<T>()`.
 
-### `bind(token, factory)`
+### `bind(token, factory, options?)`
 
 Creates a binding for a service without declared dependencies.
 
@@ -296,7 +352,17 @@ The factory return type must be assignable to the token value type. If the servi
 const handlerBinding = bind(tokens.handler, () => (message: string) => message.length);
 ```
 
-### `bind(token, dependencies, factory)`
+Pass `options.dispose` to close values created by the binding:
+
+```ts
+const dbBinding = bind.singleton(tokens.db, () => createDb(), {
+    dispose: (db) => db.close(),
+});
+```
+
+The disposer receives the resolved service value and may return `void` or `Promise<void>`.
+
+### `bind(token, dependencies, factory, options?)`
 
 Creates a binding for a service with an explicit dependency map.
 
@@ -336,6 +402,8 @@ const container = createContainer(
 );
 ```
 
+The optional fourth argument is the same binding options object accepted by dependency-free bindings.
+
 ### `bind.singleton`, `bind.scoped`, and `bind.transient`
 
 Creates a binding with an explicit lifetime.
@@ -355,6 +423,8 @@ Lifetimes behave as follows:
 `bind(...)` is equivalent to `bind.singleton(...)`.
 
 Singleton bindings cannot depend on scoped bindings. TypeScript reports this at the container or scope definition, including through transitive dependencies.
+
+Disposable transient values are tracked by the scope that resolved them and are closed when that scope is disposed. Transient values without a disposer are not tracked.
 
 ### `ref(token)` and `ref(() => token)`
 
@@ -462,6 +532,31 @@ const second = container.resolve(tokens.config);
 first === second; // true
 ```
 
+Calling `resolve` after the container or scope has been disposed throws an error.
+
+### `container.dispose()`
+
+Disposes the container or scope and returns a `Promise<void>`.
+
+```ts
+await request.dispose();
+await app.dispose();
+```
+
+Disposal behavior:
+
+- only instances owned by the disposed scope are closed;
+- parent disposal cascades to child scopes first;
+- owned instances are disposed after their dependents, falling back to reverse creation order for unrelated instances;
+- repeated `dispose()` calls are no-ops;
+- if disposers throw, Distill still attempts to close every owned instance and rejects with an `AggregateError`.
+
+After disposal, `resolve` and `createScope` throw.
+
+### `container.disposed`
+
+Boolean flag indicating whether the container or scope has been disposed.
+
 ### Exported Types
 
 Distill also exports helper types for advanced typing:
@@ -470,8 +565,10 @@ Distill also exports helper types for advanced typing:
 import type {
     Binding,
     BindingLifetime,
+    BindingOptions,
     Container,
     DependencyMap,
+    Disposer,
     Ref,
     RefToken,
     ResolvedDependencies,

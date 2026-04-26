@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { bind, getBindingDependencies, getBindingLifetime, isBinding } from "../src/bind";
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/brands";
@@ -55,6 +55,59 @@ describe("bind", () => {
         expect(getBindingLifetime(bind.singleton(tokens.port, () => 3000))).toBe("singleton");
         expect(getBindingLifetime(bind.scoped(tokens.port, () => 3000))).toBe("scoped");
         expect(getBindingLifetime(bind.transient(tokens.port, () => 3000))).toBe("transient");
+    });
+
+    it("stores dispose options for bindings without dependencies", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+        const dispose = vi.fn();
+
+        const binding = bind(tokens.port, () => 3000, { dispose });
+
+        expect(binding.dispose).toBe(dispose);
+    });
+
+    it("stores dispose options for bindings with dependencies", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly port: number }>(),
+            port: defineType<number>(),
+        });
+        const dispose = vi.fn();
+
+        const binding = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, { dispose });
+
+        expect(binding.dispose).toBe(dispose);
+    });
+
+    it("accepts options without dispose for bindings", () => {
+        const tokens = defineTokens({
+            config: defineType<{ readonly port: number }>(),
+            port: defineType<number>(),
+        });
+
+        const bindingWithoutDependencies = bind(tokens.port, () => 3000, {});
+        const bindingWithDependencies = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, {});
+
+        expect(bindingWithoutDependencies.dispose).toBeUndefined();
+        expect(bindingWithDependencies.dispose).toBeUndefined();
+    });
+
+    it("throws when binding options are not objects at runtime", () => {
+        const tokens = defineTokens({
+            port: defineType<number>(),
+        });
+
+        expect(() => bind(tokens.port, () => 3000, null as never)).toThrowError("Binding options must be an object");
+        expect(() => bind(tokens.port, () => 3000, "not options" as never)).toThrowError(
+            "Binding options must be an object",
+        );
+        expect(() => bind(tokens.port, {}, () => 3000, null as never)).toThrowError(
+            "Binding options must be an object",
+        );
+        expect(() => bind(tokens.port, {}, () => 3000, "not options" as never)).toThrowError(
+            "Binding options must be an object",
+        );
     });
 
     it("throws when dependencies are provided without a factory", () => {

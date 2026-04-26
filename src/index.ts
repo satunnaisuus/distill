@@ -1,4 +1,4 @@
-export type { Binding, BindingLifetime } from "./bind";
+export type { Binding, BindingLifetime, BindingOptions, Disposer } from "./bind";
 export { bind } from "./bind";
 export type { Container } from "./container";
 export { createContainer } from "./container";

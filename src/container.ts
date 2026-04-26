@@ -1,9 +1,41 @@
 import type { AnyBinding } from "./bind";
-import { type BindingLifetime, getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
+import { getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
+import {
+    addDependencyInstance,
+    addParentDependencyTracker,
+    addRefDependencyFrame,
+    createDependencyTracker,
+} from "./dependency-tracker";
+import { disposeScope } from "./disposal";
+import { assertDisposeOption } from "./dispose-option";
 import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes } from "./graph";
 import type { DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
+import {
+    type AssertTokenIsInRegistry,
+    assertScopeIsActive,
+    canUseCachedInstance,
+    createResolutionFrame,
+    createRuntimeScope,
+    findBinding,
+    findResolutionFrameIndex,
+    findTrackedInstance,
+    getCurrentResolutionContext,
+    getInstanceCache,
+    isSameResolutionFrame,
+    type RefResolver,
+    type ResolveOptions,
+    type RuntimeBinding,
+    type RuntimeDependencyTracker,
+    type RuntimeFactory,
+    type RuntimeRefInstance,
+    type RuntimeResolutionFrame,
+    type RuntimeResolutionResult,
+    type RuntimeScope,
+    trackOwnedInstance,
+    trackResolvedInstance,
+} from "./runtime";
 import type { AnyToken, AnyTokenRegistry, TokenByKey, TokenKey, TokenValue } from "./token";
 import { tokenKey } from "./token";
 import type { IfNever } from "./type-utils";
@@ -12,6 +44,8 @@ import type { MissingDependencyKeysFromToken, ValidateBindings, ValidateScopeBin
 type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
+    dispose(): Promise<void>;
+    readonly disposed: boolean;
 };
 
 type VisibleTokensInScopes<TScopes extends BindingScopes> = BindingTokens<TScopes[number]>;
@@ -74,67 +108,8 @@ export type Container<
 > = {
     resolve: ResolveFn<TScopes>;
     createScope: CreateScopeFn<TBindings, TRegistry, TScopes>;
-};
-
-type RuntimeFactory = (scope: RuntimeScope) => unknown;
-
-type RuntimeBinding = {
-    readonly factory: RuntimeFactory;
-    readonly lifetime: BindingLifetime;
-    readonly eagerDependencies?: readonly string[];
-};
-
-type AssertTokenIsInRegistry = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
-type RefResolver = <TToken extends AnyToken>(scope: RuntimeScope, currentToken: TToken) => Ref<TokenValue<TToken>>;
-
-type RuntimeContext = {
-    readonly assertTokenIsInRegistry: AssertTokenIsInRegistry;
-    readonly resolvingPath: RuntimeResolutionFrame[];
-};
-
-type RuntimeScope = {
-    readonly context: RuntimeContext;
-    readonly parent?: RuntimeScope;
-    readonly bindings: Map<string, RuntimeBinding>;
-    readonly singletonInstances: Map<string, unknown>;
-    readonly scopedInstances: Map<string, unknown>;
-    readonly refInstances: Map<string, Ref<unknown>>;
-};
-
-type ResolvedRuntimeBinding = {
-    readonly binding: RuntimeBinding;
-    readonly ownerScope: RuntimeScope;
-};
-
-type RuntimeResolutionFrame = {
-    readonly tokenKey: string;
-    readonly ownerScope: RuntimeScope;
-    readonly resolutionScope: RuntimeScope;
-};
-
-const isSameResolutionFrame = (left: RuntimeResolutionFrame, right: RuntimeResolutionFrame): boolean => {
-    return (
-        left.tokenKey === right.tokenKey &&
-        left.ownerScope === right.ownerScope &&
-        left.resolutionScope === right.resolutionScope
-    );
-};
-
-const findResolutionFrameIndex = (path: readonly RuntimeResolutionFrame[], frame: RuntimeResolutionFrame): number => {
-    return path.findIndex((currentFrame) => isSameResolutionFrame(currentFrame, frame));
-};
-
-const createResolutionFrame = (
-    resolutionScope: RuntimeScope,
-    tokenKey: string,
-    resolvedBinding: ResolvedRuntimeBinding,
-): RuntimeResolutionFrame => {
-    return {
-        tokenKey,
-        ownerScope: resolvedBinding.ownerScope,
-        resolutionScope:
-            resolvedBinding.binding.lifetime === "singleton" ? resolvedBinding.ownerScope : resolutionScope,
-    };
+    dispose(): Promise<void>;
+    readonly disposed: boolean;
 };
 
 const createTokenRegistryAssert = <TRegistry extends AnyTokenRegistry>(tokens: TRegistry): AssertTokenIsInRegistry => {
@@ -175,19 +150,6 @@ const collectVisibleTokenKeys = (scope: RuntimeScope): Set<string> => {
     }
 
     return visibleTokenKeys;
-};
-
-const findBinding = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding | undefined => {
-    const binding = scope.bindings.get(tokenKey);
-
-    if (binding) {
-        return {
-            binding,
-            ownerScope: scope,
-        };
-    }
-
-    return scope.parent ? findBinding(scope.parent, tokenKey) : undefined;
 };
 
 const assertNoCircularDependencies = (scope: RuntimeScope): void => {
@@ -253,7 +215,7 @@ const createDependencyFactory = (
     assertTokenIsInRegistry: AssertTokenIsInRegistry,
     getOrCreateRefInstance: RefResolver,
 ): RuntimeFactory => {
-    return (scope) => {
+    return (scope, dependencyTracker) => {
         const resolvedDependencies: Record<string, unknown> = {};
 
         for (const [key, dependency] of Object.entries(dependencies) as Array<[string, DependencyReference]>) {
@@ -261,10 +223,18 @@ const createDependencyFactory = (
 
             if (isRefDependency(dependency)) {
                 const dependencyToken = dependency.resolveToken();
-                assertTokenIsInRegistry(dependencyToken);
-                resolvedDependency = getOrCreateRefInstance(scope, dependencyToken);
+                const dependencyTokenKey = assertTokenIsInRegistry(dependencyToken);
+                if (dependencyTracker) {
+                    addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
+                }
+                resolvedDependency = getOrCreateRefInstance(scope, dependencyToken, dependencyTracker);
             } else {
-                resolvedDependency = resolveActual(scope, dependency);
+                const dependencyResult = resolveActualWithOwnership(
+                    scope,
+                    dependency,
+                    dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
+                );
+                resolvedDependency = dependencyResult.value;
             }
 
             Object.defineProperty(resolvedDependencies, key, {
@@ -289,42 +259,25 @@ const createRuntimeBinding = (
     const factory = dependencies
         ? createDependencyFactory(binding, dependencies, assertTokenIsInRegistry, getOrCreateRefInstance)
         : () => (binding.factory as () => unknown)();
+    const dispose = binding.dispose;
+
+    if (dispose !== undefined) {
+        assertDisposeOption(dispose);
+    }
 
     return {
         factory,
         lifetime: getBindingLifetime(binding),
         eagerDependencies,
+        ...(dispose ? { dispose } : {}),
     };
 };
 
-const createRuntimeScope = (context: RuntimeContext, parent?: RuntimeScope): RuntimeScope => {
-    return {
-        context,
-        parent,
-        bindings: new Map(),
-        singletonInstances: new Map(),
-        scopedInstances: new Map(),
-        refInstances: new Map(),
-    };
-};
-
-const getCurrentResolutionContext = (scope: RuntimeScope): string => {
-    return scope.context.resolvingPath[scope.context.resolvingPath.length - 1].tokenKey;
-};
-
-const getInstanceCache = (
-    binding: RuntimeBinding,
-    ownerScope: RuntimeScope,
-    resolutionScope: RuntimeScope,
-): Map<string, unknown> | undefined => {
-    if (binding.lifetime === "transient") {
-        return undefined;
-    }
-
-    return binding.lifetime === "singleton" ? ownerScope.singletonInstances : resolutionScope.scopedInstances;
-};
-
-const hasCachedInstance = <TToken extends AnyToken>(scope: RuntimeScope, currentToken: TToken): boolean => {
+const hasCachedInstance = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+): boolean => {
     const currentTokenKey = scope.context.assertTokenIsInRegistry(currentToken);
     const resolvedBinding = findBinding(scope, currentTokenKey);
 
@@ -332,24 +285,82 @@ const hasCachedInstance = <TToken extends AnyToken>(scope: RuntimeScope, current
         return false;
     }
 
-    return getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope)?.has(currentTokenKey) ?? false;
+    return (
+        canUseCachedInstance(scope, resolvedBinding.ownerScope, options) &&
+        (getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope)?.has(currentTokenKey) ?? false)
+    );
 };
 
-const resolveActual = <TToken extends AnyToken>(scope: RuntimeScope, currentToken: TToken): TokenValue<TToken> => {
+const shouldTrackResolutionDependencies = (
+    binding: RuntimeBinding,
+    dependentTrackers: readonly RuntimeDependencyTracker[],
+): boolean => {
+    return Boolean(binding.dispose) || binding.lifetime !== "transient" || dependentTrackers.length > 0;
+};
+
+const addResolutionDependency = (
+    dependencyTracker: RuntimeDependencyTracker,
+    dependencyResult: RuntimeResolutionResult<unknown>,
+): void => {
+    if (dependencyResult.ownedInstance) {
+        addDependencyInstance(dependencyTracker, dependencyResult.ownedInstance);
+        return;
+    }
+
+    /* v8 ignore next -- defensive invariant: tracked dependents should only receive tracked dependency results */
+    if (!dependencyResult.dependencyTracker) {
+        throw new Error("Resolution dependency is missing dependency tracking");
+    }
+
+    addParentDependencyTracker(dependencyResult.dependencyTracker, dependencyTracker);
+};
+
+const addResolutionDependencies = (
+    dependencyTrackers: readonly RuntimeDependencyTracker[],
+    dependencyResult: RuntimeResolutionResult<unknown>,
+): void => {
+    for (const dependencyTracker of dependencyTrackers) {
+        addResolutionDependency(dependencyTracker, dependencyResult);
+    }
+};
+
+const resolveActualWithOwnership = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+): RuntimeResolutionResult<TokenValue<TToken>> => {
     const currentTokenKey = scope.context.assertTokenIsInRegistry(currentToken);
     const resolvedBinding = findBinding(scope, currentTokenKey);
+    const dependentTrackers = options?.dependentTrackers ? Array.from(options.dependentTrackers) : [];
 
     if (!resolvedBinding) {
         throw new Error(`Service "${currentTokenKey}" is not registered in the container`);
     }
 
+    const currentFrame = createResolutionFrame(scope, currentTokenKey, resolvedBinding);
     const instanceCache = getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope);
 
-    if (instanceCache?.has(currentTokenKey)) {
-        return instanceCache.get(currentTokenKey) as TokenValue<TToken>;
+    if (instanceCache?.has(currentTokenKey) && canUseCachedInstance(scope, resolvedBinding.ownerScope, options)) {
+        const trackedInstance = findTrackedInstance(currentFrame.resolutionScope, currentFrame);
+
+        /* v8 ignore next -- defensive invariant: cached instances are registered with tracking metadata */
+        if (!trackedInstance) {
+            throw new Error("Cached instance is missing dependency tracking");
+        }
+
+        const dependencyResult: RuntimeResolutionResult<TokenValue<TToken>> = {
+            value: instanceCache.get(currentTokenKey) as TokenValue<TToken>,
+            ...(trackedInstance.ownedInstance ? { ownedInstance: trackedInstance.ownedInstance } : {}),
+            dependencyTracker: trackedInstance.dependencyTracker,
+        };
+
+        addResolutionDependencies(dependentTrackers, dependencyResult);
+        return dependencyResult;
     }
 
-    const currentFrame = createResolutionFrame(scope, currentTokenKey, resolvedBinding);
+    assertScopeIsActive(scope);
+    assertScopeIsActive(resolvedBinding.ownerScope);
+
     const cycleStartIndex = findResolutionFrameIndex(scope.context.resolvingPath, currentFrame);
 
     if (cycleStartIndex !== -1) {
@@ -362,23 +373,66 @@ const resolveActual = <TToken extends AnyToken>(scope: RuntimeScope, currentToke
     scope.context.resolvingPath.push(currentFrame);
 
     try {
-        const instance = resolvedBinding.binding.factory(currentFrame.resolutionScope);
+        const dependencyTracker = shouldTrackResolutionDependencies(resolvedBinding.binding, dependentTrackers)
+            ? createDependencyTracker()
+            : undefined;
+        if (dependencyTracker) {
+            currentFrame.resolutionScope.dependencyTrackers.push(dependencyTracker);
+        }
+        const instance = resolvedBinding.binding.factory(currentFrame.resolutionScope, dependencyTracker);
         instanceCache?.set(currentTokenKey, instance);
-        return instance as TokenValue<TToken>;
+        const ownedInstance = dependencyTracker
+            ? trackOwnedInstance(
+                  currentFrame.resolutionScope,
+                  resolvedBinding.binding,
+                  currentFrame,
+                  dependencyTracker,
+                  instance,
+              )
+            : undefined;
+
+        if (dependencyTracker && instanceCache) {
+            trackResolvedInstance(currentFrame.resolutionScope, currentFrame, dependencyTracker, ownedInstance);
+        }
+
+        const dependencyResult: RuntimeResolutionResult<TokenValue<TToken>> = dependencyTracker
+            ? {
+                  value: instance as TokenValue<TToken>,
+                  ...(ownedInstance ? { ownedInstance } : {}),
+                  dependencyTracker,
+              }
+            : {
+                  value: instance as TokenValue<TToken>,
+              };
+
+        addResolutionDependencies(dependentTrackers, dependencyResult);
+        return dependencyResult;
     } finally {
         scope.context.resolvingPath.pop();
     }
 };
 
+const resolveActual = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+): TokenValue<TToken> => {
+    return resolveActualWithOwnership(scope, currentToken, options).value;
+};
+
 const getOrCreateRefInstance = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
+    dependencyTracker: RuntimeDependencyTracker | undefined,
 ): Ref<TokenValue<TToken>> => {
     const currentTokenKey = scope.context.assertTokenIsInRegistry(currentToken);
     const existingInstance = scope.refInstances.get(currentTokenKey);
 
     if (existingInstance) {
-        return existingInstance as Ref<TokenValue<TToken>>;
+        if (dependencyTracker) {
+            existingInstance.dependencyTrackers.add(dependencyTracker);
+        }
+        return existingInstance.ref as Ref<TokenValue<TToken>>;
     }
 
     const refInstance: Ref<TokenValue<TToken>> = {
@@ -391,7 +445,12 @@ const getOrCreateRefInstance = <TToken extends AnyToken>(
                     createResolutionFrame(scope, currentTokenKey, resolvedBinding),
                 ) !== -1;
 
-            if (!hasCachedInstance(scope, currentToken) && isInitializing) {
+            const resolveOptions = {
+                allowCachedDuringDispose: true,
+                dependentTrackers: runtimeRefInstance.dependencyTrackers,
+            };
+
+            if (!hasCachedInstance(scope, currentToken, resolveOptions) && isInitializing) {
                 const resolutionContext = getCurrentResolutionContext(scope);
 
                 throw new Error(
@@ -399,15 +458,21 @@ const getOrCreateRefInstance = <TToken extends AnyToken>(
                 );
             }
 
-            return resolveActual(scope, currentToken);
+            return resolveActualWithOwnership(scope, currentToken, resolveOptions).value;
         },
     };
+    const runtimeRefInstance: RuntimeRefInstance = {
+        ref: refInstance,
+        dependencyTrackers: dependencyTracker ? new Set([dependencyTracker]) : new Set(),
+    };
 
-    scope.refInstances.set(currentTokenKey, refInstance);
+    scope.refInstances.set(currentTokenKey, runtimeRefInstance);
     return refInstance;
 };
 
 const registerBindings = (scope: RuntimeScope, bindings: readonly AnyBinding[]): void => {
+    assertScopeIsActive(scope);
+
     for (const binding of bindings) {
         if (!isBinding(binding)) {
             throw new Error("Bindings must be created with bind");
@@ -430,14 +495,23 @@ const registerBindings = (scope: RuntimeScope, bindings: readonly AnyBinding[]):
 
 const createContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
     return {
+        get disposed() {
+            return scope.disposed;
+        },
         resolve(currentToken) {
             return resolveActual(scope, currentToken);
         },
         createScope(...bindings) {
+            assertScopeIsActive(scope);
+
             const childScope = createRuntimeScope(scope.context, scope);
             registerBindings(childScope, bindings);
+            scope.children.add(childScope);
 
             return createContainerForScope(childScope);
+        },
+        dispose() {
+            return disposeScope(scope);
         },
     };
 };

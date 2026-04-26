@@ -1,4 +1,4 @@
-import { bind, createContainer, defineTokens, type as defineType, ref } from "@satunnaisuus/distill";
+import { bind, createContainer, type Disposer, defineTokens, type as defineType, ref } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Handler, Logger } from "./fixtures/services.js";
 import { tokens } from "./fixtures/tokens.js";
@@ -77,9 +77,19 @@ test("bind rejects dependency maps without factories", () => {
     }).type.toRaiseError();
 });
 
-test("bind rejects extra arguments for dependency-free factories", () => {
+test("bind supports dispose options for dependency-free factories", () => {
+    const binding = bind(tokens.port, () => 3000, {
+        dispose: (port) => {
+            expect(port).type.toBe<number>();
+        },
+    });
+
+    expect(binding.dispose).type.toBe<Disposer<number> | undefined>();
+});
+
+test("bind rejects invalid dispose options for dependency-free factories", () => {
     expect(() => {
-        bind(tokens.port, () => 3000, {});
+        bind(tokens.port, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
 });
 
@@ -89,9 +99,28 @@ test("bind rejects missing arguments", () => {
     }).type.toRaiseError();
 });
 
-test("bind rejects extra arguments for dependency factories", () => {
+test("bind supports dispose options for dependency factories", () => {
+    const binding = bind(tokens.port, {}, () => 3000, {
+        dispose: (port) => {
+            expect(port).type.toBe<number>();
+        },
+    });
+
+    expect(binding.dispose).type.toBe<Disposer<number> | undefined>();
+});
+
+test("bind rejects invalid dispose options for dependency factories", () => {
     expect(() => {
-        bind(tokens.port, {}, () => 3000, {});
+        bind(tokens.port, {}, () => 3000, { dispose: (_port: string) => {} });
+    }).type.toRaiseError();
+});
+
+test("bind rejects extra arguments after dispose options", () => {
+    expect(() => {
+        bind(tokens.port, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind(tokens.port, {}, () => 3000, {}, {});
     }).type.toRaiseError();
 });
 
@@ -197,15 +226,25 @@ test("lifetime bind variants reject dependency maps without factories", () => {
     }).type.toRaiseError();
 });
 
-test("lifetime bind variants reject extra arguments for dependency-free factories", () => {
+test("lifetime bind variants support dispose options for dependency-free factories", () => {
+    const singleton = bind.singleton(tokens.port, () => 3000, { dispose: () => {} });
+    const scoped = bind.scoped(tokens.port, () => 3000, { dispose: () => {} });
+    const transient = bind.transient(tokens.port, () => 3000, { dispose: () => {} });
+
+    expect(singleton.dispose).type.toBe<Disposer<number> | undefined>();
+    expect(scoped.dispose).type.toBe<Disposer<number> | undefined>();
+    expect(transient.dispose).type.toBe<Disposer<number> | undefined>();
+});
+
+test("lifetime bind variants reject invalid dispose options for dependency-free factories", () => {
     expect(() => {
-        bind.singleton(tokens.port, () => 3000, {});
+        bind.singleton(tokens.port, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
     expect(() => {
-        bind.scoped(tokens.port, () => 3000, {});
+        bind.scoped(tokens.port, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
     expect(() => {
-        bind.transient(tokens.port, () => 3000, {});
+        bind.transient(tokens.port, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
 });
 
@@ -221,15 +260,46 @@ test("lifetime bind variants reject missing arguments", () => {
     }).type.toRaiseError();
 });
 
-test("lifetime bind variants reject extra arguments for dependency factories", () => {
+test("lifetime bind variants support dispose options for dependency factories", () => {
+    const singleton = bind.singleton(tokens.port, {}, () => 3000, { dispose: () => {} });
+    const scoped = bind.scoped(tokens.port, {}, () => 3000, { dispose: () => {} });
+    const transient = bind.transient(tokens.port, {}, () => 3000, { dispose: () => {} });
+
+    expect(singleton.dispose).type.toBe<Disposer<number> | undefined>();
+    expect(scoped.dispose).type.toBe<Disposer<number> | undefined>();
+    expect(transient.dispose).type.toBe<Disposer<number> | undefined>();
+});
+
+test("lifetime bind variants reject invalid dispose options for dependency factories", () => {
     expect(() => {
-        bind.singleton(tokens.port, {}, () => 3000, {});
+        bind.singleton(tokens.port, {}, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
     expect(() => {
-        bind.scoped(tokens.port, {}, () => 3000, {});
+        bind.scoped(tokens.port, {}, () => 3000, { dispose: (_port: string) => {} });
     }).type.toRaiseError();
     expect(() => {
-        bind.transient(tokens.port, {}, () => 3000, {});
+        bind.transient(tokens.port, {}, () => 3000, { dispose: (_port: string) => {} });
+    }).type.toRaiseError();
+});
+
+test("lifetime bind variants reject extra arguments after dispose options", () => {
+    expect(() => {
+        bind.singleton(tokens.port, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.singleton(tokens.port, {}, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.scoped(tokens.port, {}, () => 3000, {}, {});
+    }).type.toRaiseError();
+    expect(() => {
+        bind.transient(tokens.port, {}, () => 3000, {}, {});
     }).type.toRaiseError();
 });
 

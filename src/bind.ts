@@ -1,9 +1,15 @@
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "./brands";
 import type { DependencyMap, ResolvedDependencies } from "./dependencies";
+import { getDisposeOption } from "./dispose-option";
 import type { AnyToken, TokenValue } from "./token";
 import type { IfNever, IsAny } from "./type-utils";
 
 export type BindingLifetime = "singleton" | "scoped" | "transient";
+export type Disposer<TValue> = (value: TValue) => void | Promise<void>;
+
+export type BindingOptions<TValue> = {
+    readonly dispose?: Disposer<TValue>;
+};
 
 type UndefinedDependencyKeys<TDependencies> = {
     [TKey in keyof TDependencies]-?: IsAny<TDependencies[TKey]> extends true
@@ -36,6 +42,7 @@ export type Binding<
     readonly [bindingLifetimeBrand]: TLifetime;
     readonly token: TToken;
     readonly factory: BindingFactory<TToken, TDependencies>;
+    readonly dispose?: Disposer<TokenValue<TToken>>;
     readonly [bindingDependenciesBrand]?: TDependencies;
 };
 
@@ -44,6 +51,7 @@ export type AnyBinding = {
     readonly [bindingLifetimeBrand]: BindingLifetime;
     readonly token: AnyToken;
     readonly factory: (...args: any[]) => unknown;
+    readonly dispose?: unknown;
     readonly [bindingDependenciesBrand]?: DependencyMap | undefined;
 };
 
@@ -66,12 +74,14 @@ type BindFunction<TLifetime extends BindingLifetime> = {
     <TToken extends AnyToken>(
         currentToken: TToken,
         factory: () => NoInfer<TokenValue<TToken>>,
+        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
     ): Binding<TToken, undefined, TLifetime>;
 
     <TToken extends AnyToken, TDependencies extends DependencyMap>(
         currentToken: TToken,
         dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
         factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
+        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
     ): Binding<TToken, TDependencies, TLifetime>;
 };
 
@@ -85,27 +95,37 @@ const createBind = <const TLifetime extends BindingLifetime>(lifetime: TLifetime
     const bindWithLifetime = <TToken extends AnyToken, TDependencies extends DependencyMap>(
         currentToken: TToken,
         dependenciesOrFactory: TDependencies | (() => NoInfer<TokenValue<TToken>>),
-        maybeFactory?: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
+        maybeFactoryOrOptions?:
+            | ((dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>)
+            | BindingOptions<NoInfer<TokenValue<TToken>>>,
+        maybeOptions?: BindingOptions<NoInfer<TokenValue<TToken>>>,
     ): Binding<TToken, TDependencies | undefined, TLifetime> => {
         if (typeof dependenciesOrFactory === "function") {
+            const options = maybeFactoryOrOptions as BindingOptions<NoInfer<TokenValue<TToken>>> | undefined;
+            const dispose = getDisposeOption(options);
+
             return {
                 [bindingBrand]: true,
                 [bindingLifetimeBrand]: lifetime,
                 token: currentToken,
                 factory: dependenciesOrFactory as BindingFactory<TToken, undefined>,
+                ...(dispose ? { dispose } : {}),
             };
         }
 
-        if (!maybeFactory) {
+        if (typeof maybeFactoryOrOptions !== "function") {
             throw new Error("Factory is required when dependencies are provided");
         }
+
+        const dispose = getDisposeOption(maybeOptions);
 
         return {
             [bindingBrand]: true,
             [bindingLifetimeBrand]: lifetime,
             token: currentToken,
             [bindingDependenciesBrand]: dependenciesOrFactory,
-            factory: maybeFactory as BindingFactory<TToken, TDependencies>,
+            factory: maybeFactoryOrOptions as BindingFactory<TToken, TDependencies>,
+            ...(dispose ? { dispose } : {}),
         };
     };
 
