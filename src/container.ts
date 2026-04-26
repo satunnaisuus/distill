@@ -2,6 +2,7 @@ import type { AnyBinding } from "./bind";
 import { type BindingLifetime, getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
 import type {
+    BindingByToken,
     BindingDependencyScopes,
     BindingDependencyTokens,
     BindingResolution,
@@ -146,15 +147,70 @@ type LastBinding<TBindings extends readonly AnyBinding[]> = TBindings extends re
     ? TLastBinding
     : never;
 
-type HasSingletonDependencyOnToken<TBinding extends AnyBinding, TToken extends AnyToken> =
-    HasBindingLifetime<TBinding, "singleton"> extends true
-        ? HasTrue<
-              BindingDependencyTokens<TBinding> extends infer TDependencyToken
-                  ? TDependencyToken extends AnyToken
-                      ? SameTokenKey<TDependencyToken, TToken>
-                      : false
+type HasTokenInPath<TPath extends AnyToken, TToken extends AnyToken> = HasTrue<
+    TPath extends AnyToken ? SameTokenKey<TPath, TToken> : false
+>;
+
+type HasDependencyTokenPathToToken<
+    TBindings extends readonly AnyBinding[],
+    TDependencyToken extends AnyToken,
+    TTargetToken extends AnyToken,
+    TPath extends AnyToken,
+> =
+    SameTokenKey<TDependencyToken, TTargetToken> extends true
+        ? true
+        : HasTokenInPath<TPath, TDependencyToken> extends true
+          ? false
+          : BindingByToken<TBindings, TDependencyToken> extends infer TDependencyBinding
+            ? [TDependencyBinding] extends [never]
+                ? false
+                : TDependencyBinding extends AnyBinding
+                  ? HasBindingDependencyPathToToken<
+                        TBindings,
+                        TDependencyBinding,
+                        TTargetToken,
+                        TPath | TDependencyToken
+                    >
                   : false
-          >
+            : false;
+
+type HasBindingDependencyPathToToken<
+    TBindings extends readonly AnyBinding[],
+    TBinding extends AnyBinding,
+    TTargetToken extends AnyToken,
+    TPath extends AnyToken = never,
+> = HasTrue<
+    TBinding extends AnyBinding
+        ? BindingDependencyTokens<TBinding> extends infer TDependencyToken
+            ? TDependencyToken extends AnyToken
+                ? HasDependencyTokenPathToToken<TBindings, TDependencyToken, TTargetToken, TPath>
+                : false
+            : false
+        : false
+>;
+
+type HasSingletonDependencyOnBinding<
+    TBindings extends readonly AnyBinding[],
+    TCurrentBinding extends AnyBinding,
+> = HasTrue<
+    TBindings[number] extends infer TBinding
+        ? TBinding extends AnyBinding
+            ? HasBindingLifetime<TBinding, "singleton"> extends true
+                ? SameTokenKey<TBinding["token"], TCurrentBinding["token"]> extends true
+                    ? true
+                    : HasBindingDependencyPathToToken<TBindings, TBinding, TCurrentBinding["token"]>
+                : false
+            : false
+        : false
+>;
+
+type IsNeededForSingletonDependencyOnToken<
+    TBindings extends readonly AnyBinding[],
+    TBinding extends AnyBinding,
+    TToken extends AnyToken,
+> =
+    HasBindingDependencyPathToToken<TBindings, TBinding, TToken> extends true
+        ? HasSingletonDependencyOnBinding<TBindings, TBinding>
         : false;
 
 type SplitBeforeSingletonDependencyOnToken<
@@ -165,7 +221,7 @@ type SplitBeforeSingletonDependencyOnToken<
     infer TCurrentBinding extends AnyBinding,
     ...infer TRemainingBindings extends readonly AnyBinding[],
 ]
-    ? HasSingletonDependencyOnToken<TCurrentBinding, TToken> extends true
+    ? IsNeededForSingletonDependencyOnToken<TBindings, TCurrentBinding, TToken> extends true
         ? readonly [TBefore, TBindings]
         : SplitBeforeSingletonDependencyOnToken<TRemainingBindings, TToken, readonly [...TBefore, TCurrentBinding]>
     : readonly [TBefore, readonly []];

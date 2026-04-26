@@ -209,6 +209,92 @@ test("public Container helper type accepts flattened child bindings before overr
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
 
+test("public Container helper type accepts transitive flattened child bindings before overrides", () => {
+    type Config = {
+        readonly name: string;
+    };
+    type Port = {
+        readonly value: number;
+    };
+    type Service = {
+        readonly port: Port;
+    };
+    type Consumer = {
+        readonly service: Service;
+    };
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        port: defineType<Port>(),
+        service: defineType<Service>(),
+        consumer: defineType<Consumer>(),
+    });
+    const rootConfigBinding = bind.scoped(scopedTokens.config, () => ({ name: "root" }));
+    const childPortBinding = bind.transient(scopedTokens.port, { config: scopedTokens.config }, () => ({
+        value: 3000,
+    }));
+    const childServiceBinding = bind.singleton(scopedTokens.service, { port: scopedTokens.port }, ({ port }) => ({
+        port,
+    }));
+    const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, rootConfigBinding).createScope(
+        childPortBinding,
+        childServiceBinding,
+        childConfigBinding,
+    );
+    const typedChild: Container<
+        readonly [
+            typeof rootConfigBinding,
+            typeof childPortBinding,
+            typeof childServiceBinding,
+            typeof childConfigBinding,
+        ],
+        typeof scopedTokens
+    > = child;
+
+    const grandchild = typedChild.createScope(
+        bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
+            service,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
+});
+
+test("public Container helper type preserves parent singleton owners before child overrides", () => {
+    type Config = {
+        readonly name: string;
+    };
+    type Service = {
+        readonly name: string;
+    };
+    type Consumer = {
+        readonly service: Service;
+    };
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        service: defineType<Service>(),
+        consumer: defineType<Consumer>(),
+    });
+    const rootConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "root" }));
+    const rootServiceBinding = bind.singleton(scopedTokens.service, { config: scopedTokens.config }, ({ config }) => ({
+        name: config.name,
+    }));
+    const childConfigBinding = bind.scoped(scopedTokens.config, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, rootConfigBinding, rootServiceBinding).createScope(childConfigBinding);
+    const typedChild: Container<
+        readonly [typeof rootConfigBinding, typeof rootServiceBinding, typeof childConfigBinding],
+        typeof scopedTokens
+    > = child;
+
+    const grandchild = typedChild.createScope(
+        bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
+            service,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
+});
+
 test("public Container helper type accepts flattened child bindings with union dependencies before overrides", () => {
     type Config = {
         readonly name: string;
