@@ -146,26 +146,29 @@ type LastBinding<TBindings extends readonly AnyBinding[]> = TBindings extends re
     ? TLastBinding
     : never;
 
-type HasSingletonDependencyOnToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = HasTrue<
-    TBindings[number] extends infer TBinding extends AnyBinding
-        ? HasBindingLifetime<TBinding, "singleton"> extends true
-            ? BindingDependencyTokens<TBinding> extends infer TDependencyToken
-                ? TDependencyToken extends AnyToken
-                    ? SameTokenKey<TDependencyToken, TToken>
-                    : false
-                : false
-            : false
-        : false
->;
-
-type ShouldSplitLastScopeForOverride<
-    TKeptScope extends readonly AnyBinding[],
-    TMovedBindings extends readonly AnyBinding[],
-    TBinding extends AnyBinding,
-> =
-    HasBindingLifetime<LastBinding<TKeptScope>, "scoped"> extends true
-        ? HasSingletonDependencyOnToken<TMovedBindings, TBinding["token"]>
+type HasSingletonDependencyOnToken<TBinding extends AnyBinding, TToken extends AnyToken> =
+    HasBindingLifetime<TBinding, "singleton"> extends true
+        ? HasTrue<
+              BindingDependencyTokens<TBinding> extends infer TDependencyToken
+                  ? TDependencyToken extends AnyToken
+                      ? SameTokenKey<TDependencyToken, TToken>
+                      : false
+                  : false
+          >
         : false;
+
+type SplitBeforeSingletonDependencyOnToken<
+    TBindings extends readonly AnyBinding[],
+    TToken extends AnyToken,
+    TBefore extends readonly AnyBinding[] = readonly [],
+> = TBindings extends readonly [
+    infer TCurrentBinding extends AnyBinding,
+    ...infer TRemainingBindings extends readonly AnyBinding[],
+]
+    ? HasSingletonDependencyOnToken<TCurrentBinding, TToken> extends true
+        ? readonly [TBefore, TBindings]
+        : SplitBeforeSingletonDependencyOnToken<TRemainingBindings, TToken, readonly [...TBefore, TCurrentBinding]>
+    : readonly [TBefore, readonly []];
 
 type AppendOverrideBinding<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
     ...infer TRemainingScopes extends BindingScopes,
@@ -173,10 +176,21 @@ type AppendOverrideBinding<TScopes extends BindingScopes, TBinding extends AnyBi
 ]
     ? SplitScopeAfterBindingToken<TCurrentScope, TBinding["token"]> extends readonly [
           infer TKeptScope extends readonly AnyBinding[],
-          infer TMovedBindings extends readonly AnyBinding[],
+          infer TBindingsAfterOverride extends readonly AnyBinding[],
       ]
-        ? ShouldSplitLastScopeForOverride<TKeptScope, TMovedBindings, TBinding> extends true
-            ? readonly [...TRemainingScopes, TKeptScope, readonly [...TMovedBindings, TBinding]]
+        ? HasBindingLifetime<LastBinding<TKeptScope>, "scoped"> extends true
+            ? SplitBeforeSingletonDependencyOnToken<TBindingsAfterOverride, TBinding["token"]> extends readonly [
+                  infer TUnmovedBindings extends readonly AnyBinding[],
+                  infer TMovedBindings extends readonly AnyBinding[],
+              ]
+                ? TMovedBindings extends readonly []
+                    ? AppendBindingToNewScope<TScopes, TBinding>
+                    : readonly [
+                          ...TRemainingScopes,
+                          readonly [...TKeptScope, ...TUnmovedBindings],
+                          readonly [...TMovedBindings, TBinding],
+                      ]
+                : never
             : AppendBindingToNewScope<TScopes, TBinding>
         : never
     : readonly [readonly [TBinding]];
@@ -210,7 +224,7 @@ type CreateScopeFn<
     TScopes extends BindingScopes,
 > = <const TScopeBindings extends readonly AnyBinding[]>(
     ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TRegistry, TScopes>
-) => Container<readonly [...TBindings, ...TScopeBindings], TRegistry>;
+) => Container<readonly [...TBindings, ...TScopeBindings], TRegistry, readonly [...TScopes, TScopeBindings]>;
 
 export type Container<
     TBindings extends readonly AnyBinding[] = [],

@@ -262,7 +262,7 @@ test("public Container helper type accepts flattened child bindings with union d
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
 
-test("public Container helper type accepts flattened child bindings without overrides", () => {
+test("public Container helper type accepts explicit child scope boundaries without overrides", () => {
     const scopedTokens = defineTokens({
         config: defineType<Config>(),
         port: defineType<number>(),
@@ -270,7 +270,11 @@ test("public Container helper type accepts flattened child bindings without over
     const configBinding = bind.scoped(scopedTokens.config, () => ({ port: 3000 }));
     const portBinding = bind.scoped(scopedTokens.port, () => 3000);
     const child = createContainer(scopedTokens, configBinding).createScope(portBinding);
-    const typedChild: Container<readonly [typeof configBinding, typeof portBinding], typeof scopedTokens> = child;
+    const typedChild: Container<
+        readonly [typeof configBinding, typeof portBinding],
+        typeof scopedTokens,
+        readonly [readonly [typeof configBinding], readonly [typeof portBinding]]
+    > = child;
 
     expect(typedChild.resolve(scopedTokens.config)).type.toBe<Config>();
     expect(typedChild.resolve(scopedTokens.port)).type.toBe<number>();

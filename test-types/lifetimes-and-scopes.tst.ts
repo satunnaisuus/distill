@@ -312,6 +312,43 @@ test("nested scopes preserve parent singleton owners after child overrides", () 
     expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
 });
 
+test("nested scopes preserve same-scope override owners after child overrides", () => {
+    type Config = {
+        readonly name: string;
+    };
+    type Service = {
+        readonly config: Config;
+    };
+    type Consumer = {
+        readonly service: Service;
+    };
+    const scopedTokens = defineTokens({
+        config: defineType<Config>(),
+        service: defineType<Service>(),
+        consumer: defineType<Consumer>(),
+    });
+    const rootConfigBinding = bind.scoped(scopedTokens.config, () => ({ name: "root" }));
+    const rootServiceBinding = bind.scoped(scopedTokens.service, { config: scopedTokens.config }, ({ config }) => ({
+        config,
+    }));
+    const childServiceBinding = bind.singleton(scopedTokens.service, { config: scopedTokens.config }, ({ config }) => ({
+        config,
+    }));
+    const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
+    const child = createContainer(scopedTokens, rootConfigBinding, rootServiceBinding).createScope(
+        childServiceBinding,
+        childConfigBinding,
+    );
+
+    const grandchild = child.createScope(
+        bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
+            service,
+        })),
+    );
+
+    expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
+});
+
 test("createScope allows circular dependencies when a ref breaks the same-scope eager path", () => {
     type ServiceA = {
         readonly getB: () => ServiceB;
