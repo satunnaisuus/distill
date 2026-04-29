@@ -67,6 +67,12 @@ export type ResolveBindingContextInScopes<
     TResolutionScopes extends BindingScopes = TScopes,
 > = TToken extends AnyToken ? ResolveTokenContextInScopes<TScopes, TToken, TResolutionScopes> : never;
 
+export type ResolveAllBindingContextsInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TResolutionScopes extends BindingScopes = TScopes,
+> = TToken extends AnyToken ? ResolveAllTokenContextsInScopes<TScopes, TToken, TResolutionScopes> : never;
+
 type ResolveTokenContextInScopes<
     TScopes extends BindingScopes,
     TToken extends AnyToken,
@@ -80,6 +86,23 @@ type ResolveTokenContextInScopes<
           ResolveTokenContextInScopes<TRemainingScopes, TToken, TResolutionScopes>,
           BindingResolutionContext<TToken, BindingByToken<TCurrentScope, TToken>, TScopes, TResolutionScopes>
       >
+    : never;
+
+type ResolveAllTokenContextsInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TResolutionScopes extends BindingScopes,
+> = TScopes extends readonly [
+    ...infer TRemainingScopes extends BindingScopes,
+    infer TCurrentScope extends readonly AnyBinding[],
+]
+    ?
+          | ResolveAllTokenContextsInScopes<TRemainingScopes, TToken, TResolutionScopes>
+          | (BindingByToken<TCurrentScope, TToken> extends infer TBinding extends AnyBinding
+                ? TBinding extends AnyBinding
+                    ? BindingResolutionContext<TToken, TBinding, TScopes, TResolutionScopes>
+                    : never
+                : never)
     : never;
 
 export type BindingContextInScopes<

@@ -6,6 +6,7 @@ import { type Token, token } from "../src/token";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
+    readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
     readonly dispose: () => Promise<void>;
     readonly disposed: boolean;
@@ -485,6 +486,25 @@ describe("createContainer", () => {
         });
         expect(childScope.resolve(tokens.serviceB).serviceA).toBe(rootServiceA);
         expect(container.resolve(tokens.serviceA)).toBe(rootServiceA);
+    });
+
+    it("ignores shadowed regular parent bindings during child scope cycle checks", () => {
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: string }>(),
+            serviceB: token("serviceB").of<{ readonly name: string }>(),
+        };
+        const container = createContainer(
+            Object.values(tokens),
+            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "root-a" })),
+            bind.scoped(tokens.serviceB, () => ({ name: "root-b" })),
+        );
+
+        const childScope = container.createScope(
+            bind.scoped(tokens.serviceA, () => ({ name: "child-a" })),
+            bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "child-b" })),
+        );
+
+        expect(childScope.resolve(tokens.serviceB)).toEqual({ name: "child-b" });
     });
 
     it("lets nested scopes inherit child overrides while keeping grandchild overrides local", () => {

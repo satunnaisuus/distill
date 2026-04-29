@@ -7,6 +7,7 @@ export type RuntimeFactory = (scope: RuntimeScope, dependencyTracker: RuntimeDep
 export type RuntimeDisposer = UnknownDisposer;
 
 export type RuntimeBinding = {
+    readonly id: number;
     readonly factory: RuntimeFactory;
     readonly lifetime: BindingLifetime;
     readonly eagerDependencies?: readonly string[];
@@ -22,6 +23,7 @@ export type RefResolver = <TToken extends AnyToken>(
 
 export type RuntimeContext = {
     readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
+    readonly isMultiTokenKey: (tokenKey: string) => boolean;
     readonly resolvingPath: RuntimeResolutionFrame[];
 };
 
@@ -30,7 +32,7 @@ export type RuntimeScope = {
     readonly context: RuntimeContext;
     readonly parent?: RuntimeScope;
     readonly children: Set<RuntimeScope>;
-    readonly bindings: Map<string, RuntimeBinding>;
+    readonly bindings: Map<string, RuntimeBinding[]>;
     readonly singletonInstances: Map<string, unknown>;
     readonly scopedInstances: Map<string, unknown>;
     readonly refInstances: Map<string, RuntimeRefInstance>;
@@ -99,14 +101,20 @@ export type RuntimeResolutionResult<TValue> =
 
 export type RuntimeResolutionFrame = {
     readonly tokenKey: string;
+    readonly bindingId: number;
     readonly ownerScope: RuntimeScope;
     readonly resolutionScope: RuntimeScope;
 };
 
 let nextRuntimeScopeId = 1;
+let nextRuntimeBindingId = 1;
+
+export const createRuntimeBindingId = (): number => {
+    return nextRuntimeBindingId++;
+};
 
 export const getResolutionFrameKey = (frame: RuntimeResolutionFrame): string => {
-    return `${frame.tokenKey}\u0000${frame.ownerScope.id}\u0000${frame.resolutionScope.id}`;
+    return `${frame.tokenKey}\u0000${frame.bindingId}\u0000${frame.ownerScope.id}\u0000${frame.resolutionScope.id}`;
 };
 
 export const isSameResolutionFrame = (left: RuntimeResolutionFrame, right: RuntimeResolutionFrame): boolean => {
@@ -129,23 +137,41 @@ export const createResolutionFrame = (
 ): RuntimeResolutionFrame => {
     return {
         tokenKey,
+        bindingId: resolvedBinding.binding.id,
         ownerScope: resolvedBinding.ownerScope,
         resolutionScope:
             resolvedBinding.binding.lifetime === "singleton" ? resolvedBinding.ownerScope : resolutionScope,
     };
 };
 
-export const findBinding = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding | undefined => {
-    const binding = scope.bindings.get(tokenKey);
+export const getRuntimeBindingCacheKey = (binding: RuntimeBinding): string => {
+    return String(binding.id);
+};
 
-    if (binding) {
+export const findBinding = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding | undefined => {
+    const bindings = scope.bindings.get(tokenKey);
+
+    if (bindings && bindings.length > 0) {
         return {
-            binding,
+            binding: bindings[bindings.length - 1],
             ownerScope: scope,
         };
     }
 
     return scope.parent ? findBinding(scope.parent, tokenKey) : undefined;
+};
+
+export const findBindings = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding[] => {
+    const parentBindings = scope.parent ? findBindings(scope.parent, tokenKey) : [];
+    const bindings = scope.bindings.get(tokenKey) ?? [];
+
+    return [
+        ...parentBindings,
+        ...bindings.map((binding) => ({
+            binding,
+            ownerScope: scope,
+        })),
+    ];
 };
 
 export const createRuntimeScope = (context: RuntimeContext, parent?: RuntimeScope): RuntimeScope => {

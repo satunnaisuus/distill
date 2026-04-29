@@ -17,12 +17,15 @@ import {
     assertScopeIsActive,
     canUseCachedInstance,
     createResolutionFrame,
+    createRuntimeBindingId,
     createRuntimeScope,
     findBinding,
+    findBindings,
     findResolutionFrameIndex,
     findTrackedInstance,
     getCurrentResolutionContext,
     getInstanceCache,
+    getRuntimeBindingCacheKey,
     isSameResolutionFrame,
     type RefResolver,
     type ResolveOptions,
@@ -36,10 +39,20 @@ import {
     trackOwnedInstance,
     trackResolvedInstance,
 } from "./runtime";
-import type { AnyToken, AnyTokenArray, TokenByKey, TokenKey, TokenValue } from "./token";
-import { tokenKey } from "./token";
+import type {
+    AnyMultiToken,
+    AnySingleToken,
+    AnyToken,
+    AnyTokenArray,
+    IsMultiToken,
+    TokenByKey,
+    TokenKey,
+    TokenValue,
+} from "./token";
+import { isRuntimeMultiToken, tokenKey } from "./token";
 import type { IfNever } from "./type-utils";
 import type {
+    MissingDependencyKeysFromAllTokenBindings,
     MissingDependencyKeysFromToken,
     ValidateBindings,
     ValidateScopeBindings,
@@ -48,12 +61,15 @@ import type {
 
 type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
+    resolveAll<TToken extends AnyToken>(token: TToken): Array<TokenValue<TToken>>;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
 
-type VisibleTokensInScopes<TScopes extends BindingScopes> = BindingTokens<TScopes[number]>;
+type VisibleTokensInScopes<TScopes extends BindingScopes> = Extract<BindingTokens<TScopes[number]>, AnySingleToken>;
+
+type MultiTokensInTokenList<TTokenArray extends AnyTokenArray> = Extract<TTokenArray[number], AnyMultiToken>;
 
 type ResolvableTokenInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TToken extends AnyToken
     ? IfNever<MissingDependencyKeysFromToken<TScopes, TToken>, TToken, never>
@@ -73,6 +89,28 @@ type ResolveFn<
     <TToken extends TResolvableTokens>(token: TToken) => TokenValue<TokenByKey<TToken, TResolvableTokens>>
 >;
 
+type ResolvableMultiTokenInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyMultiToken,
+> = TToken extends AnyMultiToken
+    ? IfNever<MissingDependencyKeysFromAllTokenBindings<TScopes, TToken>, TToken, never>
+    : never;
+
+type ResolvableMultiTokensInScopes<
+    TScopes extends BindingScopes,
+    TTokenArray extends AnyTokenArray,
+> = ResolvableMultiTokenInScopes<TScopes, MultiTokensInTokenList<TTokenArray>>;
+
+type ResolveAllFn<
+    TScopes extends BindingScopes,
+    TTokenArray extends AnyTokenArray,
+    TResolvableTokens extends AnyMultiToken = ResolvableMultiTokensInScopes<TScopes, TTokenArray>,
+> = IfNever<
+    TResolvableTokens,
+    (token: never) => never[],
+    <TToken extends TResolvableTokens>(token: TToken) => Array<TokenValue<TokenByKey<TToken, TResolvableTokens>>>
+>;
+
 type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
     ...infer TRemainingScopes extends BindingScopes,
     infer TCurrentScope extends readonly AnyBinding[],
@@ -81,7 +119,7 @@ type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends An
     : readonly [readonly [TBinding]];
 
 type AppendInferredBindingScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = IfNever<
-    ResolveBindingContextInScopes<TScopes, TBinding["token"]>,
+    IsMultiToken<TBinding["token"]> extends true ? never : ResolveBindingContextInScopes<TScopes, TBinding["token"]>,
     AppendBindingToLastScope<TScopes, TBinding>,
     readonly [...TScopes, readonly [TBinding]]
 >;
@@ -106,21 +144,32 @@ type CreateScopeFn<
     ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>
 ) => Container<readonly [...TBindings, ...TScopeBindings], TTokenArray, readonly [...TScopes, TScopeBindings]>;
 
+type BindingTokenArray<TBindings extends readonly AnyBinding[]> = readonly BindingTokens<TBindings>[];
+
 export type Container<
     TBindings extends readonly AnyBinding[] = [],
-    TTokenArray extends AnyTokenArray = AnyTokenArray,
+    TTokenArray extends AnyTokenArray = BindingTokenArray<TBindings>,
     TScopes extends BindingScopes = InferBindingScopes<TBindings>,
 > = {
     resolve: ResolveFn<TScopes>;
+    resolveAll: ResolveAllFn<TScopes, TTokenArray>;
     createScope: CreateScopeFn<TBindings, TTokenArray, TScopes>;
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
 
-const createTokenListAssert = <TTokenArray extends AnyTokenArray>(tokens: TTokenArray): AssertTokenIsInTokenList => {
+type TokenListContext = {
+    readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
+    readonly isMultiTokenKey: (tokenKey: string) => boolean;
+};
+
+const createTokenListContext = <TTokenArray extends AnyTokenArray>(tokens: TTokenArray): TokenListContext => {
     const tokenListKeys = new Set<string>();
+    const tokenListRuntimeTokens = new Set<string>();
+    const multiTokenKeys = new Set<string>();
 
     for (const currentToken of tokens) {
+        const currentRuntimeToken = currentToken as string;
         const currentTokenKey = tokenKey(currentToken);
 
         if (tokenListKeys.has(currentTokenKey)) {
@@ -128,17 +177,40 @@ const createTokenListAssert = <TTokenArray extends AnyTokenArray>(tokens: TToken
         }
 
         tokenListKeys.add(currentTokenKey);
+        tokenListRuntimeTokens.add(currentRuntimeToken);
+
+        if (isRuntimeMultiToken(currentRuntimeToken)) {
+            multiTokenKeys.add(currentTokenKey);
+        }
     }
 
-    return <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
-        const currentTokenKey = tokenKey(currentToken);
+    return {
+        assertTokenIsInTokenList: <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
+            const currentRuntimeToken = currentToken as string;
+            const currentTokenKey = tokenKey(currentToken);
 
-        if (!tokenListKeys.has(currentTokenKey)) {
-            throw new Error(`Token "${currentTokenKey}" is not included in the token list`);
-        }
+            if (!tokenListRuntimeTokens.has(currentRuntimeToken)) {
+                throw new Error(`Token "${currentTokenKey}" is not included in the token list`);
+            }
 
-        return currentTokenKey;
+            return currentTokenKey;
+        },
+        isMultiTokenKey: (currentTokenKey: string): boolean => {
+            return multiTokenKeys.has(currentTokenKey);
+        },
     };
+};
+
+const assertSingleTokenKey = (scope: RuntimeScope, tokenKey: string): void => {
+    if (scope.context.isMultiTokenKey(tokenKey)) {
+        throw new Error(`Multibind token "${tokenKey}" must be resolved with resolveAll`);
+    }
+};
+
+const assertMultiTokenKey = (scope: RuntimeScope, tokenKey: string): void => {
+    if (!scope.context.isMultiTokenKey(tokenKey)) {
+        throw new Error(`Token "${tokenKey}" is not a multibind token`);
+    }
 };
 
 const formatCircularDependencyPath = (path: readonly string[]): string => {
@@ -171,13 +243,11 @@ const assertNoCircularDependencies = (scope: RuntimeScope): void => {
     const visited: RuntimeResolutionFrame[] = [];
     const path: RuntimeResolutionFrame[] = [];
 
-    const visit = (resolutionScope: RuntimeScope, currentTokenKey: string): void => {
-        const resolvedBinding = findBinding(resolutionScope, currentTokenKey);
-
-        if (!resolvedBinding) {
-            return;
-        }
-
+    const visitBinding = (
+        resolutionScope: RuntimeScope,
+        currentTokenKey: string,
+        resolvedBinding: { readonly binding: RuntimeBinding; readonly ownerScope: RuntimeScope },
+    ): void => {
         const currentFrame = createResolutionFrame(resolutionScope, currentTokenKey, resolvedBinding);
 
         if (visited.some((visitedFrame) => isSameResolutionFrame(visitedFrame, currentFrame))) {
@@ -200,6 +270,22 @@ const assertNoCircularDependencies = (scope: RuntimeScope): void => {
         }
     };
 
+    const visit = (resolutionScope: RuntimeScope, currentTokenKey: string): void => {
+        if (!resolutionScope.context.isMultiTokenKey(currentTokenKey)) {
+            const resolvedBinding = findBinding(resolutionScope, currentTokenKey);
+
+            if (resolvedBinding) {
+                visitBinding(resolutionScope, currentTokenKey, resolvedBinding);
+            }
+
+            return;
+        }
+
+        for (const resolvedBinding of findBindings(resolutionScope, currentTokenKey)) {
+            visitBinding(resolutionScope, currentTokenKey, resolvedBinding);
+        }
+    };
+
     for (const currentTokenKey of collectVisibleTokenKeys(scope)) {
         visit(scope, currentTokenKey);
     }
@@ -207,7 +293,7 @@ const assertNoCircularDependencies = (scope: RuntimeScope): void => {
 
 const getEagerDependencyKeys = (
     dependencies: DependencyMap | undefined,
-    assertTokenIsInTokenList: AssertTokenIsInTokenList,
+    tokenListContext: TokenListContext,
 ): readonly string[] | undefined => {
     if (!dependencies) {
         return undefined;
@@ -217,7 +303,13 @@ const getEagerDependencyKeys = (
 
     for (const dependency of Object.values(dependencies)) {
         if (!isRefDependency(dependency)) {
-            eagerDependencyKeys.push(assertTokenIsInTokenList(dependency));
+            const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependency);
+
+            if (tokenListContext.isMultiTokenKey(dependencyTokenKey)) {
+                throw new Error(`Multibind token "${dependencyTokenKey}" must be resolved with resolveAll`);
+            }
+
+            eagerDependencyKeys.push(dependencyTokenKey);
         }
     }
 
@@ -227,7 +319,7 @@ const getEagerDependencyKeys = (
 const createDependencyFactory = (
     binding: AnyBinding,
     dependencies: DependencyMap,
-    assertTokenIsInTokenList: AssertTokenIsInTokenList,
+    tokenListContext: TokenListContext,
     getOrCreateRefInstance: RefResolver,
 ): RuntimeFactory => {
     return (scope, dependencyTracker) => {
@@ -238,7 +330,8 @@ const createDependencyFactory = (
 
             if (isRefDependency(dependency)) {
                 const dependencyToken = dependency.resolveToken();
-                const dependencyTokenKey = assertTokenIsInTokenList(dependencyToken);
+                const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+                assertSingleTokenKey(scope, dependencyTokenKey);
                 if (dependencyTracker) {
                     addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
                 }
@@ -266,13 +359,13 @@ const createDependencyFactory = (
 
 const createRuntimeBinding = (
     binding: AnyBinding,
-    assertTokenIsInTokenList: AssertTokenIsInTokenList,
+    tokenListContext: TokenListContext,
     getOrCreateRefInstance: RefResolver,
 ): RuntimeBinding => {
     const dependencies = getBindingDependencies(binding);
-    const eagerDependencies = getEagerDependencyKeys(dependencies, assertTokenIsInTokenList);
+    const eagerDependencies = getEagerDependencyKeys(dependencies, tokenListContext);
     const factory = dependencies
-        ? createDependencyFactory(binding, dependencies, assertTokenIsInTokenList, getOrCreateRefInstance)
+        ? createDependencyFactory(binding, dependencies, tokenListContext, getOrCreateRefInstance)
         : () => (binding.factory as () => unknown)();
     const dispose = binding.dispose;
 
@@ -281,6 +374,7 @@ const createRuntimeBinding = (
     }
 
     return {
+        id: createRuntimeBindingId(),
         factory,
         lifetime: getBindingLifetime(binding),
         eagerDependencies,
@@ -294,15 +388,18 @@ const hasCachedInstance = <TToken extends AnyToken>(
     options?: ResolveOptions,
 ): boolean => {
     const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    assertSingleTokenKey(scope, currentTokenKey);
     const resolvedBinding = findBinding(scope, currentTokenKey);
 
     if (!resolvedBinding) {
         return false;
     }
 
+    const instanceCacheKey = getRuntimeBindingCacheKey(resolvedBinding.binding);
+
     return (
         canUseCachedInstance(scope, resolvedBinding.ownerScope, options) &&
-        (getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope)?.has(currentTokenKey) ?? false)
+        (getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope)?.has(instanceCacheKey) ?? false)
     );
 };
 
@@ -339,23 +436,18 @@ const addResolutionDependencies = (
     }
 };
 
-const resolveActualWithOwnership = <TToken extends AnyToken>(
+const resolveBindingWithOwnership = <TToken extends AnyToken>(
     scope: RuntimeScope,
-    currentToken: TToken,
+    currentTokenKey: string,
+    resolvedBinding: { readonly binding: RuntimeBinding; readonly ownerScope: RuntimeScope },
     options?: ResolveOptions,
 ): RuntimeResolutionResult<TokenValue<TToken>> => {
-    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
-    const resolvedBinding = findBinding(scope, currentTokenKey);
     const dependentTrackers = options?.dependentTrackers ? Array.from(options.dependentTrackers) : [];
-
-    if (!resolvedBinding) {
-        throw new Error(`Service "${currentTokenKey}" is not registered in the container`);
-    }
-
     const currentFrame = createResolutionFrame(scope, currentTokenKey, resolvedBinding);
     const instanceCache = getInstanceCache(resolvedBinding.binding, resolvedBinding.ownerScope, scope);
+    const instanceCacheKey = getRuntimeBindingCacheKey(resolvedBinding.binding);
 
-    if (instanceCache?.has(currentTokenKey) && canUseCachedInstance(scope, resolvedBinding.ownerScope, options)) {
+    if (instanceCache?.has(instanceCacheKey) && canUseCachedInstance(scope, resolvedBinding.ownerScope, options)) {
         const trackedInstance = findTrackedInstance(currentFrame.resolutionScope, currentFrame);
 
         /* v8 ignore next -- defensive invariant: cached instances are registered with tracking metadata */
@@ -364,7 +456,7 @@ const resolveActualWithOwnership = <TToken extends AnyToken>(
         }
 
         const dependencyResult: RuntimeResolutionResult<TokenValue<TToken>> = {
-            value: instanceCache.get(currentTokenKey) as TokenValue<TToken>,
+            value: instanceCache.get(instanceCacheKey) as TokenValue<TToken>,
             ...(trackedInstance.ownedInstance ? { ownedInstance: trackedInstance.ownedInstance } : {}),
             dependencyTracker: trackedInstance.dependencyTracker,
         };
@@ -395,7 +487,7 @@ const resolveActualWithOwnership = <TToken extends AnyToken>(
             currentFrame.resolutionScope.dependencyTrackers.push(dependencyTracker);
         }
         const instance = resolvedBinding.binding.factory(currentFrame.resolutionScope, dependencyTracker);
-        instanceCache?.set(currentTokenKey, instance);
+        instanceCache?.set(instanceCacheKey, instance);
         const ownedInstance = dependencyTracker
             ? trackOwnedInstance(
                   currentFrame.resolutionScope,
@@ -427,6 +519,35 @@ const resolveActualWithOwnership = <TToken extends AnyToken>(
     }
 };
 
+const resolveActualWithOwnership = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+): RuntimeResolutionResult<TokenValue<TToken>> => {
+    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    assertSingleTokenKey(scope, currentTokenKey);
+    const resolvedBinding = findBinding(scope, currentTokenKey);
+
+    if (!resolvedBinding) {
+        throw new Error(`Service "${currentTokenKey}" is not registered in the container`);
+    }
+
+    return resolveBindingWithOwnership(scope, currentTokenKey, resolvedBinding, options);
+};
+
+const resolveAllActual = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+): Array<TokenValue<TToken>> => {
+    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    assertMultiTokenKey(scope, currentTokenKey);
+    assertScopeIsActive(scope);
+
+    return findBindings(scope, currentTokenKey).map((resolvedBinding) => {
+        return resolveBindingWithOwnership<TToken>(scope, currentTokenKey, resolvedBinding).value;
+    });
+};
+
 const resolveActual = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
@@ -441,6 +562,7 @@ const getOrCreateRefInstance = <TToken extends AnyToken>(
     dependencyTracker: RuntimeDependencyTracker | undefined,
 ): Ref<TokenValue<TToken>> => {
     const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    assertSingleTokenKey(scope, currentTokenKey);
     const existingInstance = scope.refInstances.get(currentTokenKey);
 
     if (existingInstance) {
@@ -494,15 +616,19 @@ const registerBindings = (scope: RuntimeScope, bindings: readonly AnyBinding[]):
         }
 
         const bindingTokenKey = scope.context.assertTokenIsInTokenList(binding.token);
+        const existingBindings = scope.bindings.get(bindingTokenKey);
 
-        if (scope.bindings.has(bindingTokenKey)) {
+        if (!scope.context.isMultiTokenKey(bindingTokenKey) && existingBindings) {
             throw new Error(`Service "${bindingTokenKey}" is already registered in the container`);
         }
 
-        scope.bindings.set(
-            bindingTokenKey,
-            createRuntimeBinding(binding, scope.context.assertTokenIsInTokenList, getOrCreateRefInstance),
-        );
+        const runtimeBinding = createRuntimeBinding(binding, scope.context, getOrCreateRefInstance);
+
+        if (existingBindings) {
+            existingBindings.push(runtimeBinding);
+        } else {
+            scope.bindings.set(bindingTokenKey, [runtimeBinding]);
+        }
     }
 
     assertNoCircularDependencies(scope);
@@ -515,6 +641,9 @@ const createContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
         },
         resolve(currentToken) {
             return resolveActual(scope, currentToken);
+        },
+        resolveAll(currentToken) {
+            return resolveAllActual(scope, currentToken);
         },
         createScope(...bindings) {
             assertScopeIsActive(scope);
@@ -535,9 +664,10 @@ export const createContainer = <const TTokenArray extends AnyTokenArray, const T
     tokens: TTokenArray & ValidateTokenList<TTokenArray>,
     ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
 ): Container<TBindings, TTokenArray, readonly [TBindings]> => {
-    const assertTokenIsInTokenList = createTokenListAssert(tokens);
+    const tokenListContext = createTokenListContext(tokens);
     const rootScope = createRuntimeScope({
-        assertTokenIsInTokenList,
+        assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
+        isMultiTokenKey: tokenListContext.isMultiTokenKey,
         resolvingPath: [],
     });
 

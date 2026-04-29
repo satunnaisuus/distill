@@ -14,6 +14,7 @@ npm install @satunnaisuus/distill
 - Compile-time checks for unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
 - Lazy service creation with singleton, scoped, and transient lifetimes.
 - Child scopes for request-local overrides and per-scope service instances.
+- Multibind tokens for collecting multiple services with `resolveAll`.
 - Async resource disposal for containers and scopes.
 - Explicit dependency maps instead of decorators, reflection, or global state.
 - Lazy `ref` dependencies for deferred access and dependency cycles.
@@ -40,6 +41,29 @@ const container = createContainer(
 const config = container.resolve(Config);
 //    ^? Config
 ```
+
+### Collect multiple bindings
+
+```ts
+import { bind, createContainer, multiToken } from "@satunnaisuus/distill";
+
+type Handler = {
+    readonly handle: (message: string) => void;
+};
+
+const Handlers = multiToken("Handlers").of<Handler>();
+
+const container = createContainer(
+    [Handlers],
+    bind(Handlers, () => ({ handle: (message) => console.log("audit", message) })),
+    bind(Handlers, () => ({ handle: (message) => console.log("metrics", message) })),
+);
+
+const handlers = container.resolveAll(Handlers);
+//    ^? Handler[]
+```
+
+Use `multiToken` for tokens that can have several bindings. Multibind tokens are resolved with `resolveAll`; regular `resolve` stays for single-service tokens.
 
 ### Wire dependencies explicitly
 

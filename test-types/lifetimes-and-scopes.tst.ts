@@ -172,6 +172,31 @@ test("createScope allows scope bindings to override parent bindings", () => {
     expect(scope.resolve(tokens.config)).type.toBe<Config>();
 });
 
+test("createScope ignores shadowed regular parent bindings during cycle validation", () => {
+    type ServiceA = {
+        readonly name: string;
+    };
+    type ServiceB = {
+        readonly name: string;
+    };
+    const scopedTokens = {
+        serviceA: token("serviceA").of<ServiceA>(),
+        serviceB: token("serviceB").of<ServiceB>(),
+    };
+    const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
+    const app = createContainer(
+        scopedTokenList,
+        bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, () => ({ name: "root-a" })),
+        bind.scoped(scopedTokens.serviceB, () => ({ name: "root-b" })),
+    );
+    const scope = app.createScope(
+        bind.scoped(scopedTokens.serviceA, () => ({ name: "child-a" })),
+        bind.scoped(scopedTokens.serviceB, { serviceA: scopedTokens.serviceA }, () => ({ name: "child-b" })),
+    );
+
+    expect(scope.resolve(scopedTokens.serviceB)).type.toBe<ServiceB>();
+});
+
 test("scope-only bindings do not change the parent resolve surface", () => {
     const app = createContainer(
         tokenList,

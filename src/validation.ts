@@ -9,10 +9,11 @@ import type {
     HasBindingToken,
     HasResolutionNode,
     ResolutionNode,
+    ResolveAllBindingContextsInScopes,
     ResolveBindingContextInScopes,
     SameTokenKey,
 } from "./graph";
-import type { AnyToken, AnyTokenArray, TokenArrayTokens, TokenKey, TokensNotIn } from "./token";
+import type { AnyToken, AnyTokenArray, IsMultiToken, TokenArrayTokens, TokenKey, TokensNotIn } from "./token";
 import type { HasTrue, IfNever, IsUnion } from "./type-utils";
 
 type HasCircularDependencyFromTokens<
@@ -135,6 +136,17 @@ export type MissingDependencyKeysFromToken<
     TPath extends ResolutionNode = never,
 > = MissingDependencyKeysFromTokens<TScopes, TToken, TPath>;
 
+export type MissingDependencyKeysFromAllTokenBindings<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TPath extends ResolutionNode = never,
+> =
+    ResolveAllBindingContextsInScopes<TScopes, TToken> extends infer TResolution
+        ? TResolution extends BindingResolutionContext
+            ? MissingDependencyKeysFromResolvedBinding<TResolution, TPath>
+            : never
+        : never;
+
 type MissingDependencyKeysFromBinding<
     TScopes extends BindingScopes,
     TBinding extends AnyBinding,
@@ -184,7 +196,7 @@ type MissingDependenciesError<
 >;
 
 type DuplicateBindingError<TBinding extends AnyBinding, TBindings extends readonly AnyBinding[]> = ValidationErrorIf<
-    HasDuplicateBindingToken<TBindings, TBinding["token"]>,
+    IsMultiToken<TBinding["token"]> extends true ? false : HasDuplicateBindingToken<TBindings, TBinding["token"]>,
     {
         readonly __duplicate_binding__: TokenKey<TBinding["token"]>;
     }
