@@ -26,7 +26,7 @@ npm install @satunnaisuus/distill
 ### Define tokens and resolve a service
 
 ```ts
-import { bind, createContainer, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly port: number;
@@ -34,10 +34,10 @@ type Config = {
 
 const Config = token("Config").of<Config>();
 
-const container = createContainer(
+const container = defineContainer(
     [Config],
     bind(Config, () => ({ port: 3000 })),
-);
+).create();
 
 const config = container.resolve(Config);
 //    ^? Config
@@ -46,7 +46,7 @@ const config = container.resolve(Config);
 ### Collect multiple bindings
 
 ```ts
-import { bind, createContainer, multiToken } from "@satunnaisuus/distill";
+import { bind, defineContainer, multiToken } from "@satunnaisuus/distill";
 
 type Handler = {
     readonly handle: (message: string) => void;
@@ -54,11 +54,11 @@ type Handler = {
 
 const Handlers = multiToken("Handlers").of<Handler>();
 
-const container = createContainer(
+const container = defineContainer(
     [Handlers],
     bind(Handlers, () => ({ handle: (message) => console.log("audit", message) })),
     bind(Handlers, () => ({ handle: (message) => console.log("metrics", message) })),
-);
+).create();
 
 const handlers = container.resolveAll(Handlers);
 //    ^? Handler[]
@@ -69,7 +69,7 @@ Use `multiToken` for tokens that can have several bindings. Multibind tokens are
 ### Wire dependencies explicitly
 
 ```ts
-import { bind, createContainer, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly port: number;
@@ -87,14 +87,14 @@ const Config = token("Config").of<Config>();
 const Logger = token("Logger").of<Logger>();
 const Server = token("Server").of<Server>();
 
-const container = createContainer(
+const container = defineContainer(
     [Config, Logger, Server],
     bind(Config, () => ({ port: 3000 })),
     bind(Logger, () => console),
     bind(Server, { config: Config, logger: Logger }, ({ config, logger }) => ({
         start: () => logger.log(`Listening on ${config.port}`),
     })),
-);
+).create();
 
 container.resolve(Server).start();
 ```
@@ -104,7 +104,7 @@ The `server` factory receives `{ config, logger }` with the correct inferred typ
 ### Mark a dependency as optional
 
 ```ts
-import { bind, createContainer, optional, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, optional, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly port: number;
@@ -117,12 +117,12 @@ type Server = {
 const Config = token("Config").of<Config>();
 const Server = token("Server").of<Server>();
 
-const container = createContainer(
+const container = defineContainer(
     [Config, Server],
     bind(Server, { config: optional(Config) }, ({ config }) => ({
         port: config?.port ?? 3000,
     })),
-);
+).create();
 
 container.resolve(Server);
 ```
@@ -132,7 +132,7 @@ The `config` factory parameter is inferred as `Config | undefined`. Optional dep
 ### Defer work with `ref`
 
 ```ts
-import { bind, createContainer, ref, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, ref, token } from "@satunnaisuus/distill";
 
 type Logger = {
     readonly log: (message: string) => void;
@@ -145,7 +145,7 @@ type JobRunner = {
 const Logger = token("Logger").of<Logger>();
 const JobRunner = token("JobRunner").of<JobRunner>();
 
-const container = createContainer(
+const container = defineContainer(
     [Logger, JobRunner],
     bind(JobRunner, { logger: ref(Logger) }, ({ logger }) => ({
         run: () => {
@@ -153,7 +153,7 @@ const container = createContainer(
         },
     })),
     bind(Logger, () => console),
-);
+).create();
 
 const runner = container.resolve(JobRunner);
 // The logger has not been created yet.
@@ -165,7 +165,7 @@ runner.run();
 ### Break dependency cycles with `ref`
 
 ```ts
-import { bind, createContainer, ref, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, ref, token } from "@satunnaisuus/distill";
 
 type Users = {
     readonly getAudit: () => Audit;
@@ -178,7 +178,7 @@ type Audit = {
 const Users = token("Users").of<Users>();
 const Audit = token("Audit").of<Audit>();
 
-const container = createContainer(
+const container = defineContainer(
     [Users, Audit],
     bind(Users, { audit: ref(Audit) }, ({ audit }) => ({
         getAudit: () => audit.value,
@@ -186,7 +186,7 @@ const container = createContainer(
     bind(Audit, { users: ref(Users) }, ({ users }) => ({
         getUsers: () => users.value,
     })),
-);
+).create();
 
 const users = container.resolve(Users);
 const audit = users.getAudit();
@@ -199,7 +199,7 @@ Use `ref` when access can be delayed until after initialization. Eager circular 
 ### Swap bindings for tests or environments
 
 ```ts
-import { bind, createContainer, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, override, overrideAll, token, multiToken } from "@satunnaisuus/distill";
 
 type Clock = {
     readonly now: () => Date;
@@ -211,32 +211,35 @@ type ReportService = {
 
 const Clock = token("Clock").of<Clock>();
 const Reports = token("Reports").of<ReportService>();
+const ReportHooks = multiToken("ReportHooks").of<() => void>();
 
-const createReportsBinding = () =>
+const app = defineContainer(
+    [Clock, Reports, ReportHooks],
+    bind(Clock, () => ({ now: () => new Date() })),
     bind(Reports, { clock: Clock }, ({ clock }) => ({
         createdAt: () => clock.now(),
-    }));
-
-const production = createContainer(
-    [Clock, Reports],
-    bind(Clock, () => ({ now: () => new Date() })),
-    createReportsBinding(),
+    })),
+    bind(ReportHooks, () => () => console.log("audit")),
+    bind(ReportHooks, () => () => console.log("metrics")),
 );
 
-const test = createContainer(
-    [Clock, Reports],
-    bind(Clock, () => ({ now: () => new Date("2026-01-01T00:00:00.000Z") })),
-    createReportsBinding(),
+const production = app.create();
+
+const test = app.create(
+    override(bind(Clock, () => ({ now: () => new Date("2026-01-01T00:00:00.000Z") }))),
+    overrideAll(ReportHooks, []),
 );
 
 production.resolve(Reports).createdAt();
 test.resolve(Reports).createdAt();
 ```
 
+`override(...)` replaces one regular token binding before the runtime container is created, so singleton graphs use the replacement. `overrideAll(...)` replaces every contribution for a multibind token; pass an empty tuple or array literal to remove all contributions for that container.
+
 ### Create request scopes
 
 ```ts
-import { bind, createContainer, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, token } from "@satunnaisuus/distill";
 
 type CurrentUser = {
     readonly id: string;
@@ -249,12 +252,12 @@ type AuditLog = {
 const CurrentUser = token("CurrentUser").of<CurrentUser>();
 const AuditLog = token("AuditLog").of<AuditLog>();
 
-const app = createContainer(
+const app = defineContainer(
     [CurrentUser, AuditLog],
     bind.scoped(AuditLog, { currentUser: CurrentUser }, ({ currentUser }) => ({
         userId: currentUser.id,
     })),
-);
+).create();
 
 const request = app.createScope(
     bind.scoped(CurrentUser, () => ({ id: "user-1" })),
@@ -269,7 +272,7 @@ Scope bindings can override parent bindings. Scoped instances are cached in the 
 ### Dispose resources
 
 ```ts
-import { bind, createContainer, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, token } from "@satunnaisuus/distill";
 
 type Db = {
     readonly close: () => Promise<void>;
@@ -288,7 +291,7 @@ const Db = token("Db").of<Db>();
 const UnitOfWork = token("UnitOfWork").of<UnitOfWork>();
 const Service = token("Service").of<Service>();
 
-const app = createContainer(
+const app = defineContainer(
     [Db, UnitOfWork, Service],
     bind.singleton(Db, () => createDb(), {
         dispose: (db) => db.close(),
@@ -298,7 +301,7 @@ const app = createContainer(
             // use unitOfWork
         },
     })),
-);
+).create();
 
 const request = app.createScope(
     bind.scoped(UnitOfWork, { db: Db }, ({ db }) => db.createUnitOfWork(), {
@@ -331,8 +334,12 @@ bind.transient(token, factory, options?)
 bind.transient(token, dependencies, factory, options?)
 ref(token)
 ref(() => token)
-createContainer([Config, Logger], ...bindings)
+defineContainer([Config, Logger], ...bindings)
+definition.create()
+definition.create(override(binding))
+definition.create(overrideAll(multibindToken, bindings))
 container.resolve(token)
+container.resolveAll(multibindToken)
 container.createScope(...bindings)
 container.dispose()
 container.disposed
@@ -418,11 +425,11 @@ Dependency keys must be string keys, and dependency values must be defined token
 Binding order does not matter:
 
 ```ts
-const container = createContainer(
+const container = defineContainer(
     [Config, Server],
     bind(Server, { config: Config }, ({ config }) => ({ port: config.port })),
     bind(Config, () => ({ port: 3000 })),
-);
+).create();
 ```
 
 The optional fourth argument is the same binding options object accepted by dependency-free bindings.
@@ -477,19 +484,21 @@ const selectedLogger = ref(() => (useJson ? JsonLogger : TextLogger));
 
 Accessing a `ref` before its target has finished initializing throws a circular initialization error. Return a function that reads `.value` later instead of reading it directly inside both sides of a cycle.
 
-### `createContainer(tokens, ...bindings)`
+### `defineContainer(tokens, ...bindings)`
 
-Creates an isolated container from an array of tokens and bindings.
+Creates a reusable container definition from an array of tokens and bindings.
 
 ```ts
-const container = createContainer(
+const app = defineContainer(
     [Config, Logger],
     bind(Config, () => ({ port: 3000 })),
     bind(Logger, () => console),
 );
+
+const container = app.create();
 ```
 
-At compile time, `createContainer` validates that:
+At compile time, `defineContainer` validates that:
 
 - every binding token belongs to the provided token list;
 - every dependency token belongs to the token list;
@@ -514,10 +523,39 @@ const bindings = [
     bind(Port, { config: Config }, ({ config }) => config.port),
 ] as const;
 
-const container = createContainer([Config, Port], ...bindings);
+const container = defineContainer([Config, Port], ...bindings).create();
 ```
 
 Avoid spreading a plain `Binding[]`; TypeScript cannot validate individual bindings after the tuple has been widened.
+
+### `definition.create(...overrides)`
+
+Creates an isolated runtime container from a definition. Each call has its own singleton, scoped, and disposal state.
+
+```ts
+const production = app.create();
+const test = app.create(
+    override(bind(Config, () => ({ port: 4000 }))),
+);
+```
+
+Use `override(binding)` for regular tokens. The binding must target a token already bound in the definition. Overrides are applied before the runtime container is built, so singleton services receive the replacement dependency.
+
+Use `overrideAll(multibindToken, bindings)` for multibind tokens:
+
+```ts
+const test = app.create(
+    overrideAll(Handlers, [
+        bind(Handlers, () => testHandler),
+    ]),
+);
+
+const withoutHandlers = app.create(
+    overrideAll(Handlers, []),
+);
+```
+
+`overrideAll` replaces the whole collection for that token. The replacement order is the order of the bindings array. Duplicate overrides for the same token are rejected.
 
 ### `container.createScope(...bindings)`
 
@@ -587,9 +625,12 @@ Distill also exports helper types for advanced typing:
 ```ts
 import type {
     Binding,
+    BindingOverride,
+    BindingOverrideAll,
     BindingLifetime,
     BindingOptions,
     Container,
+    ContainerDefinition,
     DependencyMap,
     Disposer,
     OptionalToken,
@@ -603,13 +644,13 @@ import type {
 
 Most applications only need the functions. The types are useful when sharing binding tuples between modules, writing helpers that accept token lists, or exposing container-related types from your own library.
 
-When annotating containers manually, prefer preserving the container type returned by `createContainer` and `createScope`.
+When annotating containers manually, prefer preserving the container type returned by `defineContainer` and `createScope`.
 `Container<FlatBindings, TokenList>` can infer basic scope boundaries from a flat binding tuple, but it cannot reliably
 reconstruct every child scope from that tuple alone. For example, a child binding that appears before a child override is
 ambiguous without the original `createScope` boundary:
 
 ```ts
-import { bind, createContainer, token, type Container } from "@satunnaisuus/distill";
+import { bind, defineContainer, token, type Container } from "@satunnaisuus/distill";
 
 const Config = token("Config").of<{ readonly name: string }>();
 const Port = token("Port").of<{ readonly value: number }>();
@@ -618,7 +659,7 @@ const rootConfig = bind.scoped(Config, () => ({ name: "root" }));
 const childPort = bind.transient(Port, () => ({ value: 3000 }));
 const childConfig = bind.singleton(Config, () => ({ name: "child" }));
 
-const child = createContainer([Config, Port], rootConfig).createScope(childPort, childConfig);
+const child = defineContainer([Config, Port], rootConfig).create().createScope(childPort, childConfig);
 
 // Avoid: the flat tuple does not say that childPort and childConfig were added together.
 const typedChild: Container<

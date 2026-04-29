@@ -3,5 +3,7 @@ export const allDependencyBrand: unique symbol = Symbol("allDependency");
 export const bindingBrand: unique symbol = Symbol("bindingBrand");
 export const bindingDependenciesBrand: unique symbol = Symbol("bindingDependencies");
 export const bindingLifetimeBrand: unique symbol = Symbol("bindingLifetime");
+export const bindingOverrideBrand: unique symbol = Symbol("bindingOverrideBrand");
+export const bindingOverrideAllBrand: unique symbol = Symbol("bindingOverrideAllBrand");
 export const optionalDependencyBrand: unique symbol = Symbol("optionalDependency");
 export const refDependencyBrand: unique symbol = Symbol("refDependency");

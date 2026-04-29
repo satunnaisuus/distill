@@ -1,4 +1,4 @@
-import { type Binding, bind, createContainer, type Disposer, ref, token } from "@satunnaisuus/distill";
+import { type Binding, bind, type Disposer, defineContainer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { CallableHandler, Config, Handler, Logger, Parser, Server } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -155,7 +155,7 @@ test("public Binding dispose type follows the token value type", () => {
     expect<Binding<typeof tokens.unknown>["dispose"]>().type.toBe<Disposer<unknown> | undefined>();
 });
 
-test("createContainer accepts disposable bindings and preserves resolve types", () => {
+test("defineContainer accepts disposable bindings and preserves resolve types", () => {
     const configBinding = bind(tokens.config, () => ({ port: 3000 }), {
         dispose: (config) => {
             expect(config).type.toBeAssignableTo<Config>();
@@ -166,21 +166,21 @@ test("createContainer accepts disposable bindings and preserves resolve types", 
             expect(port).type.toBe<number>();
         },
     });
-    const container = createContainer(tokenList, configBinding, portBinding);
+    const container = defineContainer(tokenList, configBinding, portBinding).create();
 
     expect(container.resolve(tokens.config)).type.toBe<Config>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
 test("createScope accepts disposable bindings and preserves resolve types", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 }), {
             dispose: (config) => {
                 expect(config).type.toBeAssignableTo<Config>();
             },
         }),
-    );
+    ).create();
     const scope = app.createScope(
         bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, {
             dispose: (port) => {
@@ -215,7 +215,7 @@ test("bind preserves dispose value types for ref dependency bindings", () => {
 
 test("disposable bindings still participate in singleton scoped dependency validation", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(
                 tokens.server,
@@ -230,32 +230,32 @@ test("disposable bindings still participate in singleton scoped dependency valid
             bind.scoped(tokens.config, () => ({ port: 3000 }), {
                 dispose: () => {},
             }),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
 test("disposable bindings still participate in token list and duplicate validation", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.port, () => 3000, { dispose: () => {} }),
             bind(tokens.port, () => 4000, { dispose: () => {} }),
-        );
+        ).create();
     }).type.toRaiseError("__duplicate_binding__");
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(externalToken, () => 3000, { dispose: () => {} }),
-        );
+        ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.port, { external: externalToken }, ({ external }) => external, { dispose: () => {} }),
-        );
+        ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -269,10 +269,10 @@ test("disposable bindings still participate in token list and duplicate validati
 });
 
 test("created containers and scopes expose typed dispose APIs", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = container.createScope(bind(tokens.port, { config: tokens.config }, ({ config }) => config.port));
 
     expect(container.dispose()).type.toBe<Promise<void>>();

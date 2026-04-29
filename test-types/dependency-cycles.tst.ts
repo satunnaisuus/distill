@@ -1,11 +1,11 @@
-import { bind, createContainer, ref, token } from "@satunnaisuus/distill";
+import { bind, defineContainer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { ServiceA, ServiceB } from "./fixtures/services.js";
 import { cycleTokenList as tokenList, cycleTokens as tokens } from "./fixtures/tokens.js";
 
 test("rejects eager circular dependencies without ref", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
                 getB: () => serviceB,
@@ -13,7 +13,7 @@ test("rejects eager circular dependencies without ref", () => {
             bind(tokens.serviceB, { serviceA: tokens.serviceA }, ({ serviceA }) => ({
                 getA: () => serviceA,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -27,12 +27,12 @@ test("rejects eager dependency on itself without ref", () => {
     const selfTokenList = [selfTokens.service] as const;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             selfTokenList,
             bind(selfTokens.service, { service: selfTokens.service }, () => ({
                 name: "service" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -54,7 +54,7 @@ test("rejects long eager circular dependencies without ref", () => {
     const longCycleTokenList = [longCycleTokens.serviceA, longCycleTokens.serviceB, longCycleTokens.serviceC] as const;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             longCycleTokenList,
             bind(longCycleTokens.serviceA, { serviceB: longCycleTokens.serviceB }, () => ({
                 name: "a" as const,
@@ -65,7 +65,7 @@ test("rejects long eager circular dependencies without ref", () => {
             bind(longCycleTokens.serviceC, { serviceA: longCycleTokens.serviceA }, () => ({
                 name: "c" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -87,7 +87,7 @@ test("rejects eager circular dependencies regardless of binding order", () => {
     const unorderedTokenList = [unorderedTokens.serviceA, unorderedTokens.serviceB, unorderedTokens.serviceC] as const;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             unorderedTokenList,
             bind(unorderedTokens.serviceC, { serviceA: unorderedTokens.serviceA }, () => ({
                 name: "c" as const,
@@ -98,12 +98,12 @@ test("rejects eager circular dependencies regardless of binding order", () => {
             bind(unorderedTokens.serviceB, { serviceC: unorderedTokens.serviceC }, () => ({
                 name: "b" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
 test("allows cycles when a single ref breaks the eager path", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
@@ -111,7 +111,7 @@ test("allows cycles when a single ref breaks the eager path", () => {
         bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
-    );
+    ).create();
 
     expect(container.resolve(tokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(tokens.serviceB)).type.toBe<ServiceB>();
@@ -138,7 +138,7 @@ test("allows long cycles when ref breaks the eager path", () => {
         longRefCycleTokens.serviceC,
     ] as const;
 
-    const container = createContainer(
+    const container = defineContainer(
         longRefCycleTokenList,
         bind(longRefCycleTokens.serviceA, { serviceB: longRefCycleTokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
@@ -149,7 +149,7 @@ test("allows long cycles when ref breaks the eager path", () => {
         bind(longRefCycleTokens.serviceC, { serviceA: ref(longRefCycleTokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
-    );
+    ).create();
 
     expect(container.resolve(longRefCycleTokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(longRefCycleTokens.serviceB)).type.toBe<ServiceB>();
@@ -174,7 +174,7 @@ test("rejects eager cycles when an unrelated ref dependency is present", () => {
     const mixedTokenList = [mixedTokens.serviceA, mixedTokens.serviceB, mixedTokens.serviceC] as const;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             mixedTokenList,
             bind(
                 mixedTokens.serviceA,
@@ -189,7 +189,7 @@ test("rejects eager cycles when an unrelated ref dependency is present", () => {
             bind(mixedTokens.serviceC, () => ({
                 name: "c" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -211,7 +211,7 @@ test("rejects cycles through a branching dependency graph", () => {
     const branchingTokenList = [branchingTokens.serviceA, branchingTokens.serviceB, branchingTokens.serviceC] as const;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             branchingTokenList,
             bind(
                 branchingTokens.serviceA,
@@ -226,7 +226,7 @@ test("rejects cycles through a branching dependency graph", () => {
             bind(branchingTokens.serviceC, { serviceA: branchingTokens.serviceA }, () => ({
                 name: "c" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -255,7 +255,7 @@ test("rejects cycles through eager union dependency tokens", () => {
         | typeof unionCycleTokens.serviceC;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             unionCycleTokenList,
             bind(unionCycleTokens.serviceA, { next: serviceBOrC }, () => ({
                 name: "a" as const,
@@ -266,7 +266,7 @@ test("rejects cycles through eager union dependency tokens", () => {
             bind(unionCycleTokens.serviceC, () => ({
                 name: "c" as const,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
@@ -288,7 +288,7 @@ test("allows acyclic eager union dependency tokens", () => {
     const unionTokenList = [unionTokens.serviceA, unionTokens.serviceB, unionTokens.serviceC] as const;
     const serviceBOrC = unionTokens.serviceB as typeof unionTokens.serviceB | typeof unionTokens.serviceC;
 
-    const container = createContainer(
+    const container = defineContainer(
         unionTokenList,
         bind(unionTokens.serviceA, { next: serviceBOrC }, ({ next }) => ({
             getNext: () => next,
@@ -299,7 +299,7 @@ test("allows acyclic eager union dependency tokens", () => {
         bind(unionTokens.serviceC, () => ({
             name: "c" as const,
         })),
-    );
+    ).create();
 
     expect(container.resolve(unionTokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(unionTokens.serviceB)).type.toBe<ServiceB>();
@@ -324,7 +324,7 @@ test("allows union dependency tokens when ref breaks the eager path", () => {
     const unionRefTokenList = [unionRefTokens.serviceA, unionRefTokens.serviceB, unionRefTokens.serviceC] as const;
     const serviceBOrC = unionRefTokens.serviceB as typeof unionRefTokens.serviceB | typeof unionRefTokens.serviceC;
 
-    const container = createContainer(
+    const container = defineContainer(
         unionRefTokenList,
         bind(unionRefTokens.serviceA, { next: ref(serviceBOrC) }, ({ next }) => ({
             getNext: () => next.value,
@@ -335,7 +335,7 @@ test("allows union dependency tokens when ref breaks the eager path", () => {
         bind(unionRefTokens.serviceC, () => ({
             name: "c" as const,
         })),
-    );
+    ).create();
 
     expect(container.resolve(unionRefTokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(unionRefTokens.serviceB)).type.toBe<ServiceB>();
@@ -368,7 +368,7 @@ test("allows acyclic eager dependency graphs with shared dependencies", () => {
         acyclicTokens.serviceD,
     ] as const;
 
-    const container = createContainer(
+    const container = defineContainer(
         acyclicTokenList,
         bind(acyclicTokens.serviceA, { serviceB: acyclicTokens.serviceB, serviceC: acyclicTokens.serviceC }, () => ({
             name: "a" as const,
@@ -382,7 +382,7 @@ test("allows acyclic eager dependency graphs with shared dependencies", () => {
         bind(acyclicTokens.serviceD, () => ({
             name: "d" as const,
         })),
-    );
+    ).create();
 
     expect(container.resolve(acyclicTokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(acyclicTokens.serviceD)).type.toBe<ServiceD>();
@@ -397,18 +397,18 @@ test("allows self references through ref", () => {
     };
     const selfRefTokenList = [selfRefTokens.service] as const;
 
-    const container = createContainer(
+    const container = defineContainer(
         selfRefTokenList,
         bind(selfRefTokens.service, { service: ref(selfRefTokens.service) }, ({ service }) => ({
             getSelf: () => service.value,
         })),
-    );
+    ).create();
 
     expect(container.resolve(selfRefTokens.service)).type.toBe<Service>();
 });
 
 test("allows circular dependencies through ref", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
             getB: () => serviceB.value,
@@ -416,7 +416,7 @@ test("allows circular dependencies through ref", () => {
         bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
-    );
+    ).create();
 
     expect(container.resolve(tokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(tokens.serviceB)).type.toBe<ServiceB>();

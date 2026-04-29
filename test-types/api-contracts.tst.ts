@@ -1,4 +1,4 @@
-import { all, bind, createContainer, type Disposer, multiToken, ref, token } from "@satunnaisuus/distill";
+import { all, bind, type Disposer, defineContainer, multiToken, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Handler, Logger } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -355,42 +355,42 @@ test("lifetime bind variants infer dependency factory parameters", () => {
     expect<Parameters<typeof transient.factory>[0]["port"]>().type.toBe<number>();
 });
 
-test("createContainer rejects missing token lists", () => {
+test("defineContainer rejects missing token lists", () => {
     expect(() => {
-        createContainer();
+        defineContainer().create();
     }).type.toRaiseError();
 });
 
-test("createContainer rejects non-array token lists", () => {
+test("defineContainer rejects non-array token lists", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             { port: token("port").of<number>() },
             bind(tokens.port, () => 3000),
-        );
+        ).create();
     }).type.toRaiseError();
 });
 
-test("createContainer rejects rest arguments that are not bindings", () => {
+test("defineContainer rejects rest arguments that are not bindings", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.port, () => 3000),
             "config",
-        );
+        ).create();
     }).type.toRaiseError();
 });
 
-test("createContainer rejects structural bindings not created by bind", () => {
+test("defineContainer rejects structural bindings not created by bind", () => {
     expect(() => {
-        createContainer(tokenList, {
+        defineContainer(tokenList, {
             token: tokens.port,
             factory: () => 3000,
-        });
+        }).create();
     }).type.toRaiseError();
 });
 
 test("createScope rejects rest arguments that are not bindings", () => {
-    const container = createContainer(tokenList);
+    const container = defineContainer(tokenList).create();
 
     expect(() => {
         container.createScope("config");
@@ -398,7 +398,7 @@ test("createScope rejects rest arguments that are not bindings", () => {
 });
 
 test("createScope rejects structural bindings not created by bind", () => {
-    const container = createContainer(tokenList);
+    const container = defineContainer(tokenList).create();
 
     expect(() => {
         container.createScope({
@@ -432,7 +432,7 @@ test("bind supports explicit empty dependency objects", () => {
 
         return 3000;
     });
-    const container = createContainer(tokenList, binding);
+    const container = defineContainer(tokenList, binding).create();
 
     expect<Parameters<typeof binding.factory>[0]>().type.toBe<{}>();
     expect(container.resolve(tokens.port)).type.toBe<number>();

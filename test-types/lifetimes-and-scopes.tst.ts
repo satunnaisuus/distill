@@ -1,4 +1,4 @@
-import { type Binding, type BindingLifetime, bind, createContainer, ref, token } from "@satunnaisuus/distill";
+import { type Binding, type BindingLifetime, bind, defineContainer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -22,13 +22,13 @@ test("default bind remains a singleton binding", () => {
 });
 
 test("createScope preserves parent bindings and adds scope bindings", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-    );
+    ).create();
     const scope = app.createScope(bind.scoped(tokens.port, () => 3000));
 
     expect(scope.resolve(tokens.config)).type.toBe<Config>();
@@ -37,10 +37,10 @@ test("createScope preserves parent bindings and adds scope bindings", () => {
 });
 
 test("createScope without bindings preserves parent bindings", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope();
 
     expect(scope.resolve(tokens.config)).type.toBe<Config>();
@@ -50,10 +50,10 @@ test("createScope without bindings preserves parent bindings", () => {
 });
 
 test("createScope allows scope bindings to depend on parent bindings", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -64,7 +64,7 @@ test("createScope allows scope bindings to depend on parent bindings", () => {
 });
 
 test("createScope allows scope bindings to depend on bindings declared later in the same scope", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
     const scope = app.createScope(
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -77,14 +77,14 @@ test("createScope allows scope bindings to depend on bindings declared later in 
 });
 
 test("scoped and transient bindings can depend on scoped bindings", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
         bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
-    );
+    ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
@@ -107,10 +107,10 @@ test("parent scoped services can depend on dependencies supplied by child scopes
         scopedTokens.transientServiceWithRef,
     ] as const;
 
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.service, { request: scopedTokens.request }, ({ request }) => ({ request })),
-    );
+    ).create();
     const requestScope = app.createScope(bind.scoped(scopedTokens.request, () => ({ id: "request-1" })));
 
     expect(() => {
@@ -118,12 +118,12 @@ test("parent scoped services can depend on dependencies supplied by child scopes
     }).type.toRaiseError();
     expect(requestScope.resolve(scopedTokens.service)).type.toBe<Service>();
 
-    const appWithRef = createContainer(
+    const appWithRef = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.service, { request: ref(scopedTokens.request) }, ({ request }) => ({
             request: request.value,
         })),
-    );
+    ).create();
     const refRequestScope = appWithRef.createScope(bind.scoped(scopedTokens.request, () => ({ id: "request-1" })));
 
     expect(() => {
@@ -131,12 +131,12 @@ test("parent scoped services can depend on dependencies supplied by child scopes
     }).type.toRaiseError();
     expect(refRequestScope.resolve(scopedTokens.service)).type.toBe<Service>();
 
-    const transientApp = createContainer(
+    const transientApp = defineContainer(
         scopedTokenList,
         bind.transient(scopedTokens.transientService, { request: scopedTokens.request }, ({ request }) => ({
             request,
         })),
-    );
+    ).create();
     const transientRequestScope = transientApp.createScope(
         bind.scoped(scopedTokens.request, () => ({ id: "request-1" })),
     );
@@ -146,12 +146,12 @@ test("parent scoped services can depend on dependencies supplied by child scopes
     }).type.toRaiseError();
     expect(transientRequestScope.resolve(scopedTokens.transientService)).type.toBe<Service>();
 
-    const transientAppWithRef = createContainer(
+    const transientAppWithRef = defineContainer(
         scopedTokenList,
         bind.transient(scopedTokens.transientServiceWithRef, { request: ref(scopedTokens.request) }, ({ request }) => ({
             request: request.value,
         })),
-    );
+    ).create();
     const transientRefRequestScope = transientAppWithRef.createScope(
         bind.scoped(scopedTokens.request, () => ({ id: "request-1" })),
     );
@@ -163,10 +163,10 @@ test("parent scoped services can depend on dependencies supplied by child scopes
 });
 
 test("createScope allows scope bindings to override parent bindings", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope(bind.scoped(tokens.config, () => ({ port: 4000 })));
 
     expect(scope.resolve(tokens.config)).type.toBe<Config>();
@@ -184,11 +184,11 @@ test("createScope ignores shadowed regular parent bindings during cycle validati
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, () => ({ name: "root-a" })),
         bind.scoped(scopedTokens.serviceB, () => ({ name: "root-b" })),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(scopedTokens.serviceA, () => ({ name: "child-a" })),
         bind.scoped(scopedTokens.serviceB, { serviceA: scopedTokens.serviceA }, () => ({ name: "child-b" })),
@@ -198,10 +198,10 @@ test("createScope ignores shadowed regular parent bindings during cycle validati
 });
 
 test("scope-only bindings do not change the parent resolve surface", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope(bind.scoped(tokens.port, () => 3000));
 
     expect(scope.resolve(tokens.port)).type.toBe<number>();
@@ -211,10 +211,10 @@ test("scope-only bindings do not change the parent resolve surface", () => {
 });
 
 test("nested scopes inherit child bindings and keep grandchild bindings local", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const child = app.createScope(bind.scoped(tokens.port, () => 3000));
     const grandchild = child.createScope(
         bind.scoped(tokens.logger, () => ({
@@ -233,10 +233,10 @@ test("nested scopes inherit child bindings and keep grandchild bindings local", 
 });
 
 test("scope resolve accepts unions of visible bound tokens", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(tokens.logger, () => ({
             log: () => {},
@@ -248,10 +248,10 @@ test("scope resolve accepts unions of visible bound tokens", () => {
 });
 
 test("scope resolve rejects unions when any token variant has no visible binding", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope();
     const selectedToken = tokens.config as typeof tokens.config | typeof tokens.logger;
 
@@ -261,10 +261,10 @@ test("scope resolve rejects unions when any token variant has no visible binding
 });
 
 test("scope resolve rejects unions when any token variant is outside the token list", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const scope = app.createScope();
     const selectedToken = tokens.config as typeof tokens.config | typeof externalToken;
 
@@ -286,13 +286,13 @@ test("createScope allows scoped overrides to depend on parent singletons that us
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.singleton(scopedTokens.serviceA, () => ({ name: "root" })),
         bind.singleton(scopedTokens.serviceB, { serviceA: scopedTokens.serviceA }, ({ serviceA }) => ({
             serviceA,
         })),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             name: "child",
@@ -320,13 +320,15 @@ test("nested scopes preserve parent singleton owners after child overrides", () 
         serviceC: token("serviceC").of<ServiceC>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB, scopedTokens.serviceC] as const;
-    const child = createContainer(
+    const child = defineContainer(
         scopedTokenList,
         bind.singleton(scopedTokens.serviceA, () => ({ name: "root" })),
         bind.singleton(scopedTokens.serviceB, { serviceA: scopedTokens.serviceA }, ({ serviceA }) => ({
             serviceA,
         })),
-    ).createScope(bind.scoped(scopedTokens.serviceA, () => ({ name: "child" })));
+    )
+        .create()
+        .createScope(bind.scoped(scopedTokens.serviceA, () => ({ name: "child" })));
 
     const grandchild = child.createScope(
         bind.singleton(scopedTokens.serviceC, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
@@ -361,10 +363,9 @@ test("nested scopes preserve same-scope override owners after child overrides", 
         config,
     }));
     const childConfigBinding = bind.singleton(scopedTokens.config, () => ({ name: "child" }));
-    const child = createContainer(scopedTokenList, rootConfigBinding, rootServiceBinding).createScope(
-        childServiceBinding,
-        childConfigBinding,
-    );
+    const child = defineContainer(scopedTokenList, rootConfigBinding, rootServiceBinding)
+        .create()
+        .createScope(childServiceBinding, childConfigBinding);
 
     const grandchild = child.createScope(
         bind.singleton(scopedTokens.consumer, { service: scopedTokens.service }, ({ service }) => ({
@@ -387,7 +388,7 @@ test("createScope allows circular dependencies when a ref breaks the same-scope 
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(scopedTokenList);
+    const app = defineContainer(scopedTokenList).create();
     const scope = app.createScope(
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
@@ -413,7 +414,7 @@ test("createScope allows circular dependencies when a ref breaks a parent overri
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
@@ -423,7 +424,7 @@ test("createScope allows circular dependencies when a ref breaks a parent overri
                 throw new Error("unused");
             },
         })),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(scopedTokens.serviceB, { serviceA: ref(scopedTokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
@@ -446,13 +447,13 @@ test("createScope rejects scoped override cycles through non-singleton parent bi
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             serviceB,
         })),
         bind.scoped(scopedTokens.serviceB, () => ({})),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(
@@ -471,7 +472,7 @@ test("createScope rejects eager dependencies on themselves inside the same scope
         service: token("service").of<Service>(),
     };
     const scopedTokenList = [scopedTokens.service] as const;
-    const app = createContainer(scopedTokenList);
+    const app = defineContainer(scopedTokenList).create();
 
     expect(() => {
         app.createScope(
@@ -498,7 +499,7 @@ test("createScope rejects eager circular dependencies contained in the same scop
         serviceC: token("serviceC").of<ServiceC>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB, scopedTokens.serviceC] as const;
-    const app = createContainer(scopedTokenList);
+    const app = defineContainer(scopedTokenList).create();
 
     expect(() => {
         app.createScope(
@@ -527,13 +528,13 @@ test("createScope rejects scoped override cycles through transient parent bindin
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.transient(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             serviceB,
         })),
         bind.scoped(scopedTokens.serviceB, () => ({})),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(
@@ -556,13 +557,13 @@ test("createScope rejects eager circular dependencies introduced by nested scope
         serviceB: token("serviceB").of<ServiceB>(),
     };
     const scopedTokenList = [scopedTokens.serviceA, scopedTokens.serviceB] as const;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.serviceA, { serviceB: scopedTokens.serviceB }, ({ serviceB }) => ({
             serviceB,
         })),
         bind.scoped(scopedTokens.serviceB, () => ({})),
-    );
+    ).create();
     const child = app.createScope();
 
     expect(() => {
@@ -575,10 +576,10 @@ test("createScope rejects eager circular dependencies introduced by nested scope
 });
 
 test("createScope rejects duplicate bindings within the same scope", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(
@@ -589,7 +590,7 @@ test("createScope rejects duplicate bindings within the same scope", () => {
 });
 
 test("createScope rejects binding tokens outside the token list", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(bind(externalToken, () => 3000));
@@ -597,7 +598,7 @@ test("createScope rejects binding tokens outside the token list", () => {
 });
 
 test("createScope rejects dependency tokens outside the token list", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(bind(tokens.port, { external: externalToken }, ({ external }) => external));
@@ -605,7 +606,7 @@ test("createScope rejects dependency tokens outside the token list", () => {
 });
 
 test("createScope rejects direct ref dependency tokens outside the token list", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -617,7 +618,7 @@ test("createScope rejects direct ref dependency tokens outside the token list", 
 });
 
 test("createScope rejects lazy ref dependency tokens outside the token list", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -629,10 +630,10 @@ test("createScope rejects lazy ref dependency tokens outside the token list", ()
 });
 
 test("createScope allows missing scoped dependencies to be supplied by descendant scopes", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.port, () => 3000),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -647,12 +648,12 @@ test("createScope allows missing scoped dependencies to be supplied by descendan
 });
 
 test("nested scopes can supply missing dependencies for parent scoped services", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-    );
+    ).create();
     const childScope = app.createScope();
     const grandchildScope = childScope.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
 
@@ -666,13 +667,13 @@ test("nested scopes can supply missing dependencies for parent scoped services",
 });
 
 test("descendant scopes can complete overridden dependency chains", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.port, () => 3000),
         bind.scoped(tokens.server, { port: tokens.port }, ({ port }) => ({
             port,
         })),
-    );
+    ).create();
     const childScope = app.createScope(
         bind.scoped(tokens.port, { config: tokens.config }, ({ config }) => config.port),
     );
@@ -705,7 +706,7 @@ test("descendant scopes can supply every variant of union dependencies", () => {
         scopedTokens.transientService,
     ] as const;
     const requestToken = scopedTokens.requestA as typeof scopedTokens.requestA | typeof scopedTokens.requestB;
-    const app = createContainer(
+    const app = defineContainer(
         scopedTokenList,
         bind.scoped(scopedTokens.service, { request: requestToken }, ({ request }) => ({
             request,
@@ -716,7 +717,7 @@ test("descendant scopes can supply every variant of union dependencies", () => {
         bind.transient(scopedTokens.transientService, { request: requestToken }, ({ request }) => ({
             request,
         })),
-    );
+    ).create();
     const partialScope = app.createScope(bind.scoped(scopedTokens.requestA, () => ({ kind: "a" as const })));
     const fullScope = partialScope.createScope(bind.scoped(scopedTokens.requestB, () => ({ kind: "b" as const })));
 
@@ -732,10 +733,10 @@ test("descendant scopes can supply every variant of union dependencies", () => {
 });
 
 test("createScope allows missing scoped ref dependencies to be supplied by descendant scopes", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.port, () => 3000),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(tokens.server, { logger: ref(tokens.logger) }, () => ({
             port: 3000,
@@ -754,10 +755,10 @@ test("createScope allows missing scoped ref dependencies to be supplied by desce
 });
 
 test("createScope allows missing lazy scoped ref dependencies to be supplied by descendant scopes", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.port, () => 3000),
-    );
+    ).create();
     const scope = app.createScope(
         bind.scoped(tokens.server, { logger: ref(() => tokens.logger) }, () => ({
             port: 3000,
@@ -776,13 +777,13 @@ test("createScope allows missing lazy scoped ref dependencies to be supplied by 
 });
 
 test("scope resolve requires transitive ref dependencies to be visible", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.server, { port: ref(tokens.port) }, ({ port }) => ({
             port: port.value,
         })),
         bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
-    );
+    ).create();
     const childScope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
 
     expect(() => {
@@ -793,7 +794,7 @@ test("scope resolve requires transitive ref dependencies to be visible", () => {
 
 test("createScope rejects union binding tokens", () => {
     const configOrPortToken = tokens.config as typeof tokens.config | typeof tokens.port;
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(bind(configOrPortToken, () => 3000));
@@ -802,10 +803,10 @@ test("createScope rejects union binding tokens", () => {
 
 test("createScope rejects union dependency tokens when any variant is outside the token list", () => {
     const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(bind(tokens.port, { dependency: configOrExternalToken }, () => 3000));
@@ -814,10 +815,10 @@ test("createScope rejects union dependency tokens when any variant is outside th
 
 test("createScope rejects union dependency tokens when any variant has no visible binding", () => {
     const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(bind(tokens.port, { dependency: configOrLoggerToken }, () => 3000));
@@ -841,7 +842,7 @@ test("createScope rejects eager cycles through union dependency tokens", () => {
     };
     const unionTokenList = [unionTokens.serviceA, unionTokens.serviceB, unionTokens.serviceC] as const;
     const serviceBOrC = unionTokens.serviceB as typeof unionTokens.serviceB | typeof unionTokens.serviceC;
-    const app = createContainer(unionTokenList);
+    const app = defineContainer(unionTokenList).create();
 
     expect(() => {
         app.createScope(
@@ -875,7 +876,7 @@ test("createScope allows union dependency tokens when ref breaks the eager path"
     };
     const unionTokenList = [unionTokens.serviceA, unionTokens.serviceB, unionTokens.serviceC] as const;
     const serviceBOrC = unionTokens.serviceB as typeof unionTokens.serviceB | typeof unionTokens.serviceC;
-    const app = createContainer(unionTokenList);
+    const app = defineContainer(unionTokenList).create();
     const scope = app.createScope(
         bind.scoped(unionTokens.serviceA, { next: ref(serviceBOrC) }, ({ next }) => ({
             getNext: () => next.value,
@@ -893,11 +894,11 @@ test("createScope allows union dependency tokens when ref breaks the eager path"
     expect(scope.resolve(unionTokens.serviceC)).type.toBe<ServiceC>();
 });
 
-test("createContainer rejects singleton bindings that depend on scoped union dependency variants", () => {
+test("defineContainer rejects singleton bindings that depend on scoped union dependency variants", () => {
     const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { dependency: configOrLoggerToken }, () => ({
                 port: 3000,
@@ -906,11 +907,11 @@ test("createContainer rejects singleton bindings that depend on scoped union dep
             bind.singleton(tokens.logger, () => ({
                 log: () => {},
             })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { dependency: ref(configOrLoggerToken) }, () => ({
                 port: 3000,
@@ -919,11 +920,11 @@ test("createContainer rejects singleton bindings that depend on scoped union dep
             bind.singleton(tokens.logger, () => ({
                 log: () => {},
             })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { dependency: ref(() => configOrLoggerToken) }, () => ({
                 port: 3000,
@@ -932,13 +933,13 @@ test("createContainer rejects singleton bindings that depend on scoped union dep
             bind.singleton(tokens.logger, () => ({
                 log: () => {},
             })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
 test("createScope rejects singleton bindings that depend on scoped union dependency variants", () => {
     const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -953,50 +954,50 @@ test("createScope rejects singleton bindings that depend on scoped union depende
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer rejects singleton bindings that depend on scoped bindings", () => {
+test("defineContainer rejects singleton bindings that depend on scoped bindings", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { config: tokens.config }, ({ config }) => ({
                 port: config.port,
             })),
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer rejects widened singleton bindings that depend on scoped bindings", () => {
+test("defineContainer rejects widened singleton bindings that depend on scoped bindings", () => {
     const serverBinding: Binding<typeof tokens.server, { readonly config: typeof tokens.config }, BindingLifetime> =
         bind.singleton(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
         }));
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             serverBinding,
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer rejects singletons that depend on widened scoped bindings", () => {
+test("defineContainer rejects singletons that depend on widened scoped bindings", () => {
     const configBinding: Binding<typeof tokens.config, undefined, BindingLifetime> = bind.scoped(tokens.config, () => ({
         port: 3000,
     }));
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { config: tokens.config }, ({ config }) => ({
                 port: config.port,
             })),
             configBinding,
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer rejects maybe-singleton bindings that depend on scoped bindings", () => {
+test("defineContainer rejects maybe-singleton bindings that depend on scoped bindings", () => {
     const useSingleton = true as boolean;
     const serverBinding = useSingleton
         ? bind.singleton(tokens.server, { config: tokens.config }, ({ config }) => ({
@@ -1007,15 +1008,15 @@ test("createContainer rejects maybe-singleton bindings that depend on scoped bin
           }));
 
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             serverBinding,
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer preserves correlated lifetime and dependencies in union bindings", () => {
+test("defineContainer preserves correlated lifetime and dependencies in union bindings", () => {
     const useSingleton = true as boolean;
     const serverBinding = useSingleton
         ? bind.singleton(tokens.server, { logger: tokens.logger }, () => ({
@@ -1025,19 +1026,19 @@ test("createContainer preserves correlated lifetime and dependencies in union bi
               port: config.port,
           }));
 
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         serverBinding,
         bind.singleton(tokens.logger, () => ({
             log: () => {},
         })),
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
-test("createContainer validates singleton missing dependencies per union binding branch", () => {
+test("defineContainer validates singleton missing dependencies per union binding branch", () => {
     const useSingleton = true as boolean;
     const serverBinding = useSingleton
         ? bind.singleton(tokens.server, { logger: tokens.logger }, () => ({
@@ -1047,13 +1048,13 @@ test("createContainer validates singleton missing dependencies per union binding
               port: config.port,
           }));
 
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         serverBinding,
         bind.singleton(tokens.logger, () => ({
             log: () => {},
         })),
-    );
+    ).create();
     const scope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
 
     expect(() => {
@@ -1062,36 +1063,36 @@ test("createContainer validates singleton missing dependencies per union binding
     expect(scope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
-test("createContainer rejects singleton bindings that depend on scoped bindings through ref", () => {
+test("defineContainer rejects singleton bindings that depend on scoped bindings through ref", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { config: ref(tokens.config) }, () => ({
                 port: 3000,
             })),
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("createContainer rejects singleton bindings that transitively depend on scoped bindings", () => {
+test("defineContainer rejects singleton bindings that transitively depend on scoped bindings", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { port: tokens.port }, ({ port }) => ({
                 port,
             })),
             bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
 test("createScope rejects singleton scope bindings that depend on scoped parent bindings", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind.scoped(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
 
     expect(() => {
         app.createScope(
@@ -1103,7 +1104,7 @@ test("createScope rejects singleton scope bindings that depend on scoped parent 
 });
 
 test("createScope rejects singleton bindings that depend on scoped bindings from the same scope", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -1116,7 +1117,7 @@ test("createScope rejects singleton bindings that depend on scoped bindings from
 });
 
 test("createScope rejects singleton bindings that depend on scoped same-scope bindings through ref", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -1129,7 +1130,7 @@ test("createScope rejects singleton bindings that depend on scoped same-scope bi
 });
 
 test("createScope rejects singleton bindings that transitively depend on scoped bindings from the same scope", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(
@@ -1143,7 +1144,7 @@ test("createScope rejects singleton bindings that transitively depend on scoped 
 });
 
 test("createScope treats default bind as a singleton when checking scoped dependencies", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
 
     expect(() => {
         app.createScope(

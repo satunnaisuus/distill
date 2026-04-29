@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { all } from "../src/all";
 import { bind } from "../src/bind";
-import { createContainer } from "../src/container";
+import { defineContainer } from "../src/container";
 import { multiToken, token, tokenKey } from "../src/token";
 
 type RuntimeContainerForTest = {
@@ -12,10 +12,17 @@ type RuntimeContainerForTest = {
     readonly disposed: boolean;
 };
 
-const createRuntimeContainer = createContainer as unknown as (
+const defineRuntimeContainer = defineContainer as unknown as (
     tokens: readonly unknown[],
     ...bindings: readonly unknown[]
-) => RuntimeContainerForTest;
+) => { readonly create: () => RuntimeContainerForTest };
+
+const createRuntimeContainer = (
+    tokens: readonly unknown[],
+    ...bindings: readonly unknown[]
+): RuntimeContainerForTest => {
+    return defineRuntimeContainer(tokens, ...bindings).create();
+};
 
 describe("multiToken", () => {
     it("creates a multibind token with a public token key", () => {
@@ -38,18 +45,18 @@ describe("resolveAll", () => {
     it("resolves all bindings for a multibind token in registration order", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks],
             bind(Hooks, () => ({ name: "first" })),
             bind(Hooks, () => ({ name: "second" })),
-        );
+        ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
     });
 
     it("returns an empty array when a multibind token has no bindings", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
-        const container = createContainer([Hooks]);
+        const container = defineContainer([Hooks]).create();
 
         expect(container.resolveAll(Hooks)).toEqual([]);
     });
@@ -61,7 +68,7 @@ describe("resolveAll", () => {
         const firstFactory = vi.fn(() => first);
         const secondFactory = vi.fn(() => second);
 
-        const container = createContainer([Hooks], bind(Hooks, firstFactory), bind(Hooks, secondFactory));
+        const container = defineContainer([Hooks], bind(Hooks, firstFactory), bind(Hooks, secondFactory)).create();
 
         expect(container.resolveAll(Hooks)).toEqual([first, second]);
         expect(container.resolveAll(Hooks)).toEqual([first, second]);
@@ -73,11 +80,11 @@ describe("resolveAll", () => {
         const Hooks = multiToken("Hooks").of<{ readonly id: number }>();
         let nextId = 1;
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks],
             bind.transient(Hooks, () => ({ id: nextId++ })),
             bind.transient(Hooks, () => ({ id: nextId++ })),
-        );
+        ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ id: 1 }, { id: 2 }]);
         expect(container.resolveAll(Hooks)).toEqual([{ id: 3 }, { id: 4 }]);
@@ -86,10 +93,10 @@ describe("resolveAll", () => {
     it("collects parent and child multibind contributions", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
-        const app = createContainer(
+        const app = defineContainer(
             [Hooks],
             bind(Hooks, () => ({ name: "root" })),
-        );
+        ).create();
         const request = app.createScope(bind(Hooks, () => ({ name: "request" })));
 
         expect(app.resolveAll(Hooks)).toEqual([{ name: "root" }]);
@@ -100,10 +107,10 @@ describe("resolveAll", () => {
         const Hooks = multiToken("Hooks").of<{ readonly id: number }>();
         let nextId = 1;
 
-        const app = createContainer(
+        const app = defineContainer(
             [Hooks],
             bind.scoped(Hooks, () => ({ id: nextId++ })),
-        );
+        ).create();
         const firstScope = app.createScope();
         const secondScope = app.createScope();
 
@@ -123,7 +130,7 @@ describe("resolveAll", () => {
         const events: string[] = [];
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks],
             bind(Hooks, () => ({ name: "first" }), {
                 dispose: () => events.push("first"),
@@ -131,7 +138,7 @@ describe("resolveAll", () => {
             bind(Hooks, () => ({ name: "second" }), {
                 dispose: () => events.push("second"),
             }),
-        );
+        ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
 
@@ -191,12 +198,12 @@ describe("all dependencies", () => {
             names: hooks.map((hook) => hook.name),
         }));
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Hooks, () => ({ name: "first" })),
             bind(Hooks, () => ({ name: "second" })),
             bind(Registry, { hooks: all(Hooks) }, factory),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
         expect(factory).toHaveBeenCalledTimes(1);
@@ -207,10 +214,10 @@ describe("all dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly count: number }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ count: hooks.length })),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ count: 0 });
     });
@@ -219,13 +226,13 @@ describe("all dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
-        const app = createContainer(
+        const app = defineContainer(
             [Hooks, Registry],
             bind(Hooks, () => ({ name: "root" })),
             bind.scoped(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
-        );
+        ).create();
         const request = app.createScope(bind(Hooks, () => ({ name: "request" })));
 
         expect(app.resolve(Registry)).toEqual({ names: ["root"] });
@@ -237,7 +244,7 @@ describe("all dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Hooks, () => {
                 calls.push("first");
@@ -251,7 +258,7 @@ describe("all dependencies", () => {
                 calls.push("registry");
                 return { names: hooks.map((hook) => hook.name) };
             }),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
         expect(calls).toEqual(["first", "second", "registry"]);
@@ -262,7 +269,7 @@ describe("all dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly hooks: readonly { readonly name: string }[] }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Hooks, () => ({ name: "first" }), {
                 dispose: () => events.push("first"),
@@ -273,7 +280,7 @@ describe("all dependencies", () => {
             bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ hooks }), {
                 dispose: () => events.push("registry"),
             }),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ hooks: [{ name: "first" }, { name: "second" }] });
 

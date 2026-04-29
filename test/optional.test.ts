@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { all } from "../src/all";
 import { bind } from "../src/bind";
 import { optionalDependencyBrand } from "../src/brands";
-import { createContainer } from "../src/container";
+import { defineContainer } from "../src/container";
 import { isOptionalDependency, optional } from "../src/optional";
 import { ref } from "../src/ref";
 import { multiToken, type Token, token } from "../src/token";
@@ -15,10 +15,17 @@ type RuntimeContainerForTest = {
     readonly disposed: boolean;
 };
 
-const createRuntimeContainer = createContainer as unknown as (
+const defineRuntimeContainer = defineContainer as unknown as (
     tokens: readonly unknown[],
     ...bindings: readonly unknown[]
-) => RuntimeContainerForTest;
+) => { readonly create: () => RuntimeContainerForTest };
+
+const createRuntimeContainer = (
+    tokens: readonly unknown[],
+    ...bindings: readonly unknown[]
+): RuntimeContainerForTest => {
+    return defineRuntimeContainer(tokens, ...bindings).create();
+};
 
 describe("optional", () => {
     it("creates an optional dependency for a direct token", () => {
@@ -80,7 +87,10 @@ describe("optional dependencies", () => {
             port: config?.port ?? 8080,
         }));
 
-        const container = createContainer([Config, Server], bind(Server, { config: optional(Config) }, factory));
+        const container = defineContainer(
+            [Config, Server],
+            bind(Server, { config: optional(Config) }, factory),
+        ).create();
 
         expect(container.resolve(Server)).toEqual({ port: 8080 });
         expect(factory).toHaveBeenCalledWith({ config: undefined });
@@ -91,7 +101,7 @@ describe("optional dependencies", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const Server = token("Server").of<{ readonly port: number }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Config, Server],
             bind(Server, { config: optional(Config) }, ({ config }) => {
                 calls.push("server");
@@ -101,7 +111,7 @@ describe("optional dependencies", () => {
                 calls.push("config");
                 return { port: 3000 };
             }),
-        );
+        ).create();
 
         expect(container.resolve(Server)).toEqual({ port: 3000 });
         expect(calls).toEqual(["config", "server"]);
@@ -111,12 +121,12 @@ describe("optional dependencies", () => {
         const Request = token("Request").of<{ readonly id: string }>();
         const Service = token("Service").of<{ readonly requestId: string }>();
 
-        const app = createContainer(
+        const app = defineContainer(
             [Request, Service],
             bind.scoped(Service, { request: optional(Request) }, ({ request }) => ({
                 requestId: request?.id ?? "none",
             })),
-        );
+        ).create();
         const requestScope = app.createScope(bind.scoped(Request, () => ({ id: "request-1" })));
 
         expect(app.resolve(Service)).toEqual({ requestId: "none" });
@@ -127,12 +137,12 @@ describe("optional dependencies", () => {
         const Logger = token("Logger").of<{ readonly log: (message: string) => void }>();
         const Service = token("Service").of<{ readonly getLogger: () => unknown }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Logger, Service],
             bind(Service, { logger: optional(ref(Logger)) }, ({ logger }) => ({
                 getLogger: () => logger?.value,
             })),
-        );
+        ).create();
 
         expect(container.resolve(Service).getLogger()).toBeUndefined();
     });
@@ -145,7 +155,7 @@ describe("optional dependencies", () => {
         const logger = { log: vi.fn() };
         const loggerFactory = vi.fn(() => logger);
 
-        const container = createContainer(
+        const container = defineContainer(
             [Logger, Service],
             bind(Service, { logger: optional(ref(Logger)) }, ({ logger }) => ({
                 getLogger: () => {
@@ -157,7 +167,7 @@ describe("optional dependencies", () => {
                 },
             })),
             bind(Logger, loggerFactory),
-        );
+        ).create();
 
         const service = container.resolve(Service);
 
@@ -170,12 +180,12 @@ describe("optional dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Registry, { hooks: optional(all(Hooks)) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: undefined });
     });
@@ -184,14 +194,14 @@ describe("optional dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
 
-        const container = createContainer(
+        const container = defineContainer(
             [Hooks, Registry],
             bind(Hooks, () => ({ name: "first" })),
             bind(Hooks, () => ({ name: "second" })),
             bind(Registry, { hooks: optional(all(Hooks)) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
-        );
+        ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
     });

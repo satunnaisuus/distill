@@ -1,9 +1,9 @@
-import { type Binding, bind, createContainer } from "@satunnaisuus/distill";
+import { type Binding, bind, defineContainer } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config } from "./fixtures/services.js";
 import { type ConfigBinding, type PortBinding, type ServerBinding, tokenList, tokens } from "./fixtures/tokens.js";
 
-test("createContainer validates and preserves bindings passed as readonly tuples", () => {
+test("defineContainer validates and preserves bindings passed as readonly tuples", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -11,13 +11,13 @@ test("createContainer validates and preserves bindings passed as readonly tuples
         bind(tokens.config, () => ({ port: 3000 })),
     ] as const;
 
-    const container = createContainer(tokenList, ...bindings);
+    const container = defineContainer(tokenList, ...bindings).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.config)).type.toBe<Config>();
 });
 
-test("createContainer validates and preserves bindings passed as typed tuples", () => {
+test("defineContainer validates and preserves bindings passed as typed tuples", () => {
     const bindings: readonly [ServerBinding, ConfigBinding] = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -25,13 +25,13 @@ test("createContainer validates and preserves bindings passed as typed tuples", 
         bind(tokens.config, () => ({ port: 3000 })),
     ];
 
-    const container = createContainer(tokenList, ...bindings);
+    const container = defineContainer(tokenList, ...bindings).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.config)).type.toBe<Config>();
 });
 
-test("createContainer validates and preserves bindings passed as mutable tuples", () => {
+test("defineContainer validates and preserves bindings passed as mutable tuples", () => {
     const bindings: [ServerBinding, ConfigBinding] = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -39,13 +39,13 @@ test("createContainer validates and preserves bindings passed as mutable tuples"
         bind(tokens.config, () => ({ port: 3000 })),
     ];
 
-    const container = createContainer(tokenList, ...bindings);
+    const container = defineContainer(tokenList, ...bindings).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.config)).type.toBe<Config>();
 });
 
-test("createContainer validates and preserves bindings passed with satisfies readonly tuple", () => {
+test("defineContainer validates and preserves bindings passed with satisfies readonly tuple", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -54,14 +54,14 @@ test("createContainer validates and preserves bindings passed with satisfies rea
         bind(tokens.port, () => 3000),
     ] satisfies readonly [ServerBinding, ConfigBinding, PortBinding];
 
-    const container = createContainer(tokenList, ...bindings);
+    const container = defineContainer(tokenList, ...bindings).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.config)).type.toBe<Config>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
-test("createContainer rejects invalid bindings passed as readonly tuples", () => {
+test("defineContainer rejects invalid bindings passed as readonly tuples", () => {
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -69,31 +69,31 @@ test("createContainer rejects invalid bindings passed as readonly tuples", () =>
     ] as const;
 
     expect(() => {
-        createContainer(tokenList, ...bindings);
+        defineContainer(tokenList, ...bindings).create();
     }).type.toRaiseError("__missing_dependencies__");
 });
 
-test("createContainer rejects valid bindings passed through mutable arrays", () => {
+test("defineContainer rejects valid bindings passed through mutable arrays", () => {
     const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
 
     expect(() => {
-        createContainer(tokenList, ...bindings);
+        defineContainer(tokenList, ...bindings).create();
     }).type.toRaiseError("__bindings_must_be_tuple__");
 });
 
-test("createContainer rejects valid bindings passed through readonly arrays", () => {
+test("defineContainer rejects valid bindings passed through readonly arrays", () => {
     const bindings: readonly Binding[] = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
 
     expect(() => {
-        createContainer(tokenList, ...bindings);
+        defineContainer(tokenList, ...bindings).create();
     }).type.toRaiseError("__bindings_must_be_tuple__");
 });
 
 test("createScope validates and preserves bindings passed as readonly tuples", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -107,10 +107,10 @@ test("createScope validates and preserves bindings passed as readonly tuples", (
 });
 
 test("createScope validates and preserves bindings passed as typed tuples", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const bindings: readonly [ServerBinding] = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -124,10 +124,10 @@ test("createScope validates and preserves bindings passed as typed tuples", () =
 });
 
 test("createScope validates and preserves bindings passed as mutable tuples", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const bindings: [ServerBinding] = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -141,10 +141,10 @@ test("createScope validates and preserves bindings passed as mutable tuples", ()
 });
 
 test("createScope validates and preserves bindings passed with satisfies readonly tuple", () => {
-    const app = createContainer(
+    const app = defineContainer(
         tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
-    );
+    ).create();
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -160,7 +160,7 @@ test("createScope validates and preserves bindings passed with satisfies readonl
 });
 
 test("createScope rejects invalid bindings passed as readonly tuples", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
     const bindings = [
         bind(tokens.server, { config: tokens.config }, ({ config }) => ({
             port: config.port,
@@ -173,7 +173,7 @@ test("createScope rejects invalid bindings passed as readonly tuples", () => {
 });
 
 test("createScope rejects valid bindings passed through mutable arrays", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
     const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
 
     expect(() => {
@@ -182,7 +182,7 @@ test("createScope rejects valid bindings passed through mutable arrays", () => {
 });
 
 test("createScope rejects valid bindings passed through readonly arrays", () => {
-    const app = createContainer(tokenList);
+    const app = defineContainer(tokenList).create();
     const bindings: readonly Binding[] = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
 
     expect(() => {

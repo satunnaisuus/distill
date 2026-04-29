@@ -10,8 +10,10 @@ import {
 } from "./dependency-tracker";
 import { disposeScope } from "./disposal";
 import { assertDisposeOption } from "./dispose-option";
-import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes } from "./graph";
+import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes, SameTokenKey } from "./graph";
 import { isOptionalDependency } from "./optional";
+import type { AnyBindingOverride, BindingOverride, BindingOverrideAll } from "./override";
+import { isBindingOverride, isBindingOverrideAll } from "./override";
 import type { AnyRefToken, DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
 import {
@@ -47,12 +49,14 @@ import type {
     AnyToken,
     AnyTokenArray,
     IsMultiToken,
+    TokenArrayTokens,
     TokenByKey,
     TokenKey,
+    TokensNotIn,
     TokenValue,
 } from "./token";
 import { isRuntimeMultiToken, tokenKey } from "./token";
-import type { IfNever } from "./type-utils";
+import type { HasTrue, IfNever } from "./type-utils";
 import type {
     MissingDependencyKeysFromAllTokenBindings,
     MissingDependencyKeysFromToken,
@@ -147,6 +151,188 @@ type CreateScopeFn<
 ) => Container<readonly [...TBindings, ...TScopeBindings], TTokenArray, readonly [...TScopes, TScopeBindings]>;
 
 type BindingTokenArray<TBindings extends readonly AnyBinding[]> = readonly BindingTokens<TBindings>[];
+
+type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
+    TTokens extends AnyToken ? SameTokenKey<TTokens, TToken> : false
+>;
+
+type SingleOverrideTokens<TOverrides extends readonly AnyBindingOverride[]> = TOverrides[number] extends infer TOverride
+    ? TOverride extends BindingOverride<infer TBinding>
+        ? TBinding["token"]
+        : never
+    : never;
+
+type MultiOverrideTokens<TOverrides extends readonly AnyBindingOverride[]> = TOverrides[number] extends infer TOverride
+    ? TOverride extends BindingOverrideAll<infer TToken>
+        ? TToken
+        : never
+    : never;
+
+type BindingIsOverridden<TBinding extends AnyBinding, TOverrides extends readonly AnyBindingOverride[]> =
+    IsMultiToken<TBinding["token"]> extends true
+        ? HasTokenWithSameKey<MultiOverrideTokens<TOverrides>, TBinding["token"]>
+        : HasTokenWithSameKey<SingleOverrideTokens<TOverrides>, TBinding["token"]>;
+
+type RemoveOverriddenBindings<
+    TBindings extends readonly AnyBinding[],
+    TOverrides extends readonly AnyBindingOverride[],
+> = TBindings extends readonly [
+    infer TCurrentBinding extends AnyBinding,
+    ...infer TRemainingBindings extends AnyBinding[],
+]
+    ? BindingIsOverridden<TCurrentBinding, TOverrides> extends true
+        ? RemoveOverriddenBindings<TRemainingBindings, TOverrides>
+        : readonly [TCurrentBinding, ...RemoveOverriddenBindings<TRemainingBindings, TOverrides>]
+    : readonly [];
+
+type SingleOverrideBindings<TOverrides extends readonly AnyBindingOverride[]> = TOverrides extends readonly [
+    infer TCurrentOverride extends AnyBindingOverride,
+    ...infer TRemainingOverrides extends AnyBindingOverride[],
+]
+    ? TCurrentOverride extends BindingOverride<infer TBinding>
+        ? readonly [TBinding, ...SingleOverrideBindings<TRemainingOverrides>]
+        : SingleOverrideBindings<TRemainingOverrides>
+    : readonly [];
+
+type MultiOverrideBindings<TOverrides extends readonly AnyBindingOverride[]> = TOverrides extends readonly [
+    infer TCurrentOverride extends AnyBindingOverride,
+    ...infer TRemainingOverrides extends AnyBindingOverride[],
+]
+    ? TCurrentOverride extends BindingOverrideAll<AnyMultiToken, infer TBindings>
+        ? readonly [...TBindings, ...MultiOverrideBindings<TRemainingOverrides>]
+        : MultiOverrideBindings<TRemainingOverrides>
+    : readonly [];
+
+type ApplyContainerOverrides<
+    TBindings extends readonly AnyBinding[],
+    TOverrides extends readonly AnyBindingOverride[],
+> = readonly [
+    ...RemoveOverriddenBindings<TBindings, TOverrides>,
+    ...SingleOverrideBindings<TOverrides>,
+    ...MultiOverrideBindings<TOverrides>,
+];
+
+type OverrideOperationToken<TOverride extends AnyBindingOverride> =
+    TOverride extends BindingOverride<infer TBinding>
+        ? TBinding["token"]
+        : TOverride extends BindingOverrideAll<infer TToken>
+          ? TToken
+          : never;
+
+type OverrideOperationTokens<TOverrides extends readonly AnyBindingOverride[]> =
+    TOverrides[number] extends infer TOverride extends AnyBindingOverride ? OverrideOperationToken<TOverride> : never;
+
+type DuplicateOverrideTokenKeys<
+    TOverrides extends readonly AnyBindingOverride[],
+    TSeenTokens extends AnyToken = never,
+> = number extends TOverrides["length"]
+    ? never
+    : TOverrides extends readonly [
+            infer TCurrentOverride extends AnyBindingOverride,
+            ...infer TRemainingOverrides extends readonly AnyBindingOverride[],
+        ]
+      ? OverrideOperationToken<TCurrentOverride> extends infer TCurrentToken extends AnyToken
+          ? HasTokenWithSameKey<TSeenTokens, TCurrentToken> extends true
+              ? TokenKey<TCurrentToken> | DuplicateOverrideTokenKeys<TRemainingOverrides, TSeenTokens>
+              : DuplicateOverrideTokenKeys<TRemainingOverrides, TSeenTokens | TCurrentToken>
+          : never
+      : never;
+
+type MissingSingleOverrideTargetKeys<
+    TOverrides extends readonly AnyBindingOverride[],
+    TBindings extends readonly AnyBinding[],
+> = TOverrides[number] extends infer TOverride
+    ? TOverride extends BindingOverride<infer TBinding>
+        ? HasTokenWithSameKey<BindingTokens<TBindings>, TBinding["token"]> extends true
+            ? never
+            : TokenKey<TBinding["token"]>
+        : never
+    : never;
+
+type TupleOverridesError<TOverrides extends readonly AnyBindingOverride[]> = number extends TOverrides["length"]
+    ? {
+          readonly __overrides_must_be_tuple__: true;
+      }
+    : {};
+
+type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
+
+type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
+
+type DuplicateOverridesError<TOverrides extends readonly AnyBindingOverride[]> = ValidationErrorUnlessNever<
+    DuplicateOverrideTokenKeys<TOverrides>,
+    {
+        readonly __duplicate_override__: DuplicateOverrideTokenKeys<TOverrides>;
+    }
+>;
+
+type OverrideTokenKeysOutsideTokenList<
+    TOverrides extends readonly AnyBindingOverride[],
+    TTokenArray extends AnyTokenArray,
+> = TokenKey<TokensNotIn<OverrideOperationTokens<TOverrides>, TokenArrayTokens<TTokenArray>>>;
+
+type OverrideTokensOutsideTokenListError<
+    TOverrides extends readonly AnyBindingOverride[],
+    TTokenArray extends AnyTokenArray,
+> = ValidationErrorUnlessNever<
+    OverrideTokenKeysOutsideTokenList<TOverrides, TTokenArray>,
+    {
+        readonly __override_token_not_in_tokens__: OverrideTokenKeysOutsideTokenList<TOverrides, TTokenArray>;
+    }
+>;
+
+type MissingSingleOverrideTargetsError<
+    TOverrides extends readonly AnyBindingOverride[],
+    TBindings extends readonly AnyBinding[],
+> = ValidationErrorUnlessNever<
+    MissingSingleOverrideTargetKeys<TOverrides, TBindings>,
+    {
+        readonly __override_target_not_bound__: MissingSingleOverrideTargetKeys<TOverrides, TBindings>;
+    }
+>;
+
+type InvalidOverrideGraphError<
+    TOverrides extends readonly AnyBindingOverride[],
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+> = IfNever<
+    TOverrides[number],
+    {},
+    ValidationErrorIf<
+        TBindings extends ValidateBindings<TBindings, TTokenArray> ? false : true,
+        {
+            readonly __invalid_overrides__: ValidateBindings<TBindings, TTokenArray>;
+        }
+    >
+>;
+
+type ValidateContainerOverrides<
+    TOverrides extends readonly AnyBindingOverride[],
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+    TResolvedBindings extends readonly AnyBinding[] = ApplyContainerOverrides<TBindings, TOverrides>,
+> = TupleOverridesError<TOverrides> &
+    DuplicateOverridesError<TOverrides> &
+    OverrideTokensOutsideTokenListError<TOverrides, TTokenArray> &
+    MissingSingleOverrideTargetsError<TOverrides, TBindings> &
+    InvalidOverrideGraphError<TOverrides, TResolvedBindings, TTokenArray>;
+
+type CreateDefinitionContainerFn<TBindings extends readonly AnyBinding[], TTokenArray extends AnyTokenArray> = <
+    const TOverrides extends readonly AnyBindingOverride[],
+>(
+    ...overrides: TOverrides & ValidateContainerOverrides<TOverrides, TBindings, TTokenArray>
+) => Container<
+    ApplyContainerOverrides<TBindings, TOverrides>,
+    TTokenArray,
+    readonly [ApplyContainerOverrides<TBindings, TOverrides>]
+>;
+
+export type ContainerDefinition<
+    TBindings extends readonly AnyBinding[] = [],
+    TTokenArray extends AnyTokenArray = BindingTokenArray<TBindings>,
+> = {
+    create: CreateDefinitionContainerFn<TBindings, TTokenArray>;
+};
 
 export type Container<
     TBindings extends readonly AnyBinding[] = [],
@@ -778,7 +964,7 @@ const registerBindings = (scope: RuntimeScope, bindings: readonly AnyBinding[]):
     assertNoCircularDependencies(scope);
 };
 
-const createContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
+const createRuntimeContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
     return {
         get disposed() {
             return scope.disposed;
@@ -796,7 +982,7 @@ const createContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
             registerBindings(childScope, bindings);
             scope.children.add(childScope);
 
-            return createContainerForScope(childScope);
+            return createRuntimeContainerForScope(childScope);
         },
         dispose() {
             return disposeScope(scope);
@@ -804,18 +990,152 @@ const createContainerForScope = (scope: RuntimeScope): RuntimeContainer => {
     };
 };
 
-export const createContainer = <const TTokenArray extends AnyTokenArray, const TBindings extends readonly AnyBinding[]>(
-    tokens: TTokenArray & ValidateTokenList<TTokenArray>,
-    ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
-): Container<TBindings, TTokenArray, readonly [TBindings]> => {
-    const tokenListContext = createTokenListContext(tokens);
-    const rootScope = createRuntimeScope({
+const createRootScope = (tokenListContext: TokenListContext): RuntimeScope => {
+    return createRuntimeScope({
         assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
         isMultiTokenKey: tokenListContext.isMultiTokenKey,
         resolvingPath: [],
     });
+};
 
-    registerBindings(rootScope, bindings);
+const collectSingleBindingKeys = (tokenListContext: TokenListContext, bindings: readonly AnyBinding[]): Set<string> => {
+    const bindingKeys = new Set<string>();
 
-    return createContainerForScope(rootScope) as unknown as Container<TBindings, TTokenArray, readonly [TBindings]>;
+    for (const binding of bindings) {
+        if (!isBinding(binding)) {
+            throw new Error("Bindings must be created with bind");
+        }
+
+        const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+
+        if (!tokenListContext.isMultiTokenKey(bindingTokenKey)) {
+            bindingKeys.add(bindingTokenKey);
+        }
+    }
+
+    return bindingKeys;
+};
+
+const applyBindingOverrides = (
+    tokenListContext: TokenListContext,
+    bindings: readonly AnyBinding[],
+    overrides: readonly AnyBindingOverride[],
+): readonly AnyBinding[] => {
+    const singleBindingKeys = collectSingleBindingKeys(tokenListContext, bindings);
+    const singleOverrides = new Map<string, AnyBinding>();
+    const multiOverrides = new Map<string, readonly AnyBinding[]>();
+
+    for (const currentOverride of overrides) {
+        if (isBindingOverride(currentOverride)) {
+            const binding = currentOverride.binding;
+
+            if (!isBinding(binding)) {
+                throw new Error("Override bindings must be created with bind");
+            }
+
+            const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+
+            if (tokenListContext.isMultiTokenKey(bindingTokenKey)) {
+                throw new Error(`Multibind token "${bindingTokenKey}" must be overridden with overrideAll`);
+            }
+
+            if (!singleBindingKeys.has(bindingTokenKey)) {
+                throw new Error(`Service "${bindingTokenKey}" is not registered in the container definition`);
+            }
+
+            if (singleOverrides.has(bindingTokenKey)) {
+                throw new Error(`Service "${bindingTokenKey}" is already overridden`);
+            }
+
+            singleOverrides.set(bindingTokenKey, binding);
+            continue;
+        }
+
+        if (isBindingOverrideAll(currentOverride)) {
+            const overrideTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+
+            if (!tokenListContext.isMultiTokenKey(overrideTokenKey)) {
+                throw new Error(`Token "${overrideTokenKey}" is not a multibind token`);
+            }
+
+            if (multiOverrides.has(overrideTokenKey)) {
+                throw new Error(`Multibind token "${overrideTokenKey}" is already overridden`);
+            }
+
+            if (!Array.isArray(currentOverride.bindings)) {
+                throw new Error("overrideAll bindings must be an array");
+            }
+
+            for (const binding of currentOverride.bindings) {
+                if (!isBinding(binding)) {
+                    throw new Error("overrideAll bindings must be created with bind");
+                }
+
+                const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+
+                if (bindingTokenKey !== overrideTokenKey || !tokenListContext.isMultiTokenKey(bindingTokenKey)) {
+                    throw new Error(
+                        `overrideAll for "${overrideTokenKey}" only accepts bindings for the same multibind token`,
+                    );
+                }
+            }
+
+            multiOverrides.set(overrideTokenKey, currentOverride.bindings);
+            continue;
+        }
+
+        throw new Error("Overrides must be created with override or overrideAll");
+    }
+
+    const resolvedBindings: AnyBinding[] = [];
+
+    for (const binding of bindings) {
+        const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+
+        if (tokenListContext.isMultiTokenKey(bindingTokenKey)) {
+            if (!multiOverrides.has(bindingTokenKey)) {
+                resolvedBindings.push(binding);
+            }
+            continue;
+        }
+
+        if (!singleOverrides.has(bindingTokenKey)) {
+            resolvedBindings.push(binding);
+        }
+    }
+
+    resolvedBindings.push(...singleOverrides.values());
+
+    for (const overrideBindings of multiOverrides.values()) {
+        resolvedBindings.push(...overrideBindings);
+    }
+
+    return resolvedBindings;
+};
+
+const createRuntimeContainer = (
+    tokenListContext: TokenListContext,
+    bindings: readonly AnyBinding[],
+    overrides: readonly AnyBindingOverride[],
+): RuntimeContainer => {
+    const rootScope = createRootScope(tokenListContext);
+    const resolvedBindings = applyBindingOverrides(tokenListContext, bindings, overrides);
+
+    registerBindings(rootScope, resolvedBindings);
+
+    return createRuntimeContainerForScope(rootScope);
+};
+
+export const defineContainer = <const TTokenArray extends AnyTokenArray, const TBindings extends readonly AnyBinding[]>(
+    tokens: TTokenArray & ValidateTokenList<TTokenArray>,
+    ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
+): ContainerDefinition<TBindings, TTokenArray> => {
+    const tokenListContext = createTokenListContext(tokens);
+    registerBindings(createRootScope(tokenListContext), bindings);
+
+    return {
+        create(...overrides: AnyBindingOverride[]) {
+            return createRuntimeContainer(tokenListContext, bindings, overrides);
+        },
+    } as unknown as ContainerDefinition<TBindings, TTokenArray>;
 };

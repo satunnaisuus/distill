@@ -1,7 +1,7 @@
 import {
     all,
     bind,
-    createContainer,
+    defineContainer,
     multiToken,
     type OptionalToken,
     optional,
@@ -64,34 +64,34 @@ test("ResolvedDependencies exposes optional dependency values as undefined union
     }>();
 });
 
-test("createContainer allows singleton bindings with missing optional dependencies", () => {
-    const container = createContainer(
+test("defineContainer allows singleton bindings with missing optional dependencies", () => {
+    const container = defineContainer(
         tokenList,
         bind(tokens.server, { config: optional(tokens.config) }, ({ config }) => ({
             port: config?.port ?? 3000,
         })),
-    );
+    ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
 test("optional dependency tokens must still belong to the token list", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.port, { external: optional(externalToken) }, ({ external }) => external ?? 3000),
-        );
+        ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("optional ref dependency tokens must still belong to the token list", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.server, { external: optional(ref(externalToken)) }, () => ({
                 port: 3000,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
@@ -100,33 +100,33 @@ test("optional all dependency tokens must still belong to the token list", () =>
     const registry = token("registry").of<{ readonly handlers: Handler[] | undefined }>();
 
     expect(() => {
-        createContainer(
+        defineContainer(
             [registry],
             bind(registry, { handlers: optional(all(handlers)) }, ({ handlers }) => ({ handlers })),
-        );
+        ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("registered optional dependencies still validate transitive missing dependencies", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind(tokens.server, { port: optional(tokens.port) }, ({ port }) => ({
                 port: port ?? 3000,
             })),
             bind(tokens.port, { config: tokens.config }, ({ config }) => config.port),
-        );
+        ).create();
     }).type.toRaiseError("__missing_dependencies__");
 });
 
 test("missing optional dependencies do not block scoped and transient resolve surfaces", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind.scoped(tokens.server, { config: optional(tokens.config) }, ({ config }) => ({
             port: config?.port ?? 3000,
         })),
         bind.transient(tokens.port, { config: optional(tokens.config) }, ({ config }) => config?.port ?? 3000),
-    );
+    ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
@@ -134,30 +134,30 @@ test("missing optional dependencies do not block scoped and transient resolve su
 
 test("registered optional scoped dependencies are still rejected from singleton graphs", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             tokenList,
             bind.singleton(tokens.server, { config: optional(tokens.config) }, ({ config }) => ({
                 port: config?.port ?? 3000,
             })),
             bind.scoped(tokens.config, () => ({ port: 3000 })),
-        );
+        ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
 test("missing optional scoped dependencies are allowed in singleton graphs", () => {
-    const container = createContainer(
+    const container = defineContainer(
         tokenList,
         bind.singleton(tokens.server, { config: optional(tokens.config) }, ({ config }) => ({
             port: config?.port ?? 3000,
         })),
-    );
+    ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
 });
 
 test("registered optional eager dependencies still participate in cycle validation", () => {
     expect(() => {
-        createContainer(
+        defineContainer(
             cycleTokenList,
             bind(cycleTokens.serviceA, { serviceB: optional(cycleTokens.serviceB) }, ({ serviceB }) => ({
                 getB: () => serviceB as ServiceB,
@@ -165,12 +165,12 @@ test("registered optional eager dependencies still participate in cycle validati
             bind(cycleTokens.serviceB, { serviceA: cycleTokens.serviceA }, ({ serviceA }) => ({
                 getA: () => serviceA,
             })),
-        );
+        ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
 
 test("optional refs do not participate in eager cycle validation", () => {
-    const container = createContainer(
+    const container = defineContainer(
         cycleTokenList,
         bind(cycleTokens.serviceA, { serviceB: cycleTokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
@@ -178,7 +178,7 @@ test("optional refs do not participate in eager cycle validation", () => {
         bind(cycleTokens.serviceB, { serviceA: optional(ref(cycleTokens.serviceA)) }, ({ serviceA }) => ({
             getA: () => serviceA?.value as ServiceA,
         })),
-    );
+    ).create();
 
     expect(container.resolve(cycleTokens.serviceA)).type.toBe<ServiceA>();
     expect(container.resolve(cycleTokens.serviceB)).type.toBe<ServiceB>();
