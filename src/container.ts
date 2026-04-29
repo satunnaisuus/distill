@@ -1,3 +1,4 @@
+import { isAllDependency } from "./all";
 import type { AnyBinding } from "./bind";
 import { getBindingDependencies, getBindingLifetime, isBinding } from "./bind";
 import type { DependencyMap } from "./dependencies";
@@ -302,15 +303,29 @@ const getEagerDependencyKeys = (
     const eagerDependencyKeys: string[] = [];
 
     for (const dependency of Object.values(dependencies)) {
-        if (!isRefDependency(dependency)) {
-            const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependency);
+        if (isRefDependency(dependency)) {
+            continue;
+        }
 
-            if (tokenListContext.isMultiTokenKey(dependencyTokenKey)) {
-                throw new Error(`Multibind token "${dependencyTokenKey}" must be resolved with resolveAll`);
+        if (isAllDependency(dependency)) {
+            const dependencyToken = dependency.resolveToken();
+            const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+
+            if (!tokenListContext.isMultiTokenKey(dependencyTokenKey)) {
+                throw new Error(`Token "${dependencyTokenKey}" is not a multibind token`);
             }
 
             eagerDependencyKeys.push(dependencyTokenKey);
+            continue;
         }
+
+        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependency);
+
+        if (tokenListContext.isMultiTokenKey(dependencyTokenKey)) {
+            throw new Error(`Multibind token "${dependencyTokenKey}" must be resolved with resolveAll`);
+        }
+
+        eagerDependencyKeys.push(dependencyTokenKey);
     }
 
     return eagerDependencyKeys;
@@ -336,6 +351,15 @@ const createDependencyFactory = (
                     addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
                 }
                 resolvedDependency = getOrCreateRefInstance(scope, dependencyToken, dependencyTracker);
+            } else if (isAllDependency(dependency)) {
+                const dependencyToken = dependency.resolveToken();
+                const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+                assertMultiTokenKey(scope, dependencyTokenKey);
+                resolvedDependency = resolveAllActualWithOwnership(
+                    scope,
+                    dependencyToken,
+                    dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
+                ).map((dependencyResult) => dependencyResult.value);
             } else {
                 const dependencyResult = resolveActualWithOwnership(
                     scope,
@@ -539,12 +563,20 @@ const resolveAllActual = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
 ): Array<TokenValue<TToken>> => {
+    return resolveAllActualWithOwnership(scope, currentToken).map((dependencyResult) => dependencyResult.value);
+};
+
+const resolveAllActualWithOwnership = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+): Array<RuntimeResolutionResult<TokenValue<TToken>>> => {
     const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
     assertMultiTokenKey(scope, currentTokenKey);
     assertScopeIsActive(scope);
 
     return findBindings(scope, currentTokenKey).map((resolvedBinding) => {
-        return resolveBindingWithOwnership<TToken>(scope, currentTokenKey, resolvedBinding).value;
+        return resolveBindingWithOwnership<TToken>(scope, currentTokenKey, resolvedBinding, options);
     });
 };
 

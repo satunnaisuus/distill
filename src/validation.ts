@@ -1,10 +1,13 @@
 import type { AnyBinding } from "./bind";
 import type {
+    BindingAllDependencyTokens,
     BindingContextInScopes,
     BindingDependencyTokens,
-    BindingEagerDependencyTokens,
+    BindingEagerAllDependencyTokens,
+    BindingEagerSingleDependencyTokens,
     BindingResolutionContext,
     BindingScopes,
+    BindingSingleDependencyTokens,
     HasBindingLifetime,
     HasBindingToken,
     HasResolutionNode,
@@ -22,13 +25,28 @@ type HasCircularDependencyFromTokens<
     TPath extends ResolutionNode,
 > = HasCircularDependencyFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath>;
 
+type HasCircularDependencyFromAllTokens<
+    TScopes extends BindingScopes,
+    TTokens extends AnyToken,
+    TPath extends ResolutionNode,
+> = HasCircularDependencyFromResolution<ResolveAllBindingContextsInScopes<TScopes, TTokens>, TPath>;
+
+type HasCircularDependencyFromBindingDependencies<
+    TScopes extends BindingScopes,
+    TBinding extends AnyBinding,
+    TPath extends ResolutionNode,
+> = HasTrue<
+    | HasCircularDependencyFromTokens<TScopes, BindingEagerSingleDependencyTokens<TBinding>, TPath>
+    | HasCircularDependencyFromAllTokens<TScopes, BindingEagerAllDependencyTokens<TBinding>, TPath>
+>;
+
 type HasCircularDependencyFromResolution<TResolution, TPath extends ResolutionNode> = HasTrue<
     TResolution extends BindingResolutionContext
         ? HasResolutionNode<TPath, TResolution["node"]> extends true
             ? true
-            : HasCircularDependencyFromTokens<
+            : HasCircularDependencyFromBindingDependencies<
                   TResolution["dependencyScopes"],
-                  BindingEagerDependencyTokens<TResolution["binding"]>,
+                  TResolution["binding"],
                   TPath | TResolution["node"]
               >
         : false
@@ -45,15 +63,30 @@ type HasScopedDependencyFromTokens<
     TPath extends ResolutionNode,
 > = HasScopedDependencyFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath>;
 
+type HasScopedDependencyFromAllTokens<
+    TScopes extends BindingScopes,
+    TTokens extends AnyToken,
+    TPath extends ResolutionNode,
+> = HasScopedDependencyFromResolution<ResolveAllBindingContextsInScopes<TScopes, TTokens>, TPath>;
+
+type HasScopedDependencyFromBindingDependencies<
+    TScopes extends BindingScopes,
+    TBinding extends AnyBinding,
+    TPath extends ResolutionNode,
+> = HasTrue<
+    | HasScopedDependencyFromTokens<TScopes, BindingSingleDependencyTokens<TBinding>, TPath>
+    | HasScopedDependencyFromAllTokens<TScopes, BindingAllDependencyTokens<TBinding>, TPath>
+>;
+
 type HasScopedDependencyFromResolution<TResolution, TPath extends ResolutionNode> = HasTrue<
     TResolution extends BindingResolutionContext
         ? HasBindingLifetime<TResolution["binding"], "scoped"> extends true
             ? true
             : HasResolutionNode<TPath, TResolution["node"]> extends true
               ? false
-              : HasScopedDependencyFromTokens<
+              : HasScopedDependencyFromBindingDependencies<
                     TResolution["dependencyScopes"],
-                    BindingDependencyTokens<TResolution["binding"]>,
+                    TResolution["binding"],
                     TPath | TResolution["node"]
                 >
         : false
@@ -62,7 +95,7 @@ type HasScopedDependencyFromResolution<TResolution, TPath extends ResolutionNode
 type HasScopedDependencyFromBinding<
     TScopes extends BindingScopes,
     TBinding extends AnyBinding,
-> = HasScopedDependencyFromTokens<TScopes, BindingDependencyTokens<TBinding>, never>;
+> = HasScopedDependencyFromBindingDependencies<TScopes, TBinding, never>;
 
 type MissingDependencyKeysFromTokens<
     TScopes extends BindingScopes,
@@ -70,6 +103,14 @@ type MissingDependencyKeysFromTokens<
     TPath extends ResolutionNode,
 > = TTokens extends AnyToken
     ? MissingDependencyKeysFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath, TokenKey<TTokens>>
+    : never;
+
+type MissingDependencyKeysFromAllTokens<
+    TScopes extends BindingScopes,
+    TTokens extends AnyToken,
+    TPath extends ResolutionNode,
+> = TTokens extends AnyToken
+    ? MissingDependencyKeysFromResolution<ResolveAllBindingContextsInScopes<TScopes, TTokens>, TPath>
     : never;
 
 type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
@@ -118,11 +159,17 @@ type MissingDependencyKeysFromResolvedBinding<
 > =
     HasResolutionNode<TPath, TResolution["node"]> extends true
         ? never
-        : MissingDependencyKeysFromTokens<
-              TResolution["dependencyScopes"],
-              BindingDependencyTokens<TResolution["binding"]>,
-              TPath | TResolution["node"]
-          >;
+        :
+              | MissingDependencyKeysFromTokens<
+                    TResolution["dependencyScopes"],
+                    BindingSingleDependencyTokens<TResolution["binding"]>,
+                    TPath | TResolution["node"]
+                >
+              | MissingDependencyKeysFromAllTokens<
+                    TResolution["dependencyScopes"],
+                    BindingAllDependencyTokens<TResolution["binding"]>,
+                    TPath | TResolution["node"]
+                >;
 
 type MissingDependencyKeysFromResolution<TResolution, TPath extends ResolutionNode, TWhenMissing = never> = IfNever<
     TResolution,

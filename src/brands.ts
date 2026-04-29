@@ -1,4 +1,5 @@
 export const tokenBrand: unique symbol = Symbol("tokenBrand");
+export const allDependencyBrand: unique symbol = Symbol("allDependency");
 export const bindingBrand: unique symbol = Symbol("bindingBrand");
 export const bindingDependenciesBrand: unique symbol = Symbol("bindingDependencies");
 export const bindingLifetimeBrand: unique symbol = Symbol("bindingLifetime");

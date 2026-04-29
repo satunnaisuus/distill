@@ -1,4 +1,6 @@
 import {
+    type AllToken,
+    all,
     type Binding,
     type BindingLifetime,
     type BindingOptions,
@@ -7,6 +9,8 @@ import {
     createContainer,
     type DependencyMap,
     type Disposer,
+    type MultiToken,
+    multiToken,
     type Ref,
     type RefToken,
     type ResolvedDependencies,
@@ -23,9 +27,12 @@ test("public helper types preserve their documented type relationships", () => {
         readonly config: typeof tokens.config;
         readonly logger: RefToken<typeof tokens.logger>;
     };
+    const handlers = multiToken("handlers").of<(message: string) => number>();
 
     expect(token("config")).type.toBe<TokenBuilder<"config">>();
     expect(token("config").of<Config>()).type.toBe<Token<"config", Config>>();
+    expect(handlers).type.toBe<MultiToken<"handlers", (message: string) => number>>();
+    expect(all(handlers)).type.toBe<AllToken<typeof handlers>>();
     expect(token("unknown").of()).type.toBe<Token<"unknown", unknown>>();
     expect<Dependencies>().type.toBeAssignableTo<DependencyMap>();
     expect<BindingLifetime>().type.toBe<"singleton" | "scoped" | "transient">();
@@ -34,6 +41,9 @@ test("public helper types preserve their documented type relationships", () => {
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;
+    }>();
+    expect<ResolvedDependencies<{ readonly handlers: AllToken<typeof handlers> }>>().type.toBe<{
+        readonly handlers: Array<(message: string) => number>;
     }>();
     expect<Binding<typeof tokens.port>["factory"]>().type.toBe<() => number>();
     expect<Binding<typeof tokens.port, { readonly config: typeof tokens.config }>["factory"]>().type.toBe<

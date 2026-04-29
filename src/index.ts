@@ -1,3 +1,5 @@
+export type { AllToken } from "./all";
+export { all } from "./all";
 export type { Binding, BindingLifetime, BindingOptions, Disposer } from "./bind";
 export { bind } from "./bind";
 export type { Container } from "./container";

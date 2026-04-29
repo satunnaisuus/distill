@@ -1,5 +1,6 @@
+import type { AllToken, AnyAllToken } from "./all";
 import { refDependencyBrand } from "./brands";
-import type { AnySingleToken } from "./token";
+import type { AnyMultiToken, AnySingleToken } from "./token";
 
 export type Ref<TValue> = {
     readonly value: TValue;
@@ -11,9 +12,29 @@ export type RefToken<TToken extends AnySingleToken> = {
 };
 
 export type AnyRefToken = RefToken<AnySingleToken>;
-export type DependencyReference = AnySingleToken | AnyRefToken;
+export type DependencyReference = AnySingleToken | AnyRefToken | AnyAllToken;
 export type DependencyToken<TDependency extends DependencyReference> =
-    TDependency extends RefToken<infer TToken> ? TToken : TDependency;
+    TDependency extends RefToken<infer TToken>
+        ? TToken
+        : TDependency extends AllToken<infer TToken>
+          ? TToken
+          : TDependency;
+export type SingleDependencyToken<TDependency extends DependencyReference> = Extract<
+    DependencyToken<TDependency>,
+    AnySingleToken
+>;
+export type AllDependencyToken<TDependency extends DependencyReference> =
+    TDependency extends AllToken<infer TToken> ? TToken : never;
+export type EagerDependencyToken<TDependency extends DependencyReference> =
+    TDependency extends RefToken<AnySingleToken> ? never : DependencyToken<TDependency>;
+export type EagerSingleDependencyToken<TDependency extends DependencyReference> = Extract<
+    EagerDependencyToken<TDependency>,
+    AnySingleToken
+>;
+export type EagerAllDependencyToken<TDependency extends DependencyReference> = Extract<
+    EagerDependencyToken<TDependency>,
+    AnyMultiToken
+>;
 
 export const isRefDependency = (dependency: DependencyReference): dependency is AnyRefToken => {
     return typeof dependency === "object" && dependency !== null && refDependencyBrand in dependency;

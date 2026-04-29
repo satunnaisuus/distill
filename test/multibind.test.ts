@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { all } from "../src/all";
 import { bind } from "../src/bind";
 import { createContainer } from "../src/container";
 import { multiToken, token, tokenKey } from "../src/token";
@@ -179,5 +180,144 @@ describe("resolveAll", () => {
         );
 
         expect(() => container.resolveAll(Config)).toThrowError('Token "Config" is not a multibind token');
+    });
+});
+
+describe("all dependencies", () => {
+    it("injects all multibind values into a dependency factory in registration order", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+        const factory = vi.fn(({ hooks }: { readonly hooks: Array<{ readonly name: string }> }) => ({
+            names: hooks.map((hook) => hook.name),
+        }));
+
+        const container = createContainer(
+            [Hooks, Registry],
+            bind(Hooks, () => ({ name: "first" })),
+            bind(Hooks, () => ({ name: "second" })),
+            bind(Registry, { hooks: all(Hooks) }, factory),
+        );
+
+        expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
+        expect(factory).toHaveBeenCalledTimes(1);
+        expect(factory.mock.calls[0][0].hooks).toEqual([{ name: "first" }, { name: "second" }]);
+    });
+
+    it("injects an empty array when the multibind token has no bindings", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly count: number }>();
+
+        const container = createContainer(
+            [Hooks, Registry],
+            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ count: hooks.length })),
+        );
+
+        expect(container.resolve(Registry)).toEqual({ count: 0 });
+    });
+
+    it("resolves all dependencies from the active resolution scope", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const app = createContainer(
+            [Hooks, Registry],
+            bind(Hooks, () => ({ name: "root" })),
+            bind.scoped(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                names: hooks.map((hook) => hook.name),
+            })),
+        );
+        const request = app.createScope(bind(Hooks, () => ({ name: "request" })));
+
+        expect(app.resolve(Registry)).toEqual({ names: ["root"] });
+        expect(request.resolve(Registry)).toEqual({ names: ["root", "request"] });
+    });
+
+    it("resolves all dependencies before calling the dependent factory", () => {
+        const calls: string[] = [];
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const container = createContainer(
+            [Hooks, Registry],
+            bind(Hooks, () => {
+                calls.push("first");
+                return { name: "first" };
+            }),
+            bind(Hooks, () => {
+                calls.push("second");
+                return { name: "second" };
+            }),
+            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => {
+                calls.push("registry");
+                return { names: hooks.map((hook) => hook.name) };
+            }),
+        );
+
+        expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
+        expect(calls).toEqual(["first", "second", "registry"]);
+    });
+
+    it("tracks all-injected dependencies for disposal ordering", async () => {
+        const events: string[] = [];
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly hooks: readonly { readonly name: string }[] }>();
+
+        const container = createContainer(
+            [Hooks, Registry],
+            bind(Hooks, () => ({ name: "first" }), {
+                dispose: () => events.push("first"),
+            }),
+            bind(Hooks, () => ({ name: "second" }), {
+                dispose: () => events.push("second"),
+            }),
+            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ hooks }), {
+                dispose: () => events.push("registry"),
+            }),
+        );
+
+        expect(container.resolve(Registry)).toEqual({ hooks: [{ name: "first" }, { name: "second" }] });
+
+        await container.dispose();
+
+        expect(events).toEqual(["registry", "second", "first"]);
+    });
+
+    it("throws when all is used with a regular token at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+        const allUnsafe = all as unknown as (dependency: unknown) => unknown;
+
+        expect(() =>
+            createRuntimeContainer(
+                [Config, Server],
+                bind(Config, () => ({ port: 3000 })),
+                bind(Server, { configs: allUnsafe(Config) as never }, () => ({ port: 3000 })),
+            ),
+        ).toThrowError('Token "Config" is not a multibind token');
+    });
+
+    it("throws when a multibind token is used as a direct dependency without all", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        expect(() =>
+            createRuntimeContainer(
+                [Hooks, Registry],
+                bind(Registry, { hooks: Hooks as never }, () => ({ names: [] })),
+            ),
+        ).toThrowError('Multibind token "Hooks" must be resolved with resolveAll');
+    });
+
+    it("detects eager circular dependencies through all", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly hooks: readonly { readonly name: string }[] }>();
+
+        expect(() =>
+            createRuntimeContainer(
+                [Hooks, Registry],
+                bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ hooks })),
+                bind(Hooks, { registry: Registry }, () => ({ name: "hook" })),
+            ),
+        ).toThrowError("Circular dependency detected while registering services: Registry -> Hooks -> Registry");
     });
 });

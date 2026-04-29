@@ -1,6 +1,12 @@
 import type { AnyBinding, BindingDependencies, BindingLifetime, BindingLifetimeOf } from "./bind";
 import type { DependencyMap } from "./dependencies";
-import type { DependencyToken } from "./ref";
+import type {
+    AllDependencyToken,
+    DependencyToken,
+    EagerAllDependencyToken,
+    EagerSingleDependencyToken,
+    SingleDependencyToken,
+} from "./ref";
 import type { AnyToken, TokenKey } from "./token";
 import type { HasTrue, IfNever, IsExact } from "./type-utils";
 
@@ -138,9 +144,20 @@ type BindingDependencyValues<
     TDependencies = BindingDependencies<TBinding>,
 > = TDependencies extends DependencyMap ? TDependencies[keyof TDependencies] : never;
 
-export type BindingEagerDependencyTokens<TBinding extends AnyBinding> = Extract<
-    BindingDependencyValues<TBinding>,
-    AnyToken
+export type BindingSingleDependencyTokens<TBinding extends AnyBinding> = SingleDependencyToken<
+    BindingDependencyValues<TBinding>
 >;
+export type BindingAllDependencyTokens<TBinding extends AnyBinding> = AllDependencyToken<
+    BindingDependencyValues<TBinding>
+>;
+export type BindingEagerSingleDependencyTokens<TBinding extends AnyBinding> = EagerSingleDependencyToken<
+    BindingDependencyValues<TBinding>
+>;
+export type BindingEagerAllDependencyTokens<TBinding extends AnyBinding> = EagerAllDependencyToken<
+    BindingDependencyValues<TBinding>
+>;
+export type BindingEagerDependencyTokens<TBinding extends AnyBinding> =
+    | BindingEagerSingleDependencyTokens<TBinding>
+    | BindingEagerAllDependencyTokens<TBinding>;
 
 export type BindingDependencyTokens<TBinding extends AnyBinding> = DependencyToken<BindingDependencyValues<TBinding>>;
