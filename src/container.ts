@@ -12,8 +12,8 @@ import { disposeScope } from "./disposal";
 import { assertDisposeOption } from "./dispose-option";
 import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes, SameTokenKey } from "./graph";
 import { isOptionalDependency } from "./optional";
-import type { AnyBindingOverride, BindingOverride, BindingOverrideAll } from "./override";
-import { isBindingOverride, isBindingOverrideAll } from "./override";
+import type { AnyBindingOverride, BindingOverride, BindingOverrideAll, BindingUnbind } from "./override";
+import { isBindingOverride, isBindingOverrideAll, isBindingUnbind } from "./override";
 import type { AnyRefToken, DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
 import {
@@ -56,7 +56,7 @@ import type {
     TokenValue,
 } from "./token";
 import { isRuntimeMultiToken, tokenKey } from "./token";
-import type { HasTrue, IfNever } from "./type-utils";
+import type { HasTrue, IfNever, IsUnion } from "./type-utils";
 import type {
     MissingDependencyKeysFromAllTokenBindings,
     MissingDependencyKeysFromToken,
@@ -159,7 +159,9 @@ type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = Ha
 type SingleOverrideTokens<TOverrides extends readonly AnyBindingOverride[]> = TOverrides[number] extends infer TOverride
     ? TOverride extends BindingOverride<infer TBinding>
         ? TBinding["token"]
-        : never
+        : TOverride extends BindingUnbind<infer TToken>
+          ? TToken
+          : never
     : never;
 
 type MultiOverrideTokens<TOverrides extends readonly AnyBindingOverride[]> = TOverrides[number] extends infer TOverride
@@ -217,7 +219,9 @@ type OverrideOperationToken<TOverride extends AnyBindingOverride> =
         ? TBinding["token"]
         : TOverride extends BindingOverrideAll<infer TToken>
           ? TToken
-          : never;
+          : TOverride extends BindingUnbind<infer TToken>
+            ? TToken
+            : never;
 
 type OverrideOperationTokens<TOverrides extends readonly AnyBindingOverride[]> =
     TOverrides[number] extends infer TOverride extends AnyBindingOverride ? OverrideOperationToken<TOverride> : never;
@@ -238,6 +242,19 @@ type DuplicateOverrideTokenKeys<
           : never
       : never;
 
+type UnionOverrideTokenKeys<TOverrides extends readonly AnyBindingOverride[]> = number extends TOverrides["length"]
+    ? never
+    : TOverrides extends readonly [
+            infer TCurrentOverride extends AnyBindingOverride,
+            ...infer TRemainingOverrides extends readonly AnyBindingOverride[],
+        ]
+      ? OverrideOperationToken<TCurrentOverride> extends infer TCurrentToken extends AnyToken
+          ? IsUnion<TCurrentToken> extends true
+              ? TokenKey<TCurrentToken> | UnionOverrideTokenKeys<TRemainingOverrides>
+              : UnionOverrideTokenKeys<TRemainingOverrides>
+          : never
+      : never;
+
 type MissingSingleOverrideTargetKeys<
     TOverrides extends readonly AnyBindingOverride[],
     TBindings extends readonly AnyBinding[],
@@ -246,7 +263,11 @@ type MissingSingleOverrideTargetKeys<
         ? HasTokenWithSameKey<BindingTokens<TBindings>, TBinding["token"]> extends true
             ? never
             : TokenKey<TBinding["token"]>
-        : never
+        : TOverride extends BindingUnbind<infer TToken>
+          ? HasTokenWithSameKey<BindingTokens<TBindings>, TToken> extends true
+              ? never
+              : TokenKey<TToken>
+          : never
     : never;
 
 type TupleOverridesError<TOverrides extends readonly AnyBindingOverride[]> = number extends TOverrides["length"]
@@ -281,6 +302,13 @@ type OverrideTokensOutsideTokenListError<
     }
 >;
 
+type UnionOverrideTokenError<TOverrides extends readonly AnyBindingOverride[]> = ValidationErrorUnlessNever<
+    UnionOverrideTokenKeys<TOverrides>,
+    {
+        readonly __union_override_token__: UnionOverrideTokenKeys<TOverrides>;
+    }
+>;
+
 type MissingSingleOverrideTargetsError<
     TOverrides extends readonly AnyBindingOverride[],
     TBindings extends readonly AnyBinding[],
@@ -312,6 +340,7 @@ type ValidateContainerOverrides<
     TTokenArray extends AnyTokenArray,
     TResolvedBindings extends readonly AnyBinding[] = ApplyContainerOverrides<TBindings, TOverrides>,
 > = TupleOverridesError<TOverrides> &
+    UnionOverrideTokenError<TOverrides> &
     DuplicateOverridesError<TOverrides> &
     OverrideTokensOutsideTokenListError<TOverrides, TTokenArray> &
     MissingSingleOverrideTargetsError<TOverrides, TBindings> &
@@ -1023,6 +1052,7 @@ const applyBindingOverrides = (
 ): readonly AnyBinding[] => {
     const singleBindingKeys = collectSingleBindingKeys(tokenListContext, bindings);
     const singleOverrides = new Map<string, AnyBinding>();
+    const singleUnbinds = new Set<string>();
     const multiOverrides = new Map<string, readonly AnyBinding[]>();
 
     for (const currentOverride of overrides) {
@@ -1043,11 +1073,30 @@ const applyBindingOverrides = (
                 throw new Error(`Service "${bindingTokenKey}" is not registered in the container definition`);
             }
 
-            if (singleOverrides.has(bindingTokenKey)) {
+            if (singleOverrides.has(bindingTokenKey) || singleUnbinds.has(bindingTokenKey)) {
                 throw new Error(`Service "${bindingTokenKey}" is already overridden`);
             }
 
             singleOverrides.set(bindingTokenKey, binding);
+            continue;
+        }
+
+        if (isBindingUnbind(currentOverride)) {
+            const unbindTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+
+            if (tokenListContext.isMultiTokenKey(unbindTokenKey)) {
+                throw new Error(`Multibind token "${unbindTokenKey}" must be removed with overrideAll`);
+            }
+
+            if (!singleBindingKeys.has(unbindTokenKey)) {
+                throw new Error(`Service "${unbindTokenKey}" is not registered in the container definition`);
+            }
+
+            if (singleOverrides.has(unbindTokenKey) || singleUnbinds.has(unbindTokenKey)) {
+                throw new Error(`Service "${unbindTokenKey}" is already overridden`);
+            }
+
+            singleUnbinds.add(unbindTokenKey);
             continue;
         }
 
@@ -1084,7 +1133,7 @@ const applyBindingOverrides = (
             continue;
         }
 
-        throw new Error("Overrides must be created with override or overrideAll");
+        throw new Error("Overrides must be created with override, overrideAll, or unbind");
     }
 
     const resolvedBindings: AnyBinding[] = [];
@@ -1099,7 +1148,7 @@ const applyBindingOverrides = (
             continue;
         }
 
-        if (!singleOverrides.has(bindingTokenKey)) {
+        if (!singleOverrides.has(bindingTokenKey) && !singleUnbinds.has(bindingTokenKey)) {
             resolvedBindings.push(binding);
         }
     }

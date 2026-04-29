@@ -234,7 +234,7 @@ production.resolve(Reports).createdAt();
 test.resolve(Reports).createdAt();
 ```
 
-`override(...)` replaces one regular token binding before the runtime container is created, so singleton graphs use the replacement. `overrideAll(...)` replaces every contribution for a multibind token; pass an empty tuple or array literal to remove all contributions for that container.
+`override(...)` replaces one regular token binding before the runtime container is created, so singleton graphs use the replacement. `unbind(...)` removes one regular token binding for that container. `overrideAll(...)` replaces every contribution for a multibind token; pass an empty tuple or array literal to remove all contributions for that container.
 
 ### Create request scopes
 
@@ -338,6 +338,7 @@ defineContainer([Config, Logger], ...bindings)
 definition.create()
 definition.create(override(binding))
 definition.create(overrideAll(multibindToken, bindings))
+definition.create(unbind(token))
 container.resolve(token)
 container.resolveAll(multibindToken)
 container.createScope(...bindings)
@@ -541,6 +542,16 @@ const test = app.create(
 
 Use `override(binding)` for regular tokens. The binding must target a token already bound in the definition. Overrides are applied before the runtime container is built, so singleton services receive the replacement dependency.
 
+Use `unbind(token)` to remove a regular token binding while creating a container:
+
+```ts
+const withoutLogger = app.create(
+    unbind(Logger),
+);
+```
+
+The token must already be bound in the definition. `unbind(...)` does not mutate the definition or existing containers. After unbinding, resolving that token fails and optional dependencies receive `undefined`. Singleton services with required dependencies on the token fail validation; scoped and transient services stay unavailable until a scope supplies the dependency.
+
 Use `overrideAll(multibindToken, bindings)` for multibind tokens:
 
 ```ts
@@ -555,7 +566,7 @@ const withoutHandlers = app.create(
 );
 ```
 
-`overrideAll` replaces the whole collection for that token. The replacement order is the order of the bindings array. Duplicate overrides for the same token are rejected.
+`overrideAll` replaces the whole collection for that token. The replacement order is the order of the bindings array. Use `overrideAll(token, [])` to remove all multibind contributions. Duplicate override or unbind operations for the same token are rejected.
 
 ### `container.createScope(...bindings)`
 
@@ -627,6 +638,7 @@ import type {
     Binding,
     BindingOverride,
     BindingOverrideAll,
+    BindingUnbind,
     BindingLifetime,
     BindingOptions,
     Container,

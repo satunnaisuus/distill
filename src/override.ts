@@ -1,5 +1,5 @@
 import type { AnyBinding } from "./bind";
-import { bindingOverrideAllBrand, bindingOverrideBrand } from "./brands";
+import { bindingOverrideAllBrand, bindingOverrideBrand, bindingUnbindBrand } from "./brands";
 import type { AnyMultiToken, AnySingleToken, TokenKey, TokensNotIn } from "./token";
 
 type AnySingleBinding = AnyBinding & {
@@ -20,7 +20,12 @@ export type BindingOverrideAll<
     readonly bindings: TBindings;
 };
 
-export type AnyBindingOverride = BindingOverride | BindingOverrideAll;
+export type BindingUnbind<TToken extends AnySingleToken = AnySingleToken> = {
+    readonly [bindingUnbindBrand]: true;
+    readonly token: TToken;
+};
+
+export type AnyBindingOverride = BindingOverride | BindingOverrideAll | BindingUnbind;
 
 type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extends TBindings["length"]
     ? {
@@ -64,10 +69,21 @@ export const overrideAll = <const TToken extends AnyMultiToken, const TBindings 
     };
 };
 
+export const unbind = <const TToken extends AnySingleToken>(currentToken: TToken): BindingUnbind<TToken> => {
+    return {
+        [bindingUnbindBrand]: true,
+        token: currentToken,
+    };
+};
+
 export const isBindingOverride = (value: unknown): value is BindingOverride => {
     return typeof value === "object" && value !== null && Object.hasOwn(value, bindingOverrideBrand);
 };
 
 export const isBindingOverrideAll = (value: unknown): value is BindingOverrideAll => {
     return typeof value === "object" && value !== null && Object.hasOwn(value, bindingOverrideAllBrand);
+};
+
+export const isBindingUnbind = (value: unknown): value is BindingUnbind => {
+    return typeof value === "object" && value !== null && Object.hasOwn(value, bindingUnbindBrand);
 };

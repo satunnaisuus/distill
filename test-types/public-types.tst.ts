@@ -7,6 +7,7 @@ import {
     type BindingOptions,
     type BindingOverride,
     type BindingOverrideAll,
+    type BindingUnbind,
     bind,
     type Container,
     type ContainerDefinition,
@@ -25,6 +26,7 @@ import {
     type Token,
     type TokenBuilder,
     token,
+    unbind,
 } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger } from "./fixtures/services.js";
@@ -38,6 +40,7 @@ test("public helper types preserve their documented type relationships", () => {
     const handlers = multiToken("handlers").of<(message: string) => number>();
     const configBinding = bind(tokens.config, () => ({ port: 3000 }));
     const configOverride = override(configBinding);
+    const configUnbind = unbind(tokens.config);
     const handlersOverride = overrideAll(handlers, []);
     const definition: ContainerDefinition<readonly [typeof configBinding], typeof tokenList> = defineContainer(
         tokenList,
@@ -69,9 +72,11 @@ test("public helper types preserve their documented type relationships", () => {
         (dependencies: { readonly config: Config }) => number
     >();
     expect(configOverride).type.toBe<BindingOverride<typeof configBinding>>();
+    expect(configUnbind).type.toBe<BindingUnbind<typeof tokens.config>>();
     expect(handlersOverride).type.toBe<BindingOverrideAll<typeof handlers, readonly []>>();
     expect<BindingOverride>().type.toBeAssignableTo<AnyBindingOverride>();
     expect<BindingOverrideAll>().type.toBeAssignableTo<AnyBindingOverride>();
+    expect<BindingUnbind>().type.toBeAssignableTo<AnyBindingOverride>();
     expect(definition.create().resolve(tokens.config)).type.toBe<Config>();
     expect<Parameters<Container<readonly [Binding<typeof tokens.port>]>["resolve"]>[0]>().type.toBe<
         typeof tokens.port

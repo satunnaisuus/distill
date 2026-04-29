@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { bind } from "../src/bind";
 import { defineContainer } from "../src/container";
-import { override, overrideAll } from "../src/override";
+import { optional } from "../src/optional";
+import { override, overrideAll, unbind } from "../src/override";
 import { ref } from "../src/ref";
 import { multiToken, type Token, token } from "../src/token";
 
@@ -110,6 +111,39 @@ describe("defineContainer", () => {
         expect(emptyContainer.resolveAll(Hooks)).toEqual([]);
     });
 
+    it("removes single bindings with unbind", () => {
+        const Feature = token("Feature").of<{ readonly enabled: boolean }>();
+        const Service = token("Service").of<{ readonly feature: { readonly enabled: boolean } | undefined }>();
+        const definition = defineContainer(
+            [Feature, Service],
+            bind(Feature, () => ({ enabled: true })),
+            bind(Service, { feature: optional(Feature) }, ({ feature }) => ({ feature })),
+        );
+
+        const production = definition.create();
+        const testContainer = definition.create(unbind(Feature)) as unknown as RuntimeContainerForTest;
+
+        expect(production.resolve(Feature)).toEqual({ enabled: true });
+        expect(() => testContainer.resolve(Feature)).toThrowError(
+            'Service "Feature" is not registered in the container',
+        );
+        expect(testContainer.resolve(Service)).toEqual({ feature: undefined });
+    });
+
+    it("reports missing dependencies when resolving services affected by unbind", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+        const definition = defineContainer(
+            [Config, Server],
+            bind(Config, () => ({ port: 3000 })),
+            bind(Server, { config: Config }, ({ config }) => ({ port: config.port })),
+        );
+        const create = definition.create as (...overrides: readonly unknown[]) => RuntimeContainerForTest;
+        const testContainer = create(unbind(Config));
+
+        expect(() => testContainer.resolve(Server)).toThrowError('Service "Config" is not registered in the container');
+    });
+
     it("throws when overrides were not created with override helpers", () => {
         const Port = token("Port").of<number>();
         const definition = defineContainer(
@@ -119,7 +153,7 @@ describe("defineContainer", () => {
         const create = definition.create as (...overrides: readonly unknown[]) => unknown;
 
         expect(() => create(bind(Port, () => 4000))).toThrowError(
-            "Overrides must be created with override or overrideAll",
+            "Overrides must be created with override, overrideAll, or unbind",
         );
     });
 
@@ -142,6 +176,54 @@ describe("defineContainer", () => {
         expect(() =>
             definition.create(override(bind(Port, () => 4000)), override(bind(Port, () => 5000))),
         ).toThrowError('Service "Port" is already overridden');
+    });
+
+    it("throws when a token is unbound and overridden at the same time", () => {
+        const Port = token("Port").of<number>();
+        const definition = defineContainer(
+            [Port],
+            bind(Port, () => 3000),
+        );
+        const create = definition.create as (...overrides: readonly unknown[]) => unknown;
+
+        expect(() => create(unbind(Port), override(bind(Port, () => 4000)))).toThrowError(
+            'Service "Port" is already overridden',
+        );
+    });
+
+    it("throws when unbind targets an unbound token", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const definition = defineContainer([Config]);
+        const create = definition.create as (...overrides: readonly unknown[]) => unknown;
+
+        expect(() => create(unbind(Config))).toThrowError(
+            'Service "Config" is not registered in the container definition',
+        );
+    });
+
+    it("throws when unbind targets a token outside the token list", () => {
+        const Port = token("Port").of<number>();
+        const External = token("External").of<number>();
+        const definition = defineContainer(
+            [Port],
+            bind(Port, () => 3000),
+        );
+        const create = definition.create as (...overrides: readonly unknown[]) => unknown;
+
+        expect(() => create(unbind(External))).toThrowError('Token "External" is not included in the token list');
+    });
+
+    it("throws when unbind is used for a multibind token at runtime", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const definition = defineContainer(
+            [Hooks],
+            bind(Hooks, () => ({ name: "audit" })),
+        );
+        const create = definition.create as (...overrides: readonly unknown[]) => unknown;
+
+        expect(() => create(unbind(Hooks as never))).toThrowError(
+            'Multibind token "Hooks" must be removed with overrideAll',
+        );
     });
 
     it("throws when override is used for a multibind token at runtime", () => {

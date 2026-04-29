@@ -1,4 +1,14 @@
-import { all, bind, defineContainer, multiToken, override, overrideAll, token } from "@satunnaisuus/distill";
+import {
+    all,
+    bind,
+    defineContainer,
+    multiToken,
+    optional,
+    override,
+    overrideAll,
+    token,
+    unbind,
+} from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Handler } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -27,11 +37,35 @@ test("create accepts single binding overrides", () => {
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
+test("create accepts single binding unbinds", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.server, { config: optional(tokens.config) }, ({ config }) => ({
+            port: config?.port ?? 0,
+        })),
+    );
+    const container = definition.create(unbind(tokens.config));
+
+    expect(() => {
+        container.resolve(tokens.config);
+    }).type.toRaiseError();
+    expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
 test("single binding overrides must target existing definition bindings", () => {
     const definition = defineContainer(tokenList);
 
     expect(() => {
         definition.create(override(bind(tokens.config, () => ({ port: 3000 }))));
+    }).type.toRaiseError("__override_target_not_bound__");
+});
+
+test("single binding unbinds must target existing definition bindings", () => {
+    const definition = defineContainer(tokenList);
+
+    expect(() => {
+        definition.create(unbind(tokens.config));
     }).type.toRaiseError("__override_target_not_bound__");
 });
 
@@ -44,12 +78,42 @@ test("single binding overrides must target tokens from the token list", () => {
     }).type.toRaiseError("__override_token_not_in_tokens__");
 });
 
+test("single binding unbinds must target tokens from the token list", () => {
+    const definition = defineContainer(tokenList);
+    const external = token("external").of<number>();
+
+    expect(() => {
+        definition.create(unbind(external));
+    }).type.toRaiseError("__override_token_not_in_tokens__");
+});
+
 test("single binding overrides reject multibind tokens", () => {
     const handlers = multiToken("handlers").of<Handler>();
 
     expect(() => {
         override(bind(handlers, () => () => 1));
     }).type.toRaiseError();
+});
+
+test("single binding unbinds reject multibind tokens", () => {
+    const handlers = multiToken("handlers").of<Handler>();
+
+    expect(() => {
+        unbind(handlers);
+    }).type.toRaiseError();
+});
+
+test("single binding unbinds reject union tokens", () => {
+    const configOrPortToken = tokens.config as typeof tokens.config | typeof tokens.port;
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.port, () => 3000),
+    );
+
+    expect(() => {
+        definition.create(unbind(configOrPortToken));
+    }).type.toRaiseError("__union_override_token__");
 });
 
 test("create rejects duplicate overrides for one token", () => {
@@ -66,6 +130,28 @@ test("create rejects duplicate overrides for one token", () => {
     }).type.toRaiseError("__duplicate_override__");
 });
 
+test("create rejects duplicate unbind and override operations for one token", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+
+    expect(() => {
+        definition.create(unbind(tokens.config), override(bind(tokens.config, () => ({ port: 4000 }))));
+    }).type.toRaiseError("__duplicate_override__");
+});
+
+test("create rejects duplicate unbind operations for one token", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+    );
+
+    expect(() => {
+        definition.create(unbind(tokens.config), unbind(tokens.config));
+    }).type.toRaiseError("__duplicate_override__");
+});
+
 test("create validates the graph after single overrides are applied", () => {
     const definition = defineContainer(
         tokenList,
@@ -76,6 +162,18 @@ test("create validates the graph after single overrides are applied", () => {
 
     expect(() => {
         definition.create(override(bind(tokens.config, { external }, ({ external }) => ({ port: external }))));
+    }).type.toRaiseError("__invalid_overrides__");
+});
+
+test("create validates the graph after unbinds are applied", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+    );
+
+    expect(() => {
+        definition.create(unbind(tokens.config));
     }).type.toRaiseError("__invalid_overrides__");
 });
 
