@@ -5,6 +5,8 @@ export { bind } from "./bind";
 export type { Container } from "./container";
 export { createContainer } from "./container";
 export type { DependencyMap, ResolvedDependencies } from "./dependencies";
+export type { OptionalToken } from "./optional";
+export { optional } from "./optional";
 export type { Ref, RefToken } from "./ref";
 export { ref } from "./ref";
 export type { MultiToken, MultiTokenBuilder, Token, TokenBuilder } from "./token";

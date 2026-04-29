@@ -1,5 +1,6 @@
 import type { AnyBinding, BindingDependencies, BindingLifetime, BindingLifetimeOf } from "./bind";
 import type { DependencyMap } from "./dependencies";
+import type { AnyOptionalToken } from "./optional";
 import type {
     AllDependencyToken,
     DependencyToken,
@@ -143,9 +144,23 @@ type BindingDependencyValues<
     TBinding extends AnyBinding,
     TDependencies = BindingDependencies<TBinding>,
 > = TDependencies extends DependencyMap ? TDependencies[keyof TDependencies] : never;
+type BindingRequiredDependencyValues<TBinding extends AnyBinding> = Exclude<
+    BindingDependencyValues<TBinding>,
+    AnyOptionalToken
+>;
+type BindingOptionalDependencyValues<TBinding extends AnyBinding> = Extract<
+    BindingDependencyValues<TBinding>,
+    AnyOptionalToken
+>;
 
 export type BindingSingleDependencyTokens<TBinding extends AnyBinding> = SingleDependencyToken<
     BindingDependencyValues<TBinding>
+>;
+export type BindingRequiredSingleDependencyTokens<TBinding extends AnyBinding> = SingleDependencyToken<
+    BindingRequiredDependencyValues<TBinding>
+>;
+export type BindingOptionalSingleDependencyTokens<TBinding extends AnyBinding> = SingleDependencyToken<
+    BindingOptionalDependencyValues<TBinding>
 >;
 export type BindingAllDependencyTokens<TBinding extends AnyBinding> = AllDependencyToken<
     BindingDependencyValues<TBinding>

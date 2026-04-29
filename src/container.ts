@@ -11,7 +11,8 @@ import {
 import { disposeScope } from "./disposal";
 import { assertDisposeOption } from "./dispose-option";
 import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes } from "./graph";
-import type { DependencyReference, Ref } from "./ref";
+import { isOptionalDependency } from "./optional";
+import type { AnyRefToken, DependencyReference, Ref } from "./ref";
 import { isRefDependency } from "./ref";
 import {
     type AssertTokenIsInTokenList,
@@ -302,7 +303,11 @@ const getEagerDependencyKeys = (
 
     const eagerDependencyKeys: string[] = [];
 
-    for (const dependency of Object.values(dependencies)) {
+    for (const dependencyReference of Object.values(dependencies)) {
+        const dependency = isOptionalDependency(dependencyReference)
+            ? dependencyReference.resolveDependency()
+            : dependencyReference;
+
         if (isRefDependency(dependency)) {
             continue;
         }
@@ -331,6 +336,125 @@ const getEagerDependencyKeys = (
     return eagerDependencyKeys;
 };
 
+const resolveRefDependency = (
+    scope: RuntimeScope,
+    dependency: AnyRefToken,
+    tokenListContext: TokenListContext,
+    dependencyTracker: RuntimeDependencyTracker | undefined,
+    getOrCreateRefInstance: RefResolver,
+): unknown => {
+    const dependencyToken = dependency.resolveToken();
+    const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+    assertSingleTokenKey(scope, dependencyTokenKey);
+    if (dependencyTracker) {
+        addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
+    }
+    return getOrCreateRefInstance(scope, dependencyToken, dependencyTracker);
+};
+
+const resolveDependencyValue = (
+    scope: RuntimeScope,
+    dependency: DependencyReference,
+    tokenListContext: TokenListContext,
+    dependencyTracker: RuntimeDependencyTracker | undefined,
+    getOrCreateRefInstance: RefResolver,
+): unknown => {
+    if (isOptionalDependency(dependency)) {
+        return resolveOptionalDependencyValue(
+            scope,
+            dependency.resolveDependency(),
+            tokenListContext,
+            dependencyTracker,
+            getOrCreateRefInstance,
+        );
+    }
+
+    if (isRefDependency(dependency)) {
+        return resolveRefDependency(scope, dependency, tokenListContext, dependencyTracker, getOrCreateRefInstance);
+    }
+
+    if (isAllDependency(dependency)) {
+        const dependencyToken = dependency.resolveToken();
+        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        assertMultiTokenKey(scope, dependencyTokenKey);
+        return resolveAllActualWithOwnership(
+            scope,
+            dependencyToken,
+            dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
+        ).map((dependencyResult) => dependencyResult.value);
+    }
+
+    const dependencyResult = resolveActualWithOwnership(
+        scope,
+        dependency,
+        dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
+    );
+    return dependencyResult.value;
+};
+
+const resolveOptionalDependencyValue = (
+    scope: RuntimeScope,
+    dependency: DependencyReference,
+    tokenListContext: TokenListContext,
+    dependencyTracker: RuntimeDependencyTracker | undefined,
+    getOrCreateRefInstance: RefResolver,
+): unknown => {
+    if (isOptionalDependency(dependency)) {
+        return resolveOptionalDependencyValue(
+            scope,
+            dependency.resolveDependency(),
+            tokenListContext,
+            dependencyTracker,
+            getOrCreateRefInstance,
+        );
+    }
+
+    if (isRefDependency(dependency)) {
+        const dependencyToken = dependency.resolveToken();
+        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        assertSingleTokenKey(scope, dependencyTokenKey);
+
+        if (!findBinding(scope, dependencyTokenKey)) {
+            return undefined;
+        }
+
+        if (dependencyTracker) {
+            addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
+        }
+        return getOrCreateRefInstance(scope, dependencyToken, dependencyTracker);
+    }
+
+    if (isAllDependency(dependency)) {
+        const dependencyToken = dependency.resolveToken();
+        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        assertMultiTokenKey(scope, dependencyTokenKey);
+
+        const resolvedBindings = findBindings(scope, dependencyTokenKey);
+
+        if (resolvedBindings.length === 0) {
+            return undefined;
+        }
+
+        return resolvedBindings.map((resolvedBinding) => {
+            return resolveBindingWithOwnership(
+                scope,
+                dependencyTokenKey,
+                resolvedBinding,
+                dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
+            ).value;
+        });
+    }
+
+    const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependency);
+    assertSingleTokenKey(scope, dependencyTokenKey);
+
+    if (!findBinding(scope, dependencyTokenKey)) {
+        return undefined;
+    }
+
+    return resolveDependencyValue(scope, dependency, tokenListContext, dependencyTracker, getOrCreateRefInstance);
+};
+
 const createDependencyFactory = (
     binding: AnyBinding,
     dependencies: DependencyMap,
@@ -341,33 +465,21 @@ const createDependencyFactory = (
         const resolvedDependencies: Record<string, unknown> = {};
 
         for (const [key, dependency] of Object.entries(dependencies) as Array<[string, DependencyReference]>) {
-            let resolvedDependency: unknown;
-
-            if (isRefDependency(dependency)) {
-                const dependencyToken = dependency.resolveToken();
-                const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
-                assertSingleTokenKey(scope, dependencyTokenKey);
-                if (dependencyTracker) {
-                    addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey);
-                }
-                resolvedDependency = getOrCreateRefInstance(scope, dependencyToken, dependencyTracker);
-            } else if (isAllDependency(dependency)) {
-                const dependencyToken = dependency.resolveToken();
-                const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
-                assertMultiTokenKey(scope, dependencyTokenKey);
-                resolvedDependency = resolveAllActualWithOwnership(
-                    scope,
-                    dependencyToken,
-                    dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
-                ).map((dependencyResult) => dependencyResult.value);
-            } else {
-                const dependencyResult = resolveActualWithOwnership(
-                    scope,
-                    dependency,
-                    dependencyTracker ? { dependentTrackers: [dependencyTracker] } : undefined,
-                );
-                resolvedDependency = dependencyResult.value;
-            }
+            const resolvedDependency = isOptionalDependency(dependency)
+                ? resolveOptionalDependencyValue(
+                      scope,
+                      dependency.resolveDependency(),
+                      tokenListContext,
+                      dependencyTracker,
+                      getOrCreateRefInstance,
+                  )
+                : resolveDependencyValue(
+                      scope,
+                      dependency,
+                      tokenListContext,
+                      dependencyTracker,
+                      getOrCreateRefInstance,
+                  );
 
             Object.defineProperty(resolvedDependencies, key, {
                 configurable: true,

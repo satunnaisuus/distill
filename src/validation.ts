@@ -5,6 +5,8 @@ import type {
     BindingDependencyTokens,
     BindingEagerAllDependencyTokens,
     BindingEagerSingleDependencyTokens,
+    BindingOptionalSingleDependencyTokens,
+    BindingRequiredSingleDependencyTokens,
     BindingResolutionContext,
     BindingScopes,
     BindingSingleDependencyTokens,
@@ -101,8 +103,9 @@ type MissingDependencyKeysFromTokens<
     TScopes extends BindingScopes,
     TTokens extends AnyToken,
     TPath extends ResolutionNode,
+    TWhenMissing = TokenKey<TTokens>,
 > = TTokens extends AnyToken
-    ? MissingDependencyKeysFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath, TokenKey<TTokens>>
+    ? MissingDependencyKeysFromResolution<ResolveBindingContextInScopes<TScopes, TTokens>, TPath, TWhenMissing>
     : never;
 
 type MissingDependencyKeysFromAllTokens<
@@ -162,8 +165,14 @@ type MissingDependencyKeysFromResolvedBinding<
         :
               | MissingDependencyKeysFromTokens<
                     TResolution["dependencyScopes"],
-                    BindingSingleDependencyTokens<TResolution["binding"]>,
+                    BindingRequiredSingleDependencyTokens<TResolution["binding"]>,
                     TPath | TResolution["node"]
+                >
+              | MissingDependencyKeysFromTokens<
+                    TResolution["dependencyScopes"],
+                    BindingOptionalSingleDependencyTokens<TResolution["binding"]>,
+                    TPath | TResolution["node"],
+                    never
                 >
               | MissingDependencyKeysFromAllTokens<
                     TResolution["dependencyScopes"],

@@ -17,6 +17,7 @@ npm install @satunnaisuus/distill
 - Multibind tokens for collecting multiple services with `resolveAll`.
 - Async resource disposal for containers and scopes.
 - Explicit dependency maps instead of decorators, reflection, or global state.
+- Optional factory dependencies with `optional`.
 - Lazy `ref` dependencies for deferred access and dependency cycles.
 - No runtime dependencies; ESM-first package.
 
@@ -99,6 +100,34 @@ container.resolve(Server).start();
 ```
 
 The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports dependencies outside the token list, singleton missing bindings, and eager cycles at the container definition. Scoped and transient services with unresolved dependencies are omitted from `resolve` until a scope supplies those dependencies.
+
+### Mark a dependency as optional
+
+```ts
+import { bind, createContainer, optional, token } from "@satunnaisuus/distill";
+
+type Config = {
+    readonly port: number;
+};
+
+type Server = {
+    readonly port: number;
+};
+
+const Config = token("Config").of<Config>();
+const Server = token("Server").of<Server>();
+
+const container = createContainer(
+    [Config, Server],
+    bind(Server, { config: optional(Config) }, ({ config }) => ({
+        port: config?.port ?? 3000,
+    })),
+);
+
+container.resolve(Server);
+```
+
+The `config` factory parameter is inferred as `Config | undefined`. Optional dependencies must still use tokens from the token list, and registered optional dependencies still validate their own dependency graph.
 
 ### Defer work with `ref`
 
@@ -563,6 +592,7 @@ import type {
     Container,
     DependencyMap,
     Disposer,
+    OptionalToken,
     Ref,
     RefToken,
     ResolvedDependencies,
