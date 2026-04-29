@@ -1,12 +1,12 @@
 import { bind, createContainer, ref } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config } from "./fixtures/services.js";
-import { tokens } from "./fixtures/tokens.js";
+import { tokenList, tokens } from "./fixtures/tokens.js";
 import { externalToken } from "./fixtures/unsafe-tokens.js";
 
 test("resolve accepts unions of bound tokens and returns the union of service values", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
         bind(tokens.port, () => 3000),
     );
@@ -17,7 +17,7 @@ test("resolve accepts unions of bound tokens and returns the union of service va
 
 test("resolve preserves bound service value types", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
         bind(tokens.port, () => 3000),
     );
@@ -27,16 +27,16 @@ test("resolve preserves bound service value types", () => {
 });
 
 test("resolve rejects every token for an empty container", () => {
-    const container = createContainer(tokens);
+    const container = createContainer(tokenList);
 
     expect(() => {
         container.resolve(tokens.port);
     }).type.toRaiseError();
 });
 
-test("resolve rejects registered tokens without bindings", () => {
+test("resolve rejects listed tokens without bindings", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
         bind(tokens.port, () => 3000),
     );
@@ -46,9 +46,9 @@ test("resolve rejects registered tokens without bindings", () => {
     }).type.toRaiseError();
 });
 
-test("resolve rejects tokens outside the registry", () => {
+test("resolve rejects tokens outside the token list", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
     );
 
@@ -59,7 +59,7 @@ test("resolve rejects tokens outside the registry", () => {
 
 test("resolve rejects unions when any token variant has no binding", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
     );
     const configOrLoggerToken = tokens.config as typeof tokens.config | typeof tokens.logger;
@@ -69,9 +69,9 @@ test("resolve rejects unions when any token variant has no binding", () => {
     }).type.toRaiseError();
 });
 
-test("resolve rejects unions when any token variant is outside the registry", () => {
+test("resolve rejects unions when any token variant is outside the token list", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
     );
     const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
@@ -81,10 +81,10 @@ test("resolve rejects unions when any token variant is outside the registry", ()
     }).type.toRaiseError();
 });
 
-test("allows lazy union ref dependency tokens when every variant is registered and bound", () => {
+test("allows lazy union ref dependency tokens when every variant is listed and bound", () => {
     const selectedToken = tokens.config as typeof tokens.config | typeof tokens.logger;
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.server, { dependency: ref(() => selectedToken) }, () => ({
             port: 3000,
         })),
@@ -100,40 +100,40 @@ test("allows lazy union ref dependency tokens when every variant is registered a
     >();
 });
 
-test("rejects union dependency tokens when any variant is outside the registry", () => {
+test("rejects union dependency tokens when any variant is outside the token list", () => {
     const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: configOrExternalToken }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
-test("rejects union ref dependency tokens when any variant is outside the registry", () => {
+test("rejects union ref dependency tokens when any variant is outside the token list", () => {
     const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: ref(configOrExternalToken) }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
-test("rejects lazy union ref dependency tokens when any variant is outside the registry", () => {
+test("rejects lazy union ref dependency tokens when any variant is outside the token list", () => {
     const configOrExternalToken = tokens.config as typeof tokens.config | typeof externalToken;
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: ref(() => configOrExternalToken) }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("rejects union dependency tokens when any variant has no binding", () => {
@@ -141,7 +141,7 @@ test("rejects union dependency tokens when any variant has no binding", () => {
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: configOrLoggerToken }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
@@ -153,7 +153,7 @@ test("rejects union ref dependency tokens when any variant has no binding", () =
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: ref(configOrLoggerToken) }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );
@@ -165,7 +165,7 @@ test("rejects lazy union ref dependency tokens when any variant has no binding",
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { dependency: ref(() => configOrLoggerToken) }, () => 3000),
             bind(tokens.config, () => ({ port: 3000 })),
         );

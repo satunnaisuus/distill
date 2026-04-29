@@ -13,7 +13,7 @@ export type RuntimeBinding = {
     readonly dispose?: RuntimeDisposer;
 };
 
-export type AssertTokenIsInRegistry = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
+export type AssertTokenIsInTokenList = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
 export type RefResolver = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
@@ -21,7 +21,7 @@ export type RefResolver = <TToken extends AnyToken>(
 ) => Ref<TokenValue<TToken>>;
 
 export type RuntimeContext = {
-    readonly assertTokenIsInRegistry: AssertTokenIsInRegistry;
+    readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
     readonly resolvingPath: RuntimeResolutionFrame[];
 };
 

@@ -1,7 +1,7 @@
-import { bind, createContainer, type Disposer, defineTokens, type as defineType, ref } from "@satunnaisuus/distill";
+import { bind, createContainer, type Disposer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Handler, Logger } from "./fixtures/services.js";
-import { tokens } from "./fixtures/tokens.js";
+import { tokenList, tokens } from "./fixtures/tokens.js";
 
 test("bind rejects dependency map values that are not tokens or refs", () => {
     expect(() => {
@@ -51,7 +51,7 @@ test("ref rejects direct union dependency values that include non-tokens", () =>
     }).type.toRaiseError();
 });
 
-test("bind rejects direct token values that were not created by defineTokens", () => {
+test("bind rejects raw string values that were not created by token", () => {
     expect(() => {
         bind("port", () => 3000);
     }).type.toRaiseError();
@@ -336,22 +336,16 @@ test("lifetime bind variants infer dependency factory parameters", () => {
     expect<Parameters<typeof transient.factory>[0]["port"]>().type.toBe<number>();
 });
 
-test("defineTokens rejects missing definitions", () => {
-    expect(() => {
-        defineTokens();
-    }).type.toRaiseError();
-});
-
-test("createContainer rejects missing token registries", () => {
+test("createContainer rejects missing token lists", () => {
     expect(() => {
         createContainer();
     }).type.toRaiseError();
 });
 
-test("createContainer rejects token registries not created by defineTokens", () => {
+test("createContainer rejects non-array token lists", () => {
     expect(() => {
         createContainer(
-            { port: "port" },
+            { port: token("port").of<number>() },
             bind(tokens.port, () => 3000),
         );
     }).type.toRaiseError();
@@ -360,7 +354,7 @@ test("createContainer rejects token registries not created by defineTokens", () 
 test("createContainer rejects rest arguments that are not bindings", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, () => 3000),
             "config",
         );
@@ -369,7 +363,7 @@ test("createContainer rejects rest arguments that are not bindings", () => {
 
 test("createContainer rejects structural bindings not created by bind", () => {
     expect(() => {
-        createContainer(tokens, {
+        createContainer(tokenList, {
             token: tokens.port,
             factory: () => 3000,
         });
@@ -377,7 +371,7 @@ test("createContainer rejects structural bindings not created by bind", () => {
 });
 
 test("createScope rejects rest arguments that are not bindings", () => {
-    const container = createContainer(tokens);
+    const container = createContainer(tokenList);
 
     expect(() => {
         container.createScope("config");
@@ -385,7 +379,7 @@ test("createScope rejects rest arguments that are not bindings", () => {
 });
 
 test("createScope rejects structural bindings not created by bind", () => {
-    const container = createContainer(tokens);
+    const container = createContainer(tokenList);
 
     expect(() => {
         container.createScope({
@@ -419,34 +413,8 @@ test("bind supports explicit empty dependency objects", () => {
 
         return 3000;
     });
-    const container = createContainer(tokens, binding);
+    const container = createContainer(tokenList, binding);
 
     expect<Parameters<typeof binding.factory>[0]>().type.toBe<{}>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
-});
-
-test("defineTokens rejects symbol token keys", () => {
-    const serviceKey = Symbol("service");
-
-    expect(() => {
-        defineTokens({
-            [serviceKey]: defineType<string>(),
-        });
-    }).type.toRaiseError("__non_string_token_keys_not_supported__");
-});
-
-test("defineTokens rejects numeric token keys", () => {
-    expect(() => {
-        defineTokens({
-            1: defineType<string>(),
-        });
-    }).type.toRaiseError("__non_string_token_keys_not_supported__");
-});
-
-test("defineTokens rejects values not created by defineType", () => {
-    expect(() => {
-        defineTokens({
-            port: 3000,
-        });
-    }).type.toRaiseError();
 });

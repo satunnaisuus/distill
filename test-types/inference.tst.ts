@@ -1,17 +1,32 @@
-import { bind, createContainer, type Ref, type RefToken, ref, type Token } from "@satunnaisuus/distill";
+import { bind, createContainer, type Ref, type RefToken, ref, type Token, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger, Server } from "./fixtures/services.js";
-import { tokens } from "./fixtures/tokens.js";
+import { tokenList, tokens } from "./fixtures/tokens.js";
 
-test("defineTokens preserves literal token keys and value types", () => {
+test("token list preserves literal token keys and value types", () => {
     expect(tokens.config).type.toBe<Token<"config", Config>>();
     expect(tokens.logger).type.toBe<Token<"logger", Logger>>();
     expect(tokens.unknown).type.toBe<Token<"unknown", unknown>>();
 });
 
+test("token and createContainer preserve literal token keys and value types", () => {
+    const Config = token("Config").of<Config>();
+    const Logger = token("Logger").of<Logger>();
+    const container = createContainer(
+        [Config, Logger],
+        bind(Config, () => ({ port: 3000 })),
+        bind(Logger, () => ({ log: () => {} })),
+    );
+
+    expect(Config).type.toBe<Token<"Config", Config>>();
+    expect(Logger).type.toBe<Token<"Logger", Logger>>();
+    expect(container.resolve(Config)).type.toBe<Config>();
+    expect(container.resolve(Logger)).type.toBe<Logger>();
+});
+
 test("bind and resolve preserve unknown service types", () => {
     const binding = bind(tokens.unknown, () => ({ port: 3000 }));
-    const container = createContainer(tokens, binding);
+    const container = createContainer(tokenList, binding);
 
     expect<ReturnType<typeof binding.factory>>().type.toBe<unknown>();
     expect(container.resolve(tokens.unknown)).type.toBe<unknown>();

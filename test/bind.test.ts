@@ -1,15 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { bind, getBindingDependencies, getBindingLifetime, isBinding } from "../src/bind";
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/brands";
-import { defineTokens } from "../src/token";
-import { type as defineType } from "../src/type-descriptor";
+import { token } from "../src/token";
 
 describe("bind", () => {
     it("creates a binding without dependencies", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const factory = () => 3000;
 
         const binding = bind(tokens.port, factory);
@@ -26,10 +24,10 @@ describe("bind", () => {
     });
 
     it("creates a binding with dependencies", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
         const dependencies = {
             config: tokens.config,
         };
@@ -48,9 +46,9 @@ describe("bind", () => {
     });
 
     it("creates explicit singleton, scoped, and transient bindings", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(getBindingLifetime(bind.singleton(tokens.port, () => 3000))).toBe("singleton");
         expect(getBindingLifetime(bind.scoped(tokens.port, () => 3000))).toBe("scoped");
@@ -58,9 +56,9 @@ describe("bind", () => {
     });
 
     it("stores dispose options for bindings without dependencies", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const dispose = vi.fn();
 
         const binding = bind(tokens.port, () => 3000, { dispose });
@@ -69,10 +67,10 @@ describe("bind", () => {
     });
 
     it("stores dispose options for bindings with dependencies", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
         const dispose = vi.fn();
 
         const binding = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, { dispose });
@@ -81,10 +79,10 @@ describe("bind", () => {
     });
 
     it("accepts options without dispose for bindings", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
 
         const bindingWithoutDependencies = bind(tokens.port, () => 3000, {});
         const bindingWithDependencies = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, {});
@@ -94,9 +92,9 @@ describe("bind", () => {
     });
 
     it("throws when binding options are not objects at runtime", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(() => bind(tokens.port, () => 3000, null as never)).toThrowError("Binding options must be an object");
         expect(() => bind(tokens.port, () => 3000, "not options" as never)).toThrowError(
@@ -111,9 +109,9 @@ describe("bind", () => {
     });
 
     it("throws when dependencies are provided without a factory", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const bindWithoutFactory = bind as unknown as (
             token: typeof tokens.port,
             dependencies: Record<string, never>,
@@ -127,19 +125,19 @@ describe("bind", () => {
 
 describe("getBindingDependencies", () => {
     it("returns undefined for a binding without dependencies", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const binding = bind(tokens.port, () => 3000);
 
         expect(getBindingDependencies(binding)).toBeUndefined();
     });
 
     it("returns dependencies from the binding brand", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
         const dependencies = {
             config: tokens.config,
         };
@@ -149,10 +147,10 @@ describe("getBindingDependencies", () => {
     });
 
     it("ignores dependencies when the dependency brand is inherited", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
         const dependencies = {
             config: tokens.config,
         };
@@ -168,9 +166,9 @@ describe("getBindingDependencies", () => {
 
 describe("isBinding", () => {
     it("rejects structural objects that were not created by bind", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(
             isBinding({
@@ -181,9 +179,9 @@ describe("isBinding", () => {
     });
 
     it("rejects objects with inherited binding brands", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const binding = Object.assign(Object.create({ [bindingBrand]: true }), {
             token: tokens.port,
             factory: () => 3000,

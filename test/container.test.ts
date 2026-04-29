@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { bind } from "../src/bind";
 import { createContainer } from "../src/container";
 import { ref } from "../src/ref";
-import { defineTokens, type Token } from "../src/token";
-import { type as defineType } from "../src/type-descriptor";
+import { type Token, token } from "../src/token";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
@@ -19,7 +17,7 @@ type Deferred = {
 };
 
 const createRuntimeContainer = createContainer as unknown as (
-    tokens: Record<string, unknown>,
+    tokens: readonly unknown[],
     ...bindings: readonly unknown[]
 ) => RuntimeContainerForTest;
 
@@ -36,13 +34,37 @@ const createDeferred = (): Deferred => {
 };
 
 describe("createContainer", () => {
-    it("resolves a service without dependencies", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("accepts an explicit array of tokens", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Logger = token("Logger").of<{ readonly log: (message: string) => void }>();
+        const logger = { log: vi.fn() };
 
         const container = createContainer(
-            tokens,
+            [Config, Logger],
+            bind(Config, () => ({ port: 3000 })),
+            bind(Logger, () => logger),
+        );
+
+        expect(container.resolve(Config)).toEqual({ port: 3000 });
+        expect(container.resolve(Logger)).toBe(logger);
+    });
+
+    it("throws when the token list contains duplicate keys", () => {
+        const NumberPort = token("port").of<number>();
+        const StringPort = token("port").of<string>();
+
+        expect(() => createRuntimeContainer([NumberPort, StringPort])).toThrowError(
+            'Token "port" is already included in the token list',
+        );
+    });
+
+    it("resolves a service without dependencies", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
+
+        const container = createContainer(
+            Object.values(tokens),
             bind(tokens.port, () => 3000),
         );
 
@@ -50,13 +72,13 @@ describe("createContainer", () => {
     });
 
     it("creates services lazily and caches resolved instances", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+        };
         const config = { port: 3000 };
         const factory = vi.fn(() => config);
 
-        const container = createContainer(tokens, bind(tokens.config, factory));
+        const container = createContainer(Object.values(tokens), bind(tokens.config, factory));
 
         expect(factory).not.toHaveBeenCalled();
         expect(container.resolve(tokens.config)).toBe(config);
@@ -66,13 +88,13 @@ describe("createContainer", () => {
 
     it("resolves eager dependencies before calling a dependent factory", () => {
         const calls: string[] = [];
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            server: defineType<{ readonly port: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            server: token("server").of<{ readonly port: number }>(),
+        };
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.config, () => {
                 calls.push("config");
                 return { port: 3000 };
@@ -87,14 +109,14 @@ describe("createContainer", () => {
         expect(calls).toEqual(["config", "server"]);
     });
 
-    it("resolves eager dependencies registered after their dependent service", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            server: defineType<{ readonly port: number }>(),
-        });
+    it("resolves eager dependencies declared after their dependent service", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            server: token("server").of<{ readonly port: number }>(),
+        };
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
             bind(tokens.config, () => ({ port: 3000 })),
         );
@@ -103,19 +125,19 @@ describe("createContainer", () => {
     });
 
     it("passes mixed eager and ref dependencies to the service factory", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{
                 readonly port: number;
                 readonly getLogger: () => { readonly log: (message: string) => void };
             }>(),
-        });
+        };
         const logger = { log: vi.fn() };
         const loggerFactory = vi.fn(() => logger);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.config, () => ({ port: 3000 })),
             bind(tokens.service, { config: tokens.config, logger: ref(tokens.logger) }, ({ config, logger }) => ({
                 port: config.port,
@@ -133,15 +155,15 @@ describe("createContainer", () => {
     });
 
     it("creates ref dependencies for non-disposable transient services without disposal tracking", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
-        });
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        };
         const logger = { log: vi.fn() };
         const loggerFactory = vi.fn(() => logger);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.transient(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
@@ -156,16 +178,16 @@ describe("createContainer", () => {
     });
 
     it("reuses a resolved dependency instance across dependents", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            firstServer: defineType<{ readonly config: { readonly port: number } }>(),
-            secondServer: defineType<{ readonly config: { readonly port: number } }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            firstServer: token("firstServer").of<{ readonly config: { readonly port: number } }>(),
+            secondServer: token("secondServer").of<{ readonly config: { readonly port: number } }>(),
+        };
         const config = { port: 3000 };
         const configFactory = vi.fn(() => config);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.config, configFactory),
             bind(tokens.firstServer, { config: tokens.config }, ({ config }) => ({ config })),
             bind(tokens.secondServer, { config: tokens.config }, ({ config }) => ({ config })),
@@ -177,19 +199,19 @@ describe("createContainer", () => {
     });
 
     it("caches resolved falsy service values", () => {
-        const tokens = defineTokens({
-            disabled: defineType<false>(),
-            empty: defineType<undefined>(),
-            none: defineType<null>(),
-            zero: defineType<0>(),
-        });
+        const tokens = {
+            disabled: token("disabled").of<false>(),
+            empty: token("empty").of<undefined>(),
+            none: token("none").of<null>(),
+            zero: token("zero").of<0>(),
+        };
         const disabledFactory = vi.fn(() => false as const);
         const emptyFactory = vi.fn(() => undefined);
         const noneFactory = vi.fn(() => null);
         const zeroFactory = vi.fn(() => 0 as const);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.disabled, disabledFactory),
             bind(tokens.empty, emptyFactory),
             bind(tokens.none, noneFactory),
@@ -211,9 +233,9 @@ describe("createContainer", () => {
     });
 
     it("retries service creation after a factory throws", () => {
-        const tokens = defineTokens({
-            service: defineType<{ readonly status: "ready" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly status: "ready" }>(),
+        };
         const service = { status: "ready" as const };
         let attempts = 0;
         const factory = vi.fn(() => {
@@ -226,7 +248,7 @@ describe("createContainer", () => {
             return service;
         });
 
-        const container = createContainer(tokens, bind(tokens.service, factory));
+        const container = createContainer(Object.values(tokens), bind(tokens.service, factory));
 
         expect(() => container.resolve(tokens.service)).toThrowError("transient failure");
         expect(container.resolve(tokens.service)).toBe(service);
@@ -235,13 +257,13 @@ describe("createContainer", () => {
     });
 
     it("creates transient services for every resolution", () => {
-        const tokens = defineTokens({
-            counter: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            counter: token("counter").of<{ readonly id: number }>(),
+        };
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = createContainer(tokens, bind.transient(tokens.counter, factory));
+        const container = createContainer(Object.values(tokens), bind.transient(tokens.counter, factory));
 
         expect(container.resolve(tokens.counter)).toEqual({ id: 1 });
         expect(container.resolve(tokens.counter)).toEqual({ id: 2 });
@@ -249,13 +271,13 @@ describe("createContainer", () => {
     });
 
     it("caches scoped services separately for each scope", () => {
-        const tokens = defineTokens({
-            counter: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            counter: token("counter").of<{ readonly id: number }>(),
+        };
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = createContainer(tokens, bind.scoped(tokens.counter, factory));
+        const container = createContainer(Object.values(tokens), bind.scoped(tokens.counter, factory));
         const firstScope = container.createScope();
         const secondScope = container.createScope();
 
@@ -274,12 +296,12 @@ describe("createContainer", () => {
     });
 
     it("shares singleton services from their registration scope with child scopes", () => {
-        const tokens = defineTokens({
-            service: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly id: number }>(),
+        };
         const service = { id: 1 };
         const factory = vi.fn(() => service);
-        const container = createContainer(tokens, bind.singleton(tokens.service, factory));
+        const container = createContainer(Object.values(tokens), bind.singleton(tokens.service, factory));
         const firstScope = container.createScope();
         const secondScope = container.createScope();
 
@@ -290,12 +312,12 @@ describe("createContainer", () => {
     });
 
     it("allows child scopes to override parent bindings", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.config, () => ({ name: "root" })),
             bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
         );
@@ -306,12 +328,12 @@ describe("createContainer", () => {
     });
 
     it("resolves ref dependencies from the scope that created the ref", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<{ readonly getName: () => string }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<{ readonly getName: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.config, () => ({ name: "root" })),
             bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
                 getName: () => config.value.name,
@@ -324,17 +346,17 @@ describe("createContainer", () => {
     });
 
     it("resolves parent scoped dependencies supplied only by child scopes", () => {
-        const tokens = defineTokens({
-            request: defineType<{ readonly id: string }>(),
-            requestHolder: defineType<{ readonly requestId: string }>(),
-            service: defineType<{ readonly requestId: string }>(),
-            serviceWithRef: defineType<{ readonly requestId: string }>(),
-            serviceWithTransitiveRef: defineType<{ readonly requestId: string }>(),
-            transientService: defineType<{ readonly requestId: string }>(),
-            transientServiceWithRef: defineType<{ readonly requestId: string }>(),
-        });
+        const tokens = {
+            request: token("request").of<{ readonly id: string }>(),
+            requestHolder: token("requestHolder").of<{ readonly requestId: string }>(),
+            service: token("service").of<{ readonly requestId: string }>(),
+            serviceWithRef: token("serviceWithRef").of<{ readonly requestId: string }>(),
+            serviceWithTransitiveRef: token("serviceWithTransitiveRef").of<{ readonly requestId: string }>(),
+            transientService: token("transientService").of<{ readonly requestId: string }>(),
+            transientServiceWithRef: token("transientServiceWithRef").of<{ readonly requestId: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
             bind.scoped(tokens.serviceWithRef, { request: ref(tokens.request) }, ({ request }) => ({
                 requestId: request.value.id,
@@ -365,12 +387,12 @@ describe("createContainer", () => {
     });
 
     it("resolves parent scoped dependencies supplied only by grandchild scopes", () => {
-        const tokens = defineTokens({
-            request: defineType<{ readonly id: string }>(),
-            service: defineType<{ readonly requestId: string }>(),
-        });
+        const tokens = {
+            request: token("request").of<{ readonly id: string }>(),
+            service: token("service").of<{ readonly requestId: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
         );
         const childScope = container.createScope();
@@ -386,13 +408,13 @@ describe("createContainer", () => {
     });
 
     it("resolves parent services through descendant-completed override chains", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            port: defineType<number>(),
-            service: defineType<{ readonly port: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+            service: token("service").of<{ readonly port: number }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.port, () => 3000),
             bind.scoped(tokens.service, { port: tokens.port }, ({ port }) => ({ port })),
         );
@@ -409,12 +431,12 @@ describe("createContainer", () => {
     });
 
     it("initializes singleton dependencies from the singleton registration scope", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.singleton(tokens.config, () => ({ name: "root" })),
             bind.singleton(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
         );
@@ -434,13 +456,13 @@ describe("createContainer", () => {
             readonly name: string;
             readonly serviceA: ServiceA;
         };
-        const tokens = defineTokens({
-            serviceA: defineType<ServiceA>(),
-            serviceB: defineType<ServiceB>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<ServiceA>(),
+            serviceB: token("serviceB").of<ServiceB>(),
+        };
         const rootServiceA = { name: "root-a" };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.singleton(tokens.serviceA, () => rootServiceA),
             bind.singleton(tokens.serviceB, { serviceA: tokens.serviceA }, ({ serviceA }) => ({
                 name: "root-b",
@@ -466,12 +488,12 @@ describe("createContainer", () => {
     });
 
     it("lets nested scopes inherit child overrides while keeping grandchild overrides local", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.config, () => ({ name: "root" })),
             bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
         );
@@ -490,13 +512,13 @@ describe("createContainer", () => {
     });
 
     it("caches scoped services independently across nested scopes", () => {
-        const tokens = defineTokens({
-            counter: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            counter: token("counter").of<{ readonly id: number }>(),
+        };
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = createContainer(tokens, bind.scoped(tokens.counter, factory));
+        const container = createContainer(Object.values(tokens), bind.scoped(tokens.counter, factory));
         const childScope = container.createScope();
         const grandchildScope = childScope.createScope();
 
@@ -513,12 +535,12 @@ describe("createContainer", () => {
     });
 
     it("shares child-scope singletons with descendants without exposing them to parent or siblings", () => {
-        const tokens = defineTokens({
-            service: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly id: number }>(),
+        };
         const service = { id: 1 };
         const factory = vi.fn(() => service);
-        const container = createRuntimeContainer(tokens);
+        const container = createRuntimeContainer(Object.values(tokens));
         const siblingScope = container.createScope();
         const childScope = container.createScope(bind.singleton(tokens.service, factory));
         const grandchildScope = childScope.createScope();
@@ -535,10 +557,10 @@ describe("createContainer", () => {
     });
 
     it("re-resolves eager dependencies for every transient service resolution", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly id: number }>(),
-            service: defineType<{ readonly configId: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly id: number }>(),
+            service: token("service").of<{ readonly configId: number }>(),
+        };
         let nextConfigId = 1;
         const configFactory = vi.fn(() => ({ id: nextConfigId++ }));
         const serviceFactory = vi.fn(({ config }: { readonly config: { readonly id: number } }) => ({
@@ -546,7 +568,7 @@ describe("createContainer", () => {
         }));
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.transient(tokens.config, configFactory),
             bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
         );
@@ -558,17 +580,17 @@ describe("createContainer", () => {
     });
 
     it("resolves transient services against child overrides on every resolution", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<{ readonly name: string; readonly id: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<{ readonly name: string; readonly id: number }>(),
+        };
         let nextId = 1;
         const serviceFactory = vi.fn(({ config }: { readonly config: { readonly name: string } }) => ({
             id: nextId++,
             name: config.name,
         }));
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.config, () => ({ name: "root" })),
             bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
         );
@@ -581,13 +603,13 @@ describe("createContainer", () => {
     });
 
     it("does not create disposable bindings during dispose without prior resolve", async () => {
-        const tokens = defineTokens({
-            service: defineType<{ readonly id: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly id: "service" }>(),
+        };
         const factory = vi.fn(() => ({ id: "service" as const }));
         const disposer = vi.fn();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, factory, {
                 dispose: disposer,
             }),
@@ -605,13 +627,13 @@ describe("createContainer", () => {
     it("finishes tracking an in-flight resolution before a factory-requested dispose runs", async () => {
         const events: string[] = [];
         let factoryDisposePromise: Promise<void> | undefined;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly id: "resource" }>(),
-            service: defineType<{ readonly resource: { readonly id: "resource" } }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly id: "resource" }>(),
+            service: token("service").of<{ readonly resource: { readonly id: "resource" } }>(),
+        };
         let disposeContainer = () => Promise.resolve();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { resource: tokens.resource },
@@ -643,13 +665,13 @@ describe("createContainer", () => {
 
     it("disposes only instances owned by the disposed scope", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            db: defineType<{ readonly id: "db" }>(),
-            rootService: defineType<{ readonly id: "root" }>(),
-            requestService: defineType<{ readonly id: "request" }>(),
-        });
+        const tokens = {
+            db: token("db").of<{ readonly id: "db" }>(),
+            rootService: token("rootService").of<{ readonly id: "root" }>(),
+            requestService: token("requestService").of<{ readonly id: "request" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.singleton(tokens.db, () => ({ id: "db" }), { dispose: () => events.push("db") }),
             bind.scoped(tokens.rootService, { db: tokens.db }, () => ({ id: "root" }), {
                 dispose: () => events.push("root"),
@@ -678,11 +700,11 @@ describe("createContainer", () => {
 
     it("disposes child-owned singletons first resolved from grandchild scopes", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly id: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly id: "service" }>(),
+        };
         const factory = vi.fn(() => ({ id: "service" as const }));
-        const container = createContainer(tokens);
+        const container = createContainer(Object.values(tokens));
         const childScope = container.createScope(
             bind.singleton(tokens.service, factory, {
                 dispose: () => events.push("service"),
@@ -711,11 +733,11 @@ describe("createContainer", () => {
 
     it("cascades dispose to child scopes before disposing parent instances", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
         );
         const childScope = container.createScope(
@@ -743,11 +765,11 @@ describe("createContainer", () => {
 
     it("disposes sibling child scopes in reverse creation order", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.service, () => ({ name: "root" })),
         );
         const firstScope = container.createScope(
@@ -769,11 +791,11 @@ describe("createContainer", () => {
 
     it("cascades direct child scope dispose to grandchild scopes without disposing parent", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: string }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
         );
         const childScope = container.createScope(
@@ -805,12 +827,12 @@ describe("createContainer", () => {
 
     it("tracks disposable transient instances in the resolution scope", async () => {
         const disposedIds: number[] = [];
-        const tokens = defineTokens({
-            resource: defineType<{ readonly id: number }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly id: number }>(),
+        };
         let nextId = 1;
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.transient(tokens.resource, () => ({ id: nextId++ }), {
                 dispose: (resource) => disposedIds.push(resource.id),
             }),
@@ -829,12 +851,12 @@ describe("createContainer", () => {
     it("keeps unrelated later transient instances in reverse creation order when disposing eager dependents", async () => {
         const events: string[] = [];
         let nextResourceId = 1;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly id: number }>(),
-            service: defineType<{ readonly resource: { readonly id: number } }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly id: number }>(),
+            service: token("service").of<{ readonly resource: { readonly id: number } }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, { resource: tokens.resource }, ({ resource }) => ({ resource }), {
                 dispose: () => events.push("service"),
             }),
@@ -853,12 +875,12 @@ describe("createContainer", () => {
 
     it("disposes lazily resolved ref dependencies after their consumers", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            dependency: defineType<{ readonly name: "dependency" }>(),
-            service: defineType<{ readonly getDependency: () => { readonly name: "dependency" } }>(),
-        });
+        const tokens = {
+            dependency: token("dependency").of<{ readonly name: "dependency" }>(),
+            service: token("service").of<{ readonly getDependency: () => { readonly name: "dependency" } }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { dependency: ref(tokens.dependency) },
@@ -886,12 +908,12 @@ describe("createContainer", () => {
     it("lets a disposer read an already resolved ref dependency before the dependency is disposed", async () => {
         const events: string[] = [];
         let dependencyDisposed = false;
-        const tokens = defineTokens({
-            dependency: defineType<{ readonly read: () => string }>(),
-            service: defineType<{ readonly readDependency: () => string }>(),
-        });
+        const tokens = {
+            dependency: token("dependency").of<{ readonly read: () => string }>(),
+            service: token("service").of<{ readonly readDependency: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { dependency: ref(tokens.dependency) },
@@ -932,12 +954,12 @@ describe("createContainer", () => {
 
     it("wraps an unresolved ref read by a disposer without creating the target", async () => {
         const targetFactory = vi.fn(() => ({ name: "target" as const }));
-        const tokens = defineTokens({
-            service: defineType<{ readonly readTarget: () => string }>(),
-            target: defineType<{ readonly name: "target" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly readTarget: () => string }>(),
+            target: token("target").of<{ readonly name: "target" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { target: ref(tokens.target) },
@@ -972,13 +994,13 @@ describe("createContainer", () => {
     it("propagates disposable ref dependency tracking through non-disposable eager wrappers", async () => {
         const events: string[] = [];
         let resourceDisposed = false;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly read: () => string }>(),
-            wrapper: defineType<{ readonly readResource: () => string }>(),
-            service: defineType<{ readonly readWrappedResource: () => string }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly read: () => string }>(),
+            wrapper: token("wrapper").of<{ readonly readResource: () => string }>(),
+            service: token("service").of<{ readonly readWrappedResource: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { wrapper: tokens.wrapper },
@@ -1023,13 +1045,13 @@ describe("createContainer", () => {
     it("preserves disposal order through cached non-disposable ref wrappers first read by disposers", async () => {
         const events: string[] = [];
         let resourceDisposed = false;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly read: () => string }>(),
-            wrapper: defineType<{ readonly readResource: () => string }>(),
-            service: defineType<{ readonly readWrappedResource: () => string }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly read: () => string }>(),
+            wrapper: token("wrapper").of<{ readonly readResource: () => string }>(),
+            service: token("service").of<{ readonly readWrappedResource: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => ({
                 readResource: () => resource.value.read(),
             })),
@@ -1074,14 +1096,14 @@ describe("createContainer", () => {
     it("preserves disposal order through cyclic cached non-disposable ref wrappers", async () => {
         const events: string[] = [];
         let resourceDisposed = false;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly read: () => string }>(),
-            wrapperA: defineType<{ readonly readResource: () => string }>(),
-            wrapperB: defineType<{ readonly getWrapperA: () => { readonly readResource: () => string } }>(),
-            service: defineType<{ readonly readWrappedResource: () => string }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly read: () => string }>(),
+            wrapperA: token("wrapperA").of<{ readonly readResource: () => string }>(),
+            wrapperB: token("wrapperB").of<{ readonly getWrapperA: () => { readonly readResource: () => string } }>(),
+            service: token("service").of<{ readonly readWrappedResource: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.wrapperA,
                 { wrapperB: ref(tokens.wrapperB), resource: ref(tokens.resource) },
@@ -1133,12 +1155,12 @@ describe("createContainer", () => {
 
     it("does not expand parent-owned cached wrappers while disposing child ref dependents", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            wrapper: defineType<{ readonly read: () => string }>(),
-            service: defineType<{ readonly readWrapper: () => string }>(),
-        });
+        const tokens = {
+            wrapper: token("wrapper").of<{ readonly read: () => string }>(),
+            service: token("service").of<{ readonly readWrapper: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.wrapper, () => ({
                 read: () => "root",
             })),
@@ -1167,14 +1189,14 @@ describe("createContainer", () => {
 
     it("lets child disposers read parent-owned cached refs during parent cascade", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            wrapper: defineType<{ readonly read: () => string }>(),
-            service: defineType<{ readonly readWrapper: () => string }>(),
-        });
+        const tokens = {
+            wrapper: token("wrapper").of<{ readonly read: () => string }>(),
+            service: token("service").of<{ readonly readWrapper: () => string }>(),
+        };
         const wrapperFactory = vi.fn(() => ({
             read: () => "root",
         }));
-        const container = createContainer(tokens, bind(tokens.wrapper, wrapperFactory));
+        const container = createContainer(Object.values(tokens), bind(tokens.wrapper, wrapperFactory));
         let childScope: RuntimeContainerForTest;
 
         childScope = container.createScope(
@@ -1205,11 +1227,11 @@ describe("createContainer", () => {
 
     it("ignores self ref dependencies when disposing", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly getSelf: () => { readonly getSelf: () => unknown } }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly getSelf: () => { readonly getSelf: () => unknown } }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { self: ref(tokens.service) },
@@ -1233,16 +1255,16 @@ describe("createContainer", () => {
     it("deduplicates propagated ref dependencies through shared non-disposable wrappers", async () => {
         const events: string[] = [];
         let resourceDisposed = false;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly read: () => string }>(),
-            wrapper: defineType<{ readonly readResource: () => string }>(),
-            shared: defineType<{ readonly readResource: () => string }>(),
-            firstConsumer: defineType<{ readonly readResource: () => string }>(),
-            secondConsumer: defineType<{ readonly readResource: () => string }>(),
-            service: defineType<{ readonly readResource: () => string }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly read: () => string }>(),
+            wrapper: token("wrapper").of<{ readonly readResource: () => string }>(),
+            shared: token("shared").of<{ readonly readResource: () => string }>(),
+            firstConsumer: token("firstConsumer").of<{ readonly readResource: () => string }>(),
+            secondConsumer: token("secondConsumer").of<{ readonly readResource: () => string }>(),
+            service: token("service").of<{ readonly readResource: () => string }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { firstConsumer: tokens.firstConsumer, secondConsumer: tokens.secondConsumer },
@@ -1299,15 +1321,15 @@ describe("createContainer", () => {
 
     it("deduplicates repeated disposable ref dependencies while reusing the same ref instance", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            dependency: defineType<{ readonly name: "dependency" }>(),
-            service: defineType<{
+        const tokens = {
+            dependency: token("dependency").of<{ readonly name: "dependency" }>(),
+            service: token("service").of<{
                 readonly hasSharedDependencyRef: boolean;
                 readonly readDependency: () => { readonly name: "dependency" };
             }>(),
-        });
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { firstDependency: ref(tokens.dependency), secondDependency: ref(tokens.dependency) },
@@ -1337,12 +1359,12 @@ describe("createContainer", () => {
     it("disposes transient ref dependency instances after their consumer", async () => {
         const events: string[] = [];
         let nextResourceId = 1;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly id: number }>(),
-            service: defineType<{ readonly getResource: () => { readonly id: number } }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly id: number }>(),
+            service: token("service").of<{ readonly getResource: () => { readonly id: number } }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { resource: ref(tokens.resource) },
@@ -1371,12 +1393,12 @@ describe("createContainer", () => {
     it("keeps unrelated later transient instances in reverse creation order when disposing ref dependents", async () => {
         const events: string[] = [];
         let nextResourceId = 1;
-        const tokens = defineTokens({
-            resource: defineType<{ readonly id: number }>(),
-            service: defineType<{ readonly getResource: () => { readonly id: number } }>(),
-        });
+        const tokens = {
+            resource: token("resource").of<{ readonly id: number }>(),
+            service: token("service").of<{ readonly getResource: () => { readonly id: number } }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { resource: ref(tokens.resource) },
@@ -1410,12 +1432,12 @@ describe("createContainer", () => {
             readonly getA: () => ServiceA;
         };
         const events: string[] = [];
-        const tokens = defineTokens({
-            serviceA: defineType<ServiceA>(),
-            serviceB: defineType<ServiceB>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<ServiceA>(),
+            serviceB: token("serviceB").of<ServiceB>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.serviceA,
                 { serviceB: ref(tokens.serviceB) },
@@ -1448,12 +1470,12 @@ describe("createContainer", () => {
         const calls: string[] = [];
         const firstError = new Error("first dispose failed");
         const secondError = new Error("second dispose failed");
-        const tokens = defineTokens({
-            first: defineType<{ readonly name: "first" }>(),
-            second: defineType<{ readonly name: "second" }>(),
-        });
+        const tokens = {
+            first: token("first").of<{ readonly name: "first" }>(),
+            second: token("second").of<{ readonly name: "second" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.first, () => ({ name: "first" }), {
                 dispose: () => {
                     calls.push("first");
@@ -1490,15 +1512,15 @@ describe("createContainer", () => {
     it("clears refs and cached instances after failed disposal", async () => {
         const disposeError = new Error("dispose failed");
         const dependency = { name: "dependency" as const };
-        const tokens = defineTokens({
-            dependency: defineType<{ readonly name: "dependency" }>(),
-            service: defineType<{
+        const tokens = {
+            dependency: token("dependency").of<{ readonly name: "dependency" }>(),
+            service: token("service").of<{
                 readonly dependencyRef: { readonly value: { readonly name: "dependency" } };
             }>(),
-        });
+        };
         const dependencyFactory = vi.fn(() => dependency);
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { dependency: ref(tokens.dependency) },
@@ -1542,11 +1564,11 @@ describe("createContainer", () => {
         const firstError = new Error("first nested dispose failed");
         const secondError = new Error("second nested dispose failed");
         const disposeError = new AggregateError([firstError, secondError], "nested dispose failures");
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: () => {
                     throw disposeError;
@@ -1572,13 +1594,13 @@ describe("createContainer", () => {
         const calls: string[] = [];
         const firstError = new Error("first child dispose failed");
         const secondError = new Error("second child dispose failed");
-        const tokens = defineTokens({
-            firstChild: defineType<{ readonly name: "first" }>(),
-            secondChild: defineType<{ readonly name: "second" }>(),
-            root: defineType<{ readonly name: "root" }>(),
-        });
+        const tokens = {
+            firstChild: token("firstChild").of<{ readonly name: "first" }>(),
+            secondChild: token("secondChild").of<{ readonly name: "second" }>(),
+            root: token("root").of<{ readonly name: "root" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.root, () => ({ name: "root" }), {
                 dispose: () => calls.push("root"),
             }),
@@ -1621,11 +1643,11 @@ describe("createContainer", () => {
         const disposeStarted = vi.fn();
         const disposeFinished = vi.fn();
         const disposeDeferred = createDeferred();
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     disposeStarted();
@@ -1656,12 +1678,12 @@ describe("createContainer", () => {
         let firstDisposePromise: Promise<void> | undefined;
         let secondDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         let disposeContainer = () => Promise.resolve();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 () => {
@@ -1688,12 +1710,12 @@ describe("createContainer", () => {
     it("resolves synchronous reentrant dispose calls as no-ops", async () => {
         let reentrantDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         let disposeContainer = () => Promise.resolve();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: () => {
                     reentrantDisposePromise = disposeContainer();
@@ -1719,12 +1741,12 @@ describe("createContainer", () => {
 
     it("resolves awaited same-scope reentrant dispose calls as no-ops", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         let disposeContainer = () => Promise.resolve();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     events.push("before");
@@ -1744,12 +1766,12 @@ describe("createContainer", () => {
     it("keeps same-scope reentrant disposal active after awaited disposer work", async () => {
         let reentrantDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         let disposeContainer = () => Promise.resolve();
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     events.push("before");
@@ -1779,12 +1801,12 @@ describe("createContainer", () => {
     it("resolves reentrant parent dispose calls from child disposers during parent cascade", async () => {
         let reentrantParentDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            child: defineType<{ readonly name: "child" }>(),
-            root: defineType<{ readonly name: "root" }>(),
-        });
+        const tokens = {
+            child: token("child").of<{ readonly name: "child" }>(),
+            root: token("root").of<{ readonly name: "root" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.root, () => ({ name: "root" }), {
                 dispose: () => events.push("root"),
             }),
@@ -1818,12 +1840,12 @@ describe("createContainer", () => {
     it("keeps ancestor reentrant disposal active after awaited child disposer work", async () => {
         let reentrantParentDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            child: defineType<{ readonly name: "child" }>(),
-            root: defineType<{ readonly name: "root" }>(),
-        });
+        const tokens = {
+            child: token("child").of<{ readonly name: "child" }>(),
+            root: token("root").of<{ readonly name: "root" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.root, () => ({ name: "root" }), {
                 dispose: () => events.push("root"),
             }),
@@ -1859,12 +1881,12 @@ describe("createContainer", () => {
 
     it("resolves parent disposal from child disposers that cascade back into the in-flight child", async () => {
         const events: string[] = [];
-        const tokens = defineTokens({
-            child: defineType<{ readonly name: "child" }>(),
-            root: defineType<{ readonly name: "root" }>(),
-        });
+        const tokens = {
+            child: token("child").of<{ readonly name: "child" }>(),
+            root: token("root").of<{ readonly name: "root" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.root, () => ({ name: "root" }), {
                 dispose: () => events.push("root"),
             }),
@@ -1892,11 +1914,11 @@ describe("createContainer", () => {
         const otherDisposeDeferred = createDeferred();
         let nestedOtherDisposePromise: Promise<void> | undefined;
         const events: string[] = [];
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         const otherContainer = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     events.push("other:start");
@@ -1906,7 +1928,7 @@ describe("createContainer", () => {
             }),
         );
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     events.push("current:start");
@@ -1933,11 +1955,11 @@ describe("createContainer", () => {
         const disposeStarted = vi.fn();
         const disposeFinished = vi.fn();
         const disposeDeferred = createDeferred();
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => ({ name: "service" }), {
                 dispose: async () => {
                     disposeStarted();
@@ -1968,12 +1990,12 @@ describe("createContainer", () => {
             readonly configRef: object;
             readonly getConfig: () => { readonly name: string };
         };
-        const tokens = defineTokens({
-            config: defineType<{ readonly name: string }>(),
-            service: defineType<Service>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly name: string }>(),
+            service: token("service").of<Service>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.config, () => ({ name: "root" })),
             bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
                 configRef: config,
@@ -1992,17 +2014,17 @@ describe("createContainer", () => {
     });
 
     it("selects lazy ref dependency tokens per scoped service initialization", () => {
-        const tokens = defineTokens({
-            firstLogger: defineType<{ readonly name: "first" }>(),
-            secondLogger: defineType<{ readonly name: "second" }>(),
-            service: defineType<{
+        const tokens = {
+            firstLogger: token("firstLogger").of<{ readonly name: "first" }>(),
+            secondLogger: token("secondLogger").of<{ readonly name: "second" }>(),
+            service: token("service").of<{
                 readonly getLogger: () => { readonly name: "first" } | { readonly name: "second" };
             }>(),
-        });
+        };
         let selectedToken: typeof tokens.firstLogger | typeof tokens.secondLogger = tokens.firstLogger;
         const resolveToken = vi.fn(() => selectedToken);
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.firstLogger, () => ({ name: "first" })),
             bind.scoped(tokens.secondLogger, () => ({ name: "second" })),
             bind.scoped(tokens.service, { logger: ref(resolveToken) }, ({ logger }) => ({
@@ -2022,41 +2044,41 @@ describe("createContainer", () => {
         expect(resolveToken).toHaveBeenCalledTimes(2);
     });
 
-    it("throws when a binding token is not in the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when a binding token is not in the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
 
         expect(() =>
             createRuntimeContainer(
-                tokens,
+                Object.values(tokens),
                 bind(externalToken, () => 3000),
             ),
-        ).toThrowError('Token "external" is not registered in the registry');
+        ).toThrowError('Token "external" is not included in the token list');
     });
 
-    it("throws when an eager dependency token is not in the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when an eager dependency token is not in the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
 
         expect(() =>
             createRuntimeContainer(
-                tokens,
+                Object.values(tokens),
                 bind(tokens.port, { external: externalToken }, ({ external }) => external),
             ),
-        ).toThrowError('Token "external" is not registered in the registry');
+        ).toThrowError('Token "external" is not included in the token list');
     });
 
-    it("throws when an eager dependency token is registered but has no binding", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            server: defineType<{ readonly port: number }>(),
-        });
+    it("throws when an eager dependency token is listed but has no binding", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            server: token("server").of<{ readonly port: number }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
         );
 
@@ -2065,26 +2087,26 @@ describe("createContainer", () => {
         );
     });
 
-    it("throws when a ref dependency resolves to a token outside the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when a ref dependency resolves to a token outside the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.port, { external: ref(() => externalToken) }, ({ external }) => external.value),
         );
 
-        expect(() => container.resolve(tokens.port)).toThrowError('Token "external" is not registered in the registry');
+        expect(() => container.resolve(tokens.port)).toThrowError('Token "external" is not included in the token list');
     });
 
-    it("throws when a ref dependency target is registered but has no binding", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
-        });
+    it("throws when a ref dependency target is listed but has no binding", () => {
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
@@ -2097,13 +2119,13 @@ describe("createContainer", () => {
         expect(() => service.getLogger()).toThrowError('Service "logger" is not registered in the container');
     });
 
-    it("throws when a disposable ref dependency target is registered but has no binding", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
-        });
+    it("throws when a disposable ref dependency target is listed but has no binding", () => {
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { logger: ref(tokens.logger) },
@@ -2123,13 +2145,13 @@ describe("createContainer", () => {
         expect(() => service.getLogger()).toThrowError('Service "logger" is not registered in the container');
     });
 
-    it("throws when a registered token has no binding", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-        });
+    it("throws when a listed token has no binding", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.config, () => ({ port: 3000 })),
         );
 
@@ -2138,29 +2160,29 @@ describe("createContainer", () => {
         );
     });
 
-    it("throws when resolving a token outside the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when resolving a token outside the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.port, () => 3000),
         );
 
         expect(() => (container as RuntimeContainerForTest).resolve(externalToken)).toThrowError(
-            'Token "external" is not registered in the registry',
+            'Token "external" is not included in the token list',
         );
     });
 
     it("throws when the same service is registered twice", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(() =>
             createContainer(
-                tokens,
+                Object.values(tokens),
                 bind(tokens.port, () => 3000),
                 bind(tokens.port, () => 4000),
             ),
@@ -2168,10 +2190,10 @@ describe("createContainer", () => {
     });
 
     it("throws when the same service is registered twice in a child scope", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
-        const container = createRuntimeContainer(tokens);
+        const tokens = {
+            port: token("port").of<number>(),
+        };
+        const container = createRuntimeContainer(Object.values(tokens));
 
         expect(() =>
             container.createScope(
@@ -2182,10 +2204,10 @@ describe("createContainer", () => {
     });
 
     it("throws when a child scope binding was not created with bind", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
-        const container = createRuntimeContainer(tokens);
+        const tokens = {
+            port: token("port").of<number>(),
+        };
+        const container = createRuntimeContainer(Object.values(tokens));
 
         expect(() =>
             container.createScope({
@@ -2195,36 +2217,36 @@ describe("createContainer", () => {
         ).toThrowError("Bindings must be created with bind");
     });
 
-    it("throws when a child scope binding token is not in the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when a child scope binding token is not in the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
-        const container = createRuntimeContainer(tokens);
+        const container = createRuntimeContainer(Object.values(tokens));
 
         expect(() => container.createScope(bind(externalToken, () => 3000))).toThrowError(
-            'Token "external" is not registered in the registry',
+            'Token "external" is not included in the token list',
         );
     });
 
-    it("throws when a child scope eager dependency token is not in the registry", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+    it("throws when a child scope eager dependency token is not in the token list", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const externalToken = "external" as Token<"external", number>;
-        const container = createRuntimeContainer(tokens);
+        const container = createRuntimeContainer(Object.values(tokens));
 
         expect(() =>
             container.createScope(bind(tokens.port, { external: externalToken }, ({ external }) => external)),
-        ).toThrowError('Token "external" is not registered in the registry');
+        ).toThrowError('Token "external" is not included in the token list');
     });
 
-    it("throws when a child scope service depends on a registered token without a visible binding", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-            server: defineType<{ readonly port: number }>(),
-        });
-        const container = createRuntimeContainer(tokens);
+    it("throws when a child scope service depends on a listed token without a visible binding", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            server: token("server").of<{ readonly port: number }>(),
+        };
+        const container = createRuntimeContainer(Object.values(tokens));
         const childScope = container.createScope(
             bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
         );
@@ -2235,12 +2257,12 @@ describe("createContainer", () => {
     });
 
     it("throws when child scope overrides create an eager circular dependency", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<{ readonly name: "a" }>(),
-            serviceB: defineType<{ readonly name: "b" }>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: "a" }>(),
+            serviceB: token("serviceB").of<{ readonly name: "b" }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
             bind.scoped(tokens.serviceB, () => ({ name: "b" })),
         );
@@ -2251,12 +2273,12 @@ describe("createContainer", () => {
     });
 
     it("throws when child scope overrides create a cycle through a transient parent binding", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<{ readonly name: "a" }>(),
-            serviceB: defineType<{ readonly name: "b" }>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: "a" }>(),
+            serviceB: token("serviceB").of<{ readonly name: "b" }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind.transient(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
             bind.scoped(tokens.serviceB, () => ({ name: "b" })),
         );
@@ -2267,12 +2289,12 @@ describe("createContainer", () => {
     });
 
     it("throws when nested scope overrides create an eager circular dependency", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<{ readonly name: "a" }>(),
-            serviceB: defineType<{ readonly name: "b" }>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: "a" }>(),
+            serviceB: token("serviceB").of<{ readonly name: "b" }>(),
+        };
         const container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
             bind.scoped(tokens.serviceB, () => ({ name: "b" })),
         );
@@ -2284,27 +2306,27 @@ describe("createContainer", () => {
     });
 
     it("throws when an eager dependency depends on itself during registration", () => {
-        const tokens = defineTokens({
-            service: defineType<{ readonly name: "service" }>(),
-        });
+        const tokens = {
+            service: token("service").of<{ readonly name: "service" }>(),
+        };
 
         expect(() =>
             createRuntimeContainer(
-                tokens,
+                Object.values(tokens),
                 bind(tokens.service, { service: tokens.service }, () => ({ name: "service" })),
             ),
         ).toThrowError("Circular dependency detected while registering services: service -> service");
     });
 
     it("throws when eager dependencies are circular during registration", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<{ readonly name: "a" }>(),
-            serviceB: defineType<{ readonly name: "b" }>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: "a" }>(),
+            serviceB: token("serviceB").of<{ readonly name: "b" }>(),
+        };
 
         expect(() =>
             createRuntimeContainer(
-                tokens,
+                Object.values(tokens),
                 bind(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
                 bind(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" })),
             ),
@@ -2312,15 +2334,15 @@ describe("createContainer", () => {
     });
 
     it("throws when eager dependencies form a long cycle during registration", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<{ readonly name: "a" }>(),
-            serviceB: defineType<{ readonly name: "b" }>(),
-            serviceC: defineType<{ readonly name: "c" }>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<{ readonly name: "a" }>(),
+            serviceB: token("serviceB").of<{ readonly name: "b" }>(),
+            serviceC: token("serviceC").of<{ readonly name: "c" }>(),
+        };
 
         expect(() =>
             createRuntimeContainer(
-                tokens,
+                Object.values(tokens),
                 bind(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
                 bind(tokens.serviceB, { serviceC: tokens.serviceC }, () => ({ name: "b" })),
                 bind(tokens.serviceC, { serviceA: tokens.serviceA }, () => ({ name: "c" })),
@@ -2331,12 +2353,12 @@ describe("createContainer", () => {
     });
 
     it("throws when a binding was not created with bind", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(() =>
-            createRuntimeContainer(tokens, {
+            createRuntimeContainer(Object.values(tokens), {
                 token: tokens.port,
                 factory: () => 3000,
             }),
@@ -2344,9 +2366,9 @@ describe("createContainer", () => {
     });
 
     it("throws when bind receives a non-function dispose option at runtime", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
 
         expect(() => bind(tokens.port, () => 3000, { dispose: "not a function" } as never)).toThrowError(
             "Dispose option must be a function",
@@ -2357,24 +2379,26 @@ describe("createContainer", () => {
     });
 
     it("throws when a registered binding has a non-function dispose value", () => {
-        const tokens = defineTokens({
-            port: defineType<number>(),
-        });
+        const tokens = {
+            port: token("port").of<number>(),
+        };
         const binding = bind(tokens.port, () => 3000);
 
         (binding as { dispose?: unknown }).dispose = "not a function";
 
-        expect(() => createRuntimeContainer(tokens, binding)).toThrowError("Dispose option must be a function");
+        expect(() => createRuntimeContainer(Object.values(tokens), binding)).toThrowError(
+            "Dispose option must be a function",
+        );
     });
 
     it("throws when a service resolves itself recursively", () => {
-        const tokens = defineTokens({
-            service: defineType<unknown>(),
-        });
+        const tokens = {
+            service: token("service").of<unknown>(),
+        };
         let container: RuntimeContainerForTest;
 
         container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, () => container.resolve(tokens.service)),
         );
 
@@ -2384,14 +2408,14 @@ describe("createContainer", () => {
     });
 
     it("throws when services resolve each other recursively", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<unknown>(),
-            serviceB: defineType<unknown>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<unknown>(),
+            serviceB: token("serviceB").of<unknown>(),
+        };
         let container: RuntimeContainerForTest;
 
         container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
             bind(tokens.serviceB, () => container.resolve(tokens.serviceA)),
         );
@@ -2402,15 +2426,15 @@ describe("createContainer", () => {
     });
 
     it("throws when services form a long recursive resolution cycle", () => {
-        const tokens = defineTokens({
-            serviceA: defineType<unknown>(),
-            serviceB: defineType<unknown>(),
-            serviceC: defineType<unknown>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<unknown>(),
+            serviceB: token("serviceB").of<unknown>(),
+            serviceC: token("serviceC").of<unknown>(),
+        };
         let container: RuntimeContainerForTest;
 
         container = createRuntimeContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
             bind(tokens.serviceB, () => container.resolve(tokens.serviceC)),
             bind(tokens.serviceC, () => container.resolve(tokens.serviceA)),
@@ -2422,13 +2446,13 @@ describe("createContainer", () => {
     });
 
     it("resolves ref token factories lazily and uses the token selected at service initialization time", () => {
-        const tokens = defineTokens({
-            firstLogger: defineType<{ readonly name: "first" }>(),
-            secondLogger: defineType<{ readonly name: "second" }>(),
-            service: defineType<{
+        const tokens = {
+            firstLogger: token("firstLogger").of<{ readonly name: "first" }>(),
+            secondLogger: token("secondLogger").of<{ readonly name: "second" }>(),
+            service: token("service").of<{
                 readonly getLogger: () => { readonly name: "first" } | { readonly name: "second" };
             }>(),
-        });
+        };
         const firstLogger = { name: "first" as const };
         const secondLogger = { name: "second" as const };
         const firstLoggerFactory = vi.fn(() => firstLogger);
@@ -2437,7 +2461,7 @@ describe("createContainer", () => {
         const resolveToken = vi.fn(() => selectedToken);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, { logger: ref(resolveToken) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
@@ -2463,15 +2487,15 @@ describe("createContainer", () => {
     });
 
     it("resolves ref dependencies lazily and caches their target instances", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
-        });
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{ readonly getLogger: () => { readonly log: (message: string) => void } }>(),
+        };
         const logger = { log: vi.fn() };
         const loggerFactory = vi.fn(() => logger);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
@@ -2487,15 +2511,15 @@ describe("createContainer", () => {
     });
 
     it("resolves transient ref dependencies lazily without caching their target instances", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly id: number }>(),
-            service: defineType<{ readonly getLogger: () => { readonly id: number } }>(),
-        });
+        const tokens = {
+            logger: token("logger").of<{ readonly id: number }>(),
+            service: token("service").of<{ readonly getLogger: () => { readonly id: number } }>(),
+        };
         let nextLoggerId = 1;
         const loggerFactory = vi.fn(() => ({ id: nextLoggerId++ }));
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
@@ -2511,18 +2535,18 @@ describe("createContainer", () => {
     });
 
     it("reuses ref dependency instances for the same target token", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ readonly log: (message: string) => void }>(),
-            service: defineType<{
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            service: token("service").of<{
                 readonly getLogger: () => { readonly log: (message: string) => void };
                 readonly hasSharedLoggerRef: boolean;
             }>(),
-        });
+        };
         const logger = { log: vi.fn() };
         const loggerFactory = vi.fn(() => logger);
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(
                 tokens.service,
                 { firstLogger: ref(tokens.logger), secondLogger: ref(tokens.logger) },
@@ -2549,13 +2573,13 @@ describe("createContainer", () => {
         type ServiceB = {
             readonly getA: () => ServiceA;
         };
-        const tokens = defineTokens({
-            serviceA: defineType<ServiceA>(),
-            serviceB: defineType<ServiceB>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<ServiceA>(),
+            serviceB: token("serviceB").of<ServiceB>(),
+        };
 
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
                 getB: () => serviceB.value,
             })),
@@ -2578,12 +2602,12 @@ describe("createContainer", () => {
         type ServiceB = {
             readonly getA: () => ServiceA;
         };
-        const tokens = defineTokens({
-            serviceA: defineType<ServiceA>(),
-            serviceB: defineType<ServiceB>(),
-        });
+        const tokens = {
+            serviceA: token("serviceA").of<ServiceA>(),
+            serviceB: token("serviceB").of<ServiceB>(),
+        };
         const container = createContainer(
-            tokens,
+            Object.values(tokens),
             bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => {
                 const resolvedServiceB = serviceB.value;
 

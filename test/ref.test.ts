@@ -1,15 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-
 import { refDependencyBrand } from "../src/brands";
 import { type DependencyReference, isRefDependency, ref } from "../src/ref";
-import { defineTokens, type Token } from "../src/token";
-import { type as defineType } from "../src/type-descriptor";
+import { type Token, token } from "../src/token";
 
 describe("ref", () => {
     it("creates a ref dependency for a direct token", () => {
-        const tokens = defineTokens({
-            logger: defineType<{ log: (message: string) => void }>(),
-        });
+        const tokens = {
+            logger: token("logger").of<{ log: (message: string) => void }>(),
+        };
 
         const dependency = ref(tokens.logger);
 
@@ -18,10 +16,10 @@ describe("ref", () => {
     });
 
     it("creates a lazy ref dependency from a token factory", () => {
-        const tokens = defineTokens({
-            first: defineType<{ readonly name: "first" }>(),
-            second: defineType<{ readonly name: "second" }>(),
-        });
+        const tokens = {
+            first: token("first").of<{ readonly name: "first" }>(),
+            second: token("second").of<{ readonly name: "second" }>(),
+        };
         let selectedToken: Token = tokens.first;
         const resolveToken = vi.fn(() => selectedToken);
 
@@ -38,9 +36,9 @@ describe("ref", () => {
 
 describe("isRefDependency", () => {
     it("returns true for ref dependencies", () => {
-        const tokens = defineTokens({
-            config: defineType<{ readonly port: number }>(),
-        });
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+        };
 
         expect(isRefDependency(ref(tokens.config))).toBe(true);
     });

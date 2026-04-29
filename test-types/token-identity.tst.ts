@@ -1,15 +1,7 @@
-import {
-    bind,
-    createContainer,
-    defineTokens,
-    type as defineType,
-    type Ref,
-    ref,
-    type Token,
-} from "@satunnaisuus/distill";
+import { bind, createContainer, type Ref, ref, type Token, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger } from "./fixtures/services.js";
-import { tokens } from "./fixtures/tokens.js";
+import { tokenList, tokens } from "./fixtures/tokens.js";
 import {
     anyKeyAnyValuePortToken,
     anyKeyPortToken,
@@ -20,119 +12,119 @@ import {
 test("rejects dependency tokens with any or too-wide branded parts", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: anyValuePortToken }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: anyKeyPortToken }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: wideAnyValueToken }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("rejects ref dependency tokens with any or too-wide branded parts", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(anyValuePortToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(anyKeyPortToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(wideAnyValueToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("rejects lazy ref dependency tokens with any or too-wide branded parts", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(() => anyValuePortToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(() => anyKeyPortToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(() => wideAnyValueToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("rejects binding tokens with any or too-wide branded parts", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(anyValuePortToken, () => 3000),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(anyKeyPortToken, () => 3000),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(wideAnyValueToken, () => 3000),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
 });
 
-test("allows legitimate any service tokens from defineType", () => {
-    const anyTokens = defineTokens({
-        consumer: defineType<{ readonly eager: any; readonly lazy: any }>(),
-        service: defineType<any>(),
-    });
+test("allows legitimate any service tokens from token", () => {
+    const anyTokens = {
+        consumer: token("consumer").of<{ readonly eager: any; readonly lazy: any }>(),
+        service: token("service").of<any>(),
+    };
     const serviceBinding = bind(anyTokens.service, () => ({ port: 3000 }));
     const consumerBinding = bind(
         anyTokens.consumer,
@@ -142,7 +134,7 @@ test("allows legitimate any service tokens from defineType", () => {
             lazy: lazy.value,
         }),
     );
-    const container = createContainer(anyTokens, consumerBinding, serviceBinding);
+    const container = createContainer(Object.values(anyTokens), consumerBinding, serviceBinding);
 
     expect(anyTokens.service).type.toBe<Token<"service", any>>();
     expect<ReturnType<typeof serviceBinding.factory>>().type.toBe<any>();
@@ -157,28 +149,28 @@ test("rejects raw any tokens used as bindings, dependencies, and refs", () => {
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(anyToken, () => 3000),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: anyToken }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: ref(anyToken) }, () => ({
                 port: 3000,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects same-key tokens with incompatible value types", () => {
@@ -186,10 +178,10 @@ test("createContainer rejects same-key tokens with incompatible value types", ()
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(stringPortToken, () => "3000"),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
 });
 
 test("createContainer rejects same-key tokens with narrower value types", () => {
@@ -197,10 +189,10 @@ test("createContainer rejects same-key tokens with narrower value types", () => 
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(narrowPortToken, () => 3000 as const),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
 });
 
 test("createContainer rejects binding tokens with widened keys", () => {
@@ -208,10 +200,10 @@ test("createContainer rejects binding tokens with widened keys", () => {
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(widenedPortToken, () => 3000),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
 });
 
 test("createContainer rejects same-key dependency tokens with incompatible value types", () => {
@@ -219,13 +211,13 @@ test("createContainer rejects same-key dependency tokens with incompatible value
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: stringPortToken }, ({ port }) => ({
                 port: port.length,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects same-key dependency tokens with narrower value types", () => {
@@ -233,13 +225,13 @@ test("createContainer rejects same-key dependency tokens with narrower value typ
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { port: narrowPortToken }, ({ port }) => ({
                 port,
             })),
             bind(tokens.port, () => 3000),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects dependency tokens with widened keys", () => {
@@ -247,13 +239,13 @@ test("createContainer rejects dependency tokens with widened keys", () => {
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { config: widenedConfigToken }, ({ config }) => ({
                 port: config.port,
             })),
             bind(tokens.config, () => ({ port: 3000 })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects ref dependency tokens with widened keys", () => {
@@ -264,7 +256,7 @@ test("createContainer rejects ref dependency tokens with widened keys", () => {
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { logger: ref(widenedLoggerToken) }, () => ({
                 port: 3000,
             })),
@@ -272,7 +264,7 @@ test("createContainer rejects ref dependency tokens with widened keys", () => {
                 log() {},
             })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects lazy ref dependency tokens with widened keys", () => {
@@ -283,7 +275,7 @@ test("createContainer rejects lazy ref dependency tokens with widened keys", () 
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { logger: ref(() => widenedLoggerToken) }, () => ({
                 port: 3000,
             })),
@@ -291,7 +283,7 @@ test("createContainer rejects lazy ref dependency tokens with widened keys", () 
                 log() {},
             })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects lazy ref dependency tokens with any-typed tokens", () => {
@@ -299,7 +291,7 @@ test("createContainer rejects lazy ref dependency tokens with any-typed tokens",
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { logger: ref(() => anyTypedToken) }, () => ({
                 port: 3000,
             })),
@@ -307,7 +299,7 @@ test("createContainer rejects lazy ref dependency tokens with any-typed tokens",
                 log() {},
             })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects lazy ref dependency tokens with same keys and incompatible value types", () => {
@@ -315,7 +307,7 @@ test("createContainer rejects lazy ref dependency tokens with same keys and inco
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.server, { logger: ref(() => sameKeyWrongValueToken) }, () => ({
                 port: 3000,
             })),
@@ -323,7 +315,7 @@ test("createContainer rejects lazy ref dependency tokens with same keys and inco
                 log() {},
             })),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
 test("createContainer rejects duplicate binding tokens with equivalent key aliases", () => {
@@ -331,7 +323,7 @@ test("createContainer rejects duplicate binding tokens with equivalent key alias
 
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, () => 3000),
             bind(portAlias, () => 4000),
         );
@@ -341,7 +333,7 @@ test("createContainer rejects duplicate binding tokens with equivalent key alias
 test("resolve uses bound value types for same-key tokens with narrower aliases", () => {
     const narrowPortToken = "port" as Token<"port", 3000>;
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.port, () => Math.random()),
     );
 
@@ -353,7 +345,7 @@ test("resolve rejects forged tokens with incompatible or unsafe branded parts", 
     const unknownPortToken = "port" as Token<"port", unknown>;
     const anyPortToken = "port" as Token<"port", any>;
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.port, () => 3000),
     );
 
@@ -380,7 +372,7 @@ test("resolve rejects forged tokens with incompatible or unsafe branded parts", 
 test("resolve rejects tokens with widened keys", () => {
     const widenedPortToken: Token<string, number> = tokens.port;
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.port, () => 3000),
     );
 

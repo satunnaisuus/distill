@@ -24,29 +24,27 @@ npm install @satunnaisuus/distill
 ### Define tokens and resolve a service
 
 ```ts
-import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly port: number;
 };
 
-const tokens = defineTokens({
-    config: defineType<Config>(),
-});
+const Config = token("Config").of<Config>();
 
 const container = createContainer(
-    tokens,
-    bind(tokens.config, () => ({ port: 3000 })),
+    [Config],
+    bind(Config, () => ({ port: 3000 })),
 );
 
-const config = container.resolve(tokens.config);
+const config = container.resolve(Config);
 //    ^? Config
 ```
 
 ### Wire dependencies explicitly
 
 ```ts
-import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly port: number;
@@ -60,30 +58,28 @@ type Server = {
     readonly start: () => void;
 };
 
-const tokens = defineTokens({
-    config: defineType<Config>(),
-    logger: defineType<Logger>(),
-    server: defineType<Server>(),
-});
+const Config = token("Config").of<Config>();
+const Logger = token("Logger").of<Logger>();
+const Server = token("Server").of<Server>();
 
 const container = createContainer(
-    tokens,
-    bind(tokens.config, () => ({ port: 3000 })),
-    bind(tokens.logger, () => console),
-    bind(tokens.server, { config: tokens.config, logger: tokens.logger }, ({ config, logger }) => ({
+    [Config, Logger, Server],
+    bind(Config, () => ({ port: 3000 })),
+    bind(Logger, () => console),
+    bind(Server, { config: Config, logger: Logger }, ({ config, logger }) => ({
         start: () => logger.log(`Listening on ${config.port}`),
     })),
 );
 
-container.resolve(tokens.server).start();
+container.resolve(Server).start();
 ```
 
-The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports out-of-registry dependencies, singleton missing bindings, and eager cycles at the container definition. Scoped and transient services with unresolved dependencies are omitted from `resolve` until a scope supplies those dependencies.
+The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports dependencies outside the token list, singleton missing bindings, and eager cycles at the container definition. Scoped and transient services with unresolved dependencies are omitted from `resolve` until a scope supplies those dependencies.
 
 ### Defer work with `ref`
 
 ```ts
-import { bind, createContainer, defineTokens, ref, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, ref, token } from "@satunnaisuus/distill";
 
 type Logger = {
     readonly log: (message: string) => void;
@@ -93,22 +89,20 @@ type JobRunner = {
     readonly run: () => void;
 };
 
-const tokens = defineTokens({
-    logger: defineType<Logger>(),
-    jobRunner: defineType<JobRunner>(),
-});
+const Logger = token("Logger").of<Logger>();
+const JobRunner = token("JobRunner").of<JobRunner>();
 
 const container = createContainer(
-    tokens,
-    bind(tokens.jobRunner, { logger: ref(tokens.logger) }, ({ logger }) => ({
+    [Logger, JobRunner],
+    bind(JobRunner, { logger: ref(Logger) }, ({ logger }) => ({
         run: () => {
             logger.value.log("Running job");
         },
     })),
-    bind(tokens.logger, () => console),
+    bind(Logger, () => console),
 );
 
-const runner = container.resolve(tokens.jobRunner);
+const runner = container.resolve(JobRunner);
 // The logger has not been created yet.
 
 runner.run();
@@ -118,7 +112,7 @@ runner.run();
 ### Break dependency cycles with `ref`
 
 ```ts
-import { bind, createContainer, defineTokens, ref, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, ref, token } from "@satunnaisuus/distill";
 
 type Users = {
     readonly getAudit: () => Audit;
@@ -128,22 +122,20 @@ type Audit = {
     readonly getUsers: () => Users;
 };
 
-const tokens = defineTokens({
-    users: defineType<Users>(),
-    audit: defineType<Audit>(),
-});
+const Users = token("Users").of<Users>();
+const Audit = token("Audit").of<Audit>();
 
 const container = createContainer(
-    tokens,
-    bind(tokens.users, { audit: ref(tokens.audit) }, ({ audit }) => ({
+    [Users, Audit],
+    bind(Users, { audit: ref(Audit) }, ({ audit }) => ({
         getAudit: () => audit.value,
     })),
-    bind(tokens.audit, { users: ref(tokens.users) }, ({ users }) => ({
+    bind(Audit, { users: ref(Users) }, ({ users }) => ({
         getUsers: () => users.value,
     })),
 );
 
-const users = container.resolve(tokens.users);
+const users = container.resolve(Users);
 const audit = users.getAudit();
 
 audit.getUsers() === users;
@@ -154,7 +146,7 @@ Use `ref` when access can be delayed until after initialization. Eager circular 
 ### Swap bindings for tests or environments
 
 ```ts
-import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, token } from "@satunnaisuus/distill";
 
 type Clock = {
     readonly now: () => Date;
@@ -164,36 +156,34 @@ type ReportService = {
     readonly createdAt: () => Date;
 };
 
-const tokens = defineTokens({
-    clock: defineType<Clock>(),
-    reports: defineType<ReportService>(),
-});
+const Clock = token("Clock").of<Clock>();
+const Reports = token("Reports").of<ReportService>();
 
 const createReportsBinding = () =>
-    bind(tokens.reports, { clock: tokens.clock }, ({ clock }) => ({
+    bind(Reports, { clock: Clock }, ({ clock }) => ({
         createdAt: () => clock.now(),
     }));
 
 const production = createContainer(
-    tokens,
-    bind(tokens.clock, () => ({ now: () => new Date() })),
+    [Clock, Reports],
+    bind(Clock, () => ({ now: () => new Date() })),
     createReportsBinding(),
 );
 
 const test = createContainer(
-    tokens,
-    bind(tokens.clock, () => ({ now: () => new Date("2026-01-01T00:00:00.000Z") })),
+    [Clock, Reports],
+    bind(Clock, () => ({ now: () => new Date("2026-01-01T00:00:00.000Z") })),
     createReportsBinding(),
 );
 
-production.resolve(tokens.reports).createdAt();
-test.resolve(tokens.reports).createdAt();
+production.resolve(Reports).createdAt();
+test.resolve(Reports).createdAt();
 ```
 
 ### Create request scopes
 
 ```ts
-import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, token } from "@satunnaisuus/distill";
 
 type CurrentUser = {
     readonly id: string;
@@ -203,23 +193,21 @@ type AuditLog = {
     readonly userId: string;
 };
 
-const tokens = defineTokens({
-    currentUser: defineType<CurrentUser>(),
-    auditLog: defineType<AuditLog>(),
-});
+const CurrentUser = token("CurrentUser").of<CurrentUser>();
+const AuditLog = token("AuditLog").of<AuditLog>();
 
 const app = createContainer(
-    tokens,
-    bind.scoped(tokens.auditLog, { currentUser: tokens.currentUser }, ({ currentUser }) => ({
+    [CurrentUser, AuditLog],
+    bind.scoped(AuditLog, { currentUser: CurrentUser }, ({ currentUser }) => ({
         userId: currentUser.id,
     })),
 );
 
 const request = app.createScope(
-    bind.scoped(tokens.currentUser, () => ({ id: "user-1" })),
+    bind.scoped(CurrentUser, () => ({ id: "user-1" })),
 );
 
-request.resolve(tokens.auditLog).userId;
+request.resolve(AuditLog).userId;
 //    ^? string
 ```
 
@@ -228,7 +216,7 @@ Scope bindings can override parent bindings. Scoped instances are cached in the 
 ### Dispose resources
 
 ```ts
-import { bind, createContainer, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { bind, createContainer, token } from "@satunnaisuus/distill";
 
 type Db = {
     readonly close: () => Promise<void>;
@@ -243,18 +231,16 @@ type Service = {
     readonly run: () => Promise<void>;
 };
 
-const tokens = defineTokens({
-    db: defineType<Db>(),
-    unitOfWork: defineType<UnitOfWork>(),
-    service: defineType<Service>(),
-});
+const Db = token("Db").of<Db>();
+const UnitOfWork = token("UnitOfWork").of<UnitOfWork>();
+const Service = token("Service").of<Service>();
 
 const app = createContainer(
-    tokens,
-    bind.singleton(tokens.db, () => createDb(), {
+    [Db, UnitOfWork, Service],
+    bind.singleton(Db, () => createDb(), {
         dispose: (db) => db.close(),
     }),
-    bind.scoped(tokens.service, { unitOfWork: tokens.unitOfWork }, ({ unitOfWork }) => ({
+    bind.scoped(Service, { unitOfWork: UnitOfWork }, ({ unitOfWork }) => ({
         run: async () => {
             // use unitOfWork
         },
@@ -262,13 +248,13 @@ const app = createContainer(
 );
 
 const request = app.createScope(
-    bind.scoped(tokens.unitOfWork, { db: tokens.db }, ({ db }) => db.createUnitOfWork(), {
+    bind.scoped(UnitOfWork, { db: Db }, ({ db }) => db.createUnitOfWork(), {
         dispose: (unitOfWork) => unitOfWork.rollback(),
     }),
 );
 
 try {
-    await request.resolve(tokens.service).run();
+    await request.resolve(Service).run();
 } finally {
     await request.dispose();
 }
@@ -281,8 +267,7 @@ Disposing a scope closes only instances owned by that scope. The request scope c
 ## API
 
 ```ts
-type<T>()
-defineTokens(definitions)
+token(key).of<T>()
 bind(token, factory, options?)
 bind(token, dependencies, factory, options?)
 bind.singleton(token, factory, options?)
@@ -293,53 +278,38 @@ bind.transient(token, factory, options?)
 bind.transient(token, dependencies, factory, options?)
 ref(token)
 ref(() => token)
-createContainer(tokens, ...bindings)
+createContainer([Config, Logger], ...bindings)
 container.resolve(token)
 container.createScope(...bindings)
 container.dispose()
 container.disposed
 ```
 
-### `type<T>()`
+### `token(key).of<T>()`
 
-Declares the value type for a token.
-
-```ts
-import { type as defineType } from "@satunnaisuus/distill";
-
-const config = defineType<{ readonly port: number }>();
-const unknownValue = defineType();
-```
-
-Type descriptors exist only to carry TypeScript information into `defineTokens`. They do not validate values at runtime. If `T` is omitted, the token value type is `unknown`.
-
-Because the export is named `type`, import it with an alias such as `type as defineType`.
-
-### `defineTokens(definitions)`
-
-Creates a token registry from string keys and type descriptors.
+Creates a token with a runtime key and a TypeScript value type.
 
 ```ts
-const tokens = defineTokens({
-    config: defineType<{ readonly port: number }>(),
-    logger: defineType<{ readonly log: (message: string) => void }>(),
-});
+import { token } from "@satunnaisuus/distill";
+
+const Config = token("Config").of<{ readonly port: number }>();
+const UnknownValue = token("UnknownValue").of();
 ```
 
-Each registry property becomes a token whose runtime value is the property key:
+The token runtime value is its key:
 
 ```ts
-tokens.config === "config";
+Config === "Config";
 ```
 
-Each returned token keeps its literal key and declared value type. Token keys must be string keys, and definition values must be created with `type<T>()`.
+Each token keeps its literal key and declared value type. Token keys must be strings. If `T` is omitted, the token value type is `unknown`.
 
 ### `bind(token, factory, options?)`
 
 Creates a binding for a service without declared dependencies.
 
 ```ts
-const configBinding = bind(tokens.config, () => ({ port: 3000 }));
+const configBinding = bind(Config, () => ({ port: 3000 }));
 ```
 
 The factory is lazy: it is not called when the binding or container is created. It runs when the service is resolved according to the binding lifetime.
@@ -349,13 +319,13 @@ The default `bind(...)` lifetime is singleton. Singleton values are cached in th
 The factory return type must be assignable to the token value type. If the service value itself is a function, return that function from the factory:
 
 ```ts
-const handlerBinding = bind(tokens.handler, () => (message: string) => message.length);
+const handlerBinding = bind(Handler, () => (message: string) => message.length);
 ```
 
 Pass `options.dispose` to close values created by the binding:
 
 ```ts
-const dbBinding = bind.singleton(tokens.db, () => createDb(), {
+const dbBinding = bind.singleton(Db, () => createDb(), {
     dispose: (db) => db.close(),
 });
 ```
@@ -368,8 +338,8 @@ Creates a binding for a service with an explicit dependency map.
 
 ```ts
 const serverBinding = bind(
-    tokens.server,
-    { config: tokens.config, logger: tokens.logger },
+    Server,
+    { config: Config, logger: Logger },
     ({ config, logger }) => ({
         start: () => logger.log(`Listening on ${config.port}`),
     }),
@@ -384,8 +354,8 @@ Dependency map keys become properties on the factory parameter. Dependency value
 The factory parameter is inferred from the dependency map:
 
 ```ts
-bind(tokens.server, { config: tokens.config }, ({ config }) => {
-    // config is inferred from tokens.config
+bind(Server, { config: Config }, ({ config }) => {
+    // config is inferred from Config
     return { port: config.port };
 });
 ```
@@ -396,9 +366,9 @@ Binding order does not matter:
 
 ```ts
 const container = createContainer(
-    tokens,
-    bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
-    bind(tokens.config, () => ({ port: 3000 })),
+    [Config, Server],
+    bind(Server, { config: Config }, ({ config }) => ({ port: config.port })),
+    bind(Config, () => ({ port: 3000 })),
 );
 ```
 
@@ -409,9 +379,9 @@ The optional fourth argument is the same binding options object accepted by depe
 Creates a binding with an explicit lifetime.
 
 ```ts
-const dbBinding = bind.singleton(tokens.db, () => createDb());
-const requestUserBinding = bind.scoped(tokens.currentUser, () => currentUser);
-const idBinding = bind.transient(tokens.id, () => crypto.randomUUID());
+const dbBinding = bind.singleton(Db, () => createDb());
+const requestUserBinding = bind.scoped(CurrentUser, () => currentUser);
+const idBinding = bind.transient(Id, () => crypto.randomUUID());
 ```
 
 Lifetimes behave as follows:
@@ -431,7 +401,7 @@ Disposable transient values are tracked by the scope that resolved them and are 
 Creates a lazy dependency reference.
 
 ```ts
-const binding = bind(tokens.jobRunner, { logger: ref(tokens.logger) }, ({ logger }) => ({
+const binding = bind(JobRunner, { logger: ref(Logger) }, ({ logger }) => ({
     run: () => logger.value.log("Running job"),
 }));
 ```
@@ -441,7 +411,7 @@ A `ref` dependency gives the factory a `Ref<T>` object with a readonly `.value` 
 Use `ref` when a dependency is expensive, optional within a code path, or part of a circular relationship where access can be delayed until after initialization.
 
 ```ts
-const usersBinding = bind(tokens.users, { audit: ref(tokens.audit) }, ({ audit }) => ({
+const usersBinding = bind(Users, { audit: ref(Audit) }, ({ audit }) => ({
     getAudit: () => audit.value,
 }));
 ```
@@ -449,27 +419,27 @@ const usersBinding = bind(tokens.users, { audit: ref(tokens.audit) }, ({ audit }
 `ref(() => token)` defers target token selection until the dependent service is initialized. The target service itself is still not created until `.value` is read.
 
 ```ts
-const selectedLogger = ref(() => useJson ? tokens.jsonLogger : tokens.textLogger);
+const selectedLogger = ref(() => (useJson ? JsonLogger : TextLogger));
 ```
 
 Accessing a `ref` before its target has finished initializing throws a circular initialization error. Return a function that reads `.value` later instead of reading it directly inside both sides of a cycle.
 
 ### `createContainer(tokens, ...bindings)`
 
-Creates an isolated container from a token registry and bindings.
+Creates an isolated container from an array of tokens and bindings.
 
 ```ts
 const container = createContainer(
-    tokens,
-    bind(tokens.config, () => ({ port: 3000 })),
-    bind(tokens.logger, () => console),
+    [Config, Logger],
+    bind(Config, () => ({ port: 3000 })),
+    bind(Logger, () => console),
 );
 ```
 
 At compile time, `createContainer` validates that:
 
-- every binding token belongs to the provided registry;
-- every dependency token belongs to the registry;
+- every binding token belongs to the provided token list;
+- every dependency token belongs to the token list;
 - singleton dependency graphs have visible bindings;
 - each token is bound once;
 - eager dependencies do not form a cycle;
@@ -481,17 +451,17 @@ Scoped and transient bindings may depend on tokens supplied by a descendant scop
 services whose dependencies are visible in that scope; the descendant `resolve` type includes the service once the needed
 bindings are supplied.
 
-Runtime checks cover binding shape, registry membership, duplicate bindings, and eager cycles for plain JavaScript or TypeScript code that bypasses the type system. Missing services and recursive resolution cycles are reported when the affected service is resolved or a `ref` value is read.
+Runtime checks cover binding shape, token list membership, duplicate bindings, and eager cycles for plain JavaScript or TypeScript code that bypasses the type system. Missing services and recursive resolution cycles are reported when the affected service is resolved or a `ref` value is read.
 
 When spreading a binding list, preserve tuple information:
 
 ```ts
 const bindings = [
-    bind(tokens.config, () => ({ port: 3000 })),
-    bind(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+    bind(Config, () => ({ port: 3000 })),
+    bind(Port, { config: Config }, ({ config }) => config.port),
 ] as const;
 
-const container = createContainer(tokens, ...bindings);
+const container = createContainer([Config, Port], ...bindings);
 ```
 
 Avoid spreading a plain `Binding[]`; TypeScript cannot validate individual bindings after the tuple has been widened.
@@ -502,13 +472,13 @@ Creates a child scope that inherits parent bindings and can add or override bind
 
 ```ts
 const request = app.createScope(
-    bind.scoped(tokens.currentUser, () => user),
+    bind.scoped(CurrentUser, () => user),
 );
 
-const service = request.resolve(tokens.service);
+const service = request.resolve(Service);
 ```
 
-Scope bindings are validated against the parent container and the token registry. Duplicate bindings inside the same scope are rejected, but a child scope can override a parent binding for the same token.
+Scope bindings are validated against the parent container and the token list. Duplicate bindings inside the same scope are rejected, but a child scope can override a parent binding for the same token.
 
 Singleton bindings are initialized from the scope where they are registered. Scoped and transient bindings resolve their dependencies from the scope that requested them, so parent scoped services can use child bindings and overrides.
 
@@ -517,7 +487,7 @@ Singleton bindings are initialized from the scope where they are registered. Sco
 Resolves a bound service.
 
 ```ts
-const config = container.resolve(tokens.config);
+const config = container.resolve(Config);
 //    ^? { readonly port: number }
 ```
 
@@ -526,8 +496,8 @@ Only tokens with bindings and currently visible dependencies can be resolved at 
 Resolution is lazy. Singleton and scoped bindings are cached according to their lifetime, while transient bindings create a new value on every resolution:
 
 ```ts
-const first = container.resolve(tokens.config);
-const second = container.resolve(tokens.config);
+const first = container.resolve(Config);
+const second = container.resolve(Config);
 
 first === second; // true
 ```
@@ -573,30 +543,33 @@ import type {
     RefToken,
     ResolvedDependencies,
     Token,
-    TokenDefinitions,
-    Tokens,
-    TypeDescriptor,
+    TokenBuilder,
 } from "@satunnaisuus/distill";
 ```
 
-Most applications only need the functions. The types are useful when sharing binding tuples between modules, writing helpers that accept token registries, or exposing container-related types from your own library.
+Most applications only need the functions. The types are useful when sharing binding tuples between modules, writing helpers that accept token lists, or exposing container-related types from your own library.
 
 When annotating containers manually, prefer preserving the container type returned by `createContainer` and `createScope`.
-`Container<FlatBindings, Registry>` can infer basic scope boundaries from a flat binding tuple, but it cannot reliably
+`Container<FlatBindings, TokenList>` can infer basic scope boundaries from a flat binding tuple, but it cannot reliably
 reconstruct every child scope from that tuple alone. For example, a child binding that appears before a child override is
 ambiguous without the original `createScope` boundary:
 
 ```ts
-const rootConfig = bind.scoped(tokens.config, () => ({ name: "root" }));
-const childPort = bind.transient(tokens.port, () => ({ value: 3000 }));
-const childConfig = bind.singleton(tokens.config, () => ({ name: "child" }));
+import { bind, createContainer, token, type Container } from "@satunnaisuus/distill";
 
-const child = createContainer(tokens, rootConfig).createScope(childPort, childConfig);
+const Config = token("Config").of<{ readonly name: string }>();
+const Port = token("Port").of<{ readonly value: number }>();
+
+const rootConfig = bind.scoped(Config, () => ({ name: "root" }));
+const childPort = bind.transient(Port, () => ({ value: 3000 }));
+const childConfig = bind.singleton(Config, () => ({ name: "child" }));
+
+const child = createContainer([Config, Port], rootConfig).createScope(childPort, childConfig);
 
 // Avoid: the flat tuple does not say that childPort and childConfig were added together.
 const typedChild: Container<
     readonly [typeof rootConfig, typeof childPort, typeof childConfig],
-    typeof tokens
+    readonly [typeof Config, typeof Port]
 > = child;
 ```
 
@@ -605,7 +578,7 @@ If you need to write the type explicitly for a scoped container, pass the third 
 ```ts
 const typedChild: Container<
     readonly [typeof rootConfig, typeof childPort, typeof childConfig],
-    typeof tokens,
+    readonly [typeof Config, typeof Port],
     readonly [readonly [typeof rootConfig], readonly [typeof childPort, typeof childConfig]]
 > = child;
 ```

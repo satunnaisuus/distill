@@ -1,4 +1,4 @@
-import { type Binding, defineTokens, type as defineType } from "@satunnaisuus/distill";
+import { type Binding, token } from "@satunnaisuus/distill";
 import type {
     CallableHandler,
     Config,
@@ -12,23 +12,38 @@ import type {
     ServiceB,
 } from "./services.js";
 
-export const tokens = defineTokens({
-    callableHandler: defineType<CallableHandler>(),
-    config: defineType<Config>(),
-    counter: defineType<Counter>(),
-    handler: defineType<Handler>(),
-    logger: defineType<Logger>(),
-    parser: defineType<Parser>(),
-    port: defineType<number>(),
-    serviceConstructor: defineType<typeof InjectableService>(),
-    server: defineType<Server>(),
-    unknown: defineType(),
-});
+export const tokens = {
+    callableHandler: token("callableHandler").of<CallableHandler>(),
+    config: token("config").of<Config>(),
+    counter: token("counter").of<Counter>(),
+    handler: token("handler").of<Handler>(),
+    logger: token("logger").of<Logger>(),
+    parser: token("parser").of<Parser>(),
+    port: token("port").of<number>(),
+    serviceConstructor: token("serviceConstructor").of<typeof InjectableService>(),
+    server: token("server").of<Server>(),
+    unknown: token("unknown").of(),
+};
 
-export const cycleTokens = defineTokens({
-    serviceA: defineType<ServiceA>(),
-    serviceB: defineType<ServiceB>(),
-});
+export const tokenList = [
+    tokens.callableHandler,
+    tokens.config,
+    tokens.counter,
+    tokens.handler,
+    tokens.logger,
+    tokens.parser,
+    tokens.port,
+    tokens.serviceConstructor,
+    tokens.server,
+    tokens.unknown,
+] as const;
+
+export const cycleTokens = {
+    serviceA: token("serviceA").of<ServiceA>(),
+    serviceB: token("serviceB").of<ServiceB>(),
+};
+
+export const cycleTokenList = [cycleTokens.serviceA, cycleTokens.serviceB] as const;
 
 export type ServerBinding = Binding<typeof tokens.server, { readonly config: typeof tokens.config }>;
 export type ConfigBinding = Binding<typeof tokens.config>;

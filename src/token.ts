@@ -1,5 +1,4 @@
 import { tokenBrand } from "./brands";
-import type { AnyTypeDescriptor, TypeValue } from "./type-descriptor";
 import type { HasTrue, IsAny, IsExact } from "./type-utils";
 
 type TokenRuntimeKey<TKey> = IsAny<TKey> extends true ? string : TKey extends string ? TKey : never;
@@ -13,6 +12,10 @@ export type Token<TKey = string, TValue = unknown> = TokenRuntimeKey<TKey> & {
     };
 };
 
+export type TokenBuilder<TKey extends string> = {
+    readonly of: <TValue = unknown>() => Token<TKey, TValue>;
+};
+
 export type AnyToken = string & {
     readonly [tokenBrand]: {
         readonly key: string;
@@ -24,9 +27,8 @@ export type AnyToken = string & {
 export type TokenValue<TToken extends AnyToken> = TToken[typeof tokenBrand]["type"];
 export type TokenKey<TToken extends AnyToken> = TToken[typeof tokenBrand]["key"];
 
-export type TokenDefinitions = Record<string, AnyTypeDescriptor>;
-export type AnyTokenRegistry = Record<string, AnyToken>;
-export type RegistryTokens<TRegistry extends AnyTokenRegistry> = TRegistry[keyof TRegistry];
+export type AnyTokenArray = readonly AnyToken[];
+export type TokenArrayTokens<TTokenArray extends AnyTokenArray> = TTokenArray[number];
 
 type IsExactToken<TToken extends AnyToken, TCandidate extends AnyToken> =
     IsExact<TokenKey<TToken>, TokenKey<TCandidate>> extends true
@@ -51,36 +53,16 @@ export type TokensNotIn<TTokens extends AnyToken, TCandidates extends AnyToken> 
         : TTokens
     : never;
 
-type TokenDefinitionKeyError<TDefinitions> = [Exclude<keyof TDefinitions, string>] extends [never]
-    ? {}
-    : {
-          readonly __non_string_token_keys_not_supported__: Exclude<keyof TDefinitions, string>;
-      };
-
-export type Tokens<TDefinitions extends TokenDefinitions> = {
-    [TKey in keyof TDefinitions as TKey extends string ? TKey : never]: Token<
-        Extract<TKey, string>,
-        TypeValue<TDefinitions[TKey]>
-    >;
-};
-
 export const tokenKey = <TToken extends AnyToken>(token: TToken): TokenKey<TToken> => {
     return token as TokenKey<TToken>;
 };
 
-export const defineTokens = <const TDefinitions extends TokenDefinitions>(
-    definitions: TDefinitions & TokenDefinitionKeyError<TDefinitions>,
-): Tokens<TDefinitions> => {
-    const tokens = {} as Tokens<TDefinitions>;
-
-    for (const key of Object.keys(definitions) as Array<Extract<keyof TDefinitions, string>>) {
-        Object.defineProperty(tokens, key, {
-            configurable: true,
-            enumerable: true,
-            value: key,
-            writable: true,
-        });
+export const token = <const TKey extends string>(key: TKey): TokenBuilder<TKey> => {
+    if (typeof key !== "string") {
+        throw new Error("Token key must be a string");
     }
 
-    return tokens;
+    return {
+        of: <TValue = unknown>() => key as Token<TKey, TValue>,
+    };
 };

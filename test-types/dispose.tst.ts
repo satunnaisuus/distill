@@ -1,15 +1,7 @@
-import {
-    type Binding,
-    bind,
-    createContainer,
-    type Disposer,
-    defineTokens,
-    type as defineType,
-    ref,
-} from "@satunnaisuus/distill";
+import { type Binding, bind, createContainer, type Disposer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { CallableHandler, Config, Handler, Logger, Parser, Server } from "./fixtures/services.js";
-import { tokens } from "./fixtures/tokens.js";
+import { tokenList, tokens } from "./fixtures/tokens.js";
 import { externalToken } from "./fixtures/unsafe-tokens.js";
 
 test("bind accepts sync and async dispose functions that return void", () => {
@@ -104,10 +96,10 @@ test("bind infers unknown-valued dispose parameters", () => {
 });
 
 test("bind infers void and undefined dispose parameters", () => {
-    const disposableTokens = defineTokens({
-        empty: defineType<undefined>(),
-        sideEffect: defineType<void>(),
-    });
+    const disposableTokens = {
+        empty: token("empty").of<undefined>(),
+        sideEffect: token("sideEffect").of<void>(),
+    };
     const emptyBinding = bind(disposableTokens.empty, () => undefined, {
         dispose: (value) => {
             expect(value).type.toBe<undefined>();
@@ -174,7 +166,7 @@ test("createContainer accepts disposable bindings and preserves resolve types", 
             expect(port).type.toBe<number>();
         },
     });
-    const container = createContainer(tokens, configBinding, portBinding);
+    const container = createContainer(tokenList, configBinding, portBinding);
 
     expect(container.resolve(tokens.config)).type.toBe<Config>();
     expect(container.resolve(tokens.port)).type.toBe<number>();
@@ -182,7 +174,7 @@ test("createContainer accepts disposable bindings and preserves resolve types", 
 
 test("createScope accepts disposable bindings and preserves resolve types", () => {
     const app = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 }), {
             dispose: (config) => {
                 expect(config).type.toBeAssignableTo<Config>();
@@ -224,7 +216,7 @@ test("bind preserves dispose value types for ref dependency bindings", () => {
 test("disposable bindings still participate in singleton scoped dependency validation", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind.singleton(
                 tokens.server,
                 { config: tokens.config },
@@ -242,28 +234,28 @@ test("disposable bindings still participate in singleton scoped dependency valid
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
 
-test("disposable bindings still participate in registry and duplicate validation", () => {
+test("disposable bindings still participate in token list and duplicate validation", () => {
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, () => 3000, { dispose: () => {} }),
             bind(tokens.port, () => 4000, { dispose: () => {} }),
         );
     }).type.toRaiseError("__duplicate_binding__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(externalToken, () => 3000, { dispose: () => {} }),
         );
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
     expect(() => {
         createContainer(
-            tokens,
+            tokenList,
             bind(tokens.port, { external: externalToken }, ({ external }) => external, { dispose: () => {} }),
         );
-    }).type.toRaiseError("__dependencies_not_in_registry__");
+    }).type.toRaiseError("__dependencies_not_in_tokens__");
 
-    const app = createContainer(tokens);
+    const app = createContainer(tokenList);
 
     expect(() => {
         app.createScope(
@@ -273,12 +265,12 @@ test("disposable bindings still participate in registry and duplicate validation
     }).type.toRaiseError("__duplicate_binding__");
     expect(() => {
         app.createScope(bind(externalToken, () => 3000, { dispose: () => {} }));
-    }).type.toRaiseError("__token_not_in_registry__");
+    }).type.toRaiseError("__token_not_in_tokens__");
 });
 
 test("created containers and scopes expose typed dispose APIs", () => {
     const container = createContainer(
-        tokens,
+        tokenList,
         bind(tokens.config, () => ({ port: 3000 })),
     );
     const scope = container.createScope(bind(tokens.port, { config: tokens.config }, ({ config }) => config.port));
