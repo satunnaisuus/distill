@@ -14,6 +14,10 @@ import {
     type DependencyMap,
     type Disposer,
     defineContainer,
+    defineModule,
+    type ExportedBinding,
+    exported,
+    type ModuleDefinition,
     type MultiToken,
     multiToken,
     type OptionalToken,
@@ -39,6 +43,10 @@ test("public helper types preserve their documented type relationships", () => {
     };
     const handlers = multiToken("handlers").of<(message: string) => number>();
     const configBinding = bind(tokens.config, () => ({ port: 3000 }));
+    const exportedConfigBinding = exported(configBinding);
+    const configModule = defineModule({
+        bindings: [exportedConfigBinding],
+    });
     const configOverride = override(configBinding);
     const configUnbind = unbind(tokens.config);
     const handlersOverride = overrideAll(handlers, []);
@@ -57,6 +65,8 @@ test("public helper types preserve their documented type relationships", () => {
     expect<BindingLifetime>().type.toBe<"singleton" | "scoped" | "transient">();
     expect<Disposer<number>>().type.toBe<(value: number) => void | Promise<void>>();
     expect<BindingOptions<number>>().type.toBe<{ readonly dispose?: Disposer<number> }>();
+    expect(exportedConfigBinding).type.toBe<ExportedBinding<typeof configBinding>>();
+    expect(configModule).type.toBe<ModuleDefinition<readonly [], readonly [typeof exportedConfigBinding]>>();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;

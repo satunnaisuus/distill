@@ -6,5 +6,7 @@ export const bindingLifetimeBrand: unique symbol = Symbol("bindingLifetime");
 export const bindingOverrideBrand: unique symbol = Symbol("bindingOverrideBrand");
 export const bindingOverrideAllBrand: unique symbol = Symbol("bindingOverrideAllBrand");
 export const bindingUnbindBrand: unique symbol = Symbol("bindingUnbindBrand");
+export const exportedBindingBrand: unique symbol = Symbol("exportedBindingBrand");
+export const moduleDefinitionBrand: unique symbol = Symbol("moduleDefinitionBrand");
 export const optionalDependencyBrand: unique symbol = Symbol("optionalDependency");
 export const refDependencyBrand: unique symbol = Symbol("refDependency");

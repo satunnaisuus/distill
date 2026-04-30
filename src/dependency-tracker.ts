@@ -8,10 +8,14 @@ import {
     type RuntimeScope,
 } from "./runtime";
 
-const createDependencyFrame = (scope: RuntimeScope, tokenKey: string): RuntimeResolutionFrame | undefined => {
-    const resolvedBinding = findBinding(scope, tokenKey);
+const createDependencyFrame = (
+    scope: RuntimeScope,
+    tokenKey: string,
+    moduleContextId: number,
+): RuntimeResolutionFrame | undefined => {
+    const resolvedBinding = findBinding(scope, tokenKey, moduleContextId, false);
 
-    return resolvedBinding ? createResolutionFrame(scope, tokenKey, resolvedBinding) : undefined;
+    return resolvedBinding ? createResolutionFrame(scope, tokenKey, resolvedBinding, moduleContextId) : undefined;
 };
 
 export const createDependencyTracker = (): RuntimeDependencyTracker => {
@@ -75,8 +79,9 @@ const addDependencyFrame = (
     dependencyTracker: RuntimeDependencyTracker,
     scope: RuntimeScope,
     tokenKey: string,
+    moduleContextId: number,
 ): void => {
-    const dependencyFrame = createDependencyFrame(scope, tokenKey);
+    const dependencyFrame = createDependencyFrame(scope, tokenKey, moduleContextId);
 
     if (dependencyFrame) {
         addDependencyFrameToTracker(dependencyTracker, dependencyFrame);
@@ -87,14 +92,15 @@ export const addRefDependencyFrame = (
     dependencyTracker: RuntimeDependencyTracker,
     scope: RuntimeScope,
     tokenKey: string,
+    moduleContextId: number,
 ): void => {
-    const resolvedBinding = findBinding(scope, tokenKey);
+    const resolvedBinding = findBinding(scope, tokenKey, moduleContextId, false);
 
     if (resolvedBinding?.binding.lifetime === "transient") {
         return;
     }
 
-    addDependencyFrame(dependencyTracker, scope, tokenKey);
+    addDependencyFrame(dependencyTracker, scope, tokenKey, moduleContextId);
 };
 
 export const addDependencyInstance = (

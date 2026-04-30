@@ -5,6 +5,8 @@ export { bind } from "./bind";
 export type { Container, ContainerDefinition } from "./container";
 export { defineContainer } from "./container";
 export type { DependencyMap, ResolvedDependencies } from "./dependencies";
+export type { ExportedBinding, ModuleDefinition } from "./module";
+export { defineModule, exported } from "./module";
 export type { OptionalToken } from "./optional";
 export { optional } from "./optional";
 export type { AnyBindingOverride, BindingOverride, BindingOverrideAll, BindingUnbind } from "./override";

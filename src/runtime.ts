@@ -3,27 +3,44 @@ import type { UnknownDisposer } from "./dispose-option";
 import type { Ref } from "./ref";
 import type { AnyToken, TokenKey, TokenValue } from "./token";
 
+export const defaultModuleContextId = 0;
+export const publicModuleContextId = -1;
+
 export type RuntimeFactory = (scope: RuntimeScope, dependencyTracker: RuntimeDependencyTracker | undefined) => unknown;
 export type RuntimeDisposer = UnknownDisposer;
+
+export type RuntimeModuleGraph = {
+    readonly rootModuleId: number;
+    readonly moduleIds: readonly number[];
+    readonly importsByModuleId: ReadonlyMap<number, readonly number[]>;
+    readonly exportedBindingIdsByModuleId: ReadonlyMap<number, Set<number>>;
+};
 
 export type RuntimeBinding = {
     readonly id: number;
     readonly factory: RuntimeFactory;
     readonly lifetime: BindingLifetime;
+    readonly isMultiToken: boolean;
+    readonly dependencyModuleContextId: number;
+    readonly visibleInAllModuleContexts: boolean;
+    readonly visibleModuleContextIds?: readonly number[];
     readonly eagerDependencies?: readonly string[];
     readonly dispose?: RuntimeDisposer;
 };
 
 export type AssertTokenIsInTokenList = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
+export type RegisterToken = <TToken extends AnyToken>(currentToken: TToken) => TokenKey<TToken>;
 export type RefResolver = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
     dependencyTracker?: RuntimeDependencyTracker,
+    moduleContextId?: number,
 ) => Ref<TokenValue<TToken>>;
 
 export type RuntimeContext = {
     readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
-    readonly isMultiTokenKey: (tokenKey: string) => boolean;
+    readonly registerToken: RegisterToken;
+    readonly moduleGraph?: RuntimeModuleGraph;
     readonly resolvingPath: RuntimeResolutionFrame[];
 };
 
@@ -101,6 +118,7 @@ export type RuntimeResolutionResult<TValue> =
 
 export type RuntimeResolutionFrame = {
     readonly tokenKey: string;
+    readonly moduleContextId: number;
     readonly bindingId: number;
     readonly ownerScope: RuntimeScope;
     readonly resolutionScope: RuntimeScope;
@@ -114,7 +132,7 @@ export const createRuntimeBindingId = (): number => {
 };
 
 export const getResolutionFrameKey = (frame: RuntimeResolutionFrame): string => {
-    return `${frame.tokenKey}\u0000${frame.bindingId}\u0000${frame.ownerScope.id}\u0000${frame.resolutionScope.id}`;
+    return `${frame.moduleContextId}\u0000${frame.tokenKey}\u0000${frame.bindingId}\u0000${frame.ownerScope.id}\u0000${frame.resolutionScope.id}`;
 };
 
 export const isSameResolutionFrame = (left: RuntimeResolutionFrame, right: RuntimeResolutionFrame): boolean => {
@@ -134,9 +152,11 @@ export const createResolutionFrame = (
     resolutionScope: RuntimeScope,
     tokenKey: string,
     resolvedBinding: ResolvedRuntimeBinding,
+    _moduleContextId = defaultModuleContextId,
 ): RuntimeResolutionFrame => {
     return {
         tokenKey,
+        moduleContextId: resolvedBinding.binding.dependencyModuleContextId,
         bindingId: resolvedBinding.binding.id,
         ownerScope: resolvedBinding.ownerScope,
         resolutionScope:
@@ -148,22 +168,84 @@ export const getRuntimeBindingCacheKey = (binding: RuntimeBinding): string => {
     return String(binding.id);
 };
 
-export const findBinding = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding | undefined => {
-    const bindings = scope.bindings.get(tokenKey);
+const isBindingVisibleInModuleContext = (
+    context: RuntimeContext,
+    binding: RuntimeBinding,
+    moduleContextId: number,
+): boolean => {
+    if (binding.visibleInAllModuleContexts) {
+        return true;
+    }
 
-    if (bindings && bindings.length > 0) {
+    if (binding.visibleModuleContextIds?.includes(moduleContextId)) {
+        return true;
+    }
+
+    const moduleGraph = context.moduleGraph;
+
+    if (!moduleGraph) {
+        return true;
+    }
+
+    if (moduleContextId === binding.dependencyModuleContextId) {
+        return true;
+    }
+
+    if (moduleContextId === publicModuleContextId) {
+        return (
+            binding.dependencyModuleContextId === moduleGraph.rootModuleId &&
+            (moduleGraph.exportedBindingIdsByModuleId.get(moduleGraph.rootModuleId)?.has(binding.id) ?? false)
+        );
+    }
+
+    const importedModuleIds = moduleGraph.importsByModuleId.get(moduleContextId) ?? [];
+
+    if (!importedModuleIds.includes(binding.dependencyModuleContextId)) {
+        return false;
+    }
+
+    return moduleGraph.exportedBindingIdsByModuleId.get(binding.dependencyModuleContextId)?.has(binding.id) ?? false;
+};
+
+export const getRuntimeRefCacheKey = (moduleContextId: number, tokenKey: string): string => {
+    return `${moduleContextId}\u0000${tokenKey}`;
+};
+
+export const findBinding = (
+    scope: RuntimeScope,
+    tokenKey: string,
+    moduleContextId = defaultModuleContextId,
+    isMultiToken?: boolean,
+): ResolvedRuntimeBinding | undefined => {
+    const bindings = scope.bindings.get(tokenKey);
+    const visibleBindings = bindings?.filter(
+        (binding) =>
+            isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
+            (isMultiToken === undefined || binding.isMultiToken === isMultiToken),
+    );
+
+    if (visibleBindings && visibleBindings.length > 0) {
         return {
-            binding: bindings[bindings.length - 1],
+            binding: visibleBindings[visibleBindings.length - 1],
             ownerScope: scope,
         };
     }
 
-    return scope.parent ? findBinding(scope.parent, tokenKey) : undefined;
+    return scope.parent ? findBinding(scope.parent, tokenKey, moduleContextId, isMultiToken) : undefined;
 };
 
-export const findBindings = (scope: RuntimeScope, tokenKey: string): ResolvedRuntimeBinding[] => {
-    const parentBindings = scope.parent ? findBindings(scope.parent, tokenKey) : [];
-    const bindings = scope.bindings.get(tokenKey) ?? [];
+export const findBindings = (
+    scope: RuntimeScope,
+    tokenKey: string,
+    moduleContextId = defaultModuleContextId,
+    isMultiToken?: boolean,
+): ResolvedRuntimeBinding[] => {
+    const parentBindings = scope.parent ? findBindings(scope.parent, tokenKey, moduleContextId, isMultiToken) : [];
+    const bindings = (scope.bindings.get(tokenKey) ?? []).filter(
+        (binding) =>
+            isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
+            (isMultiToken === undefined || binding.isMultiToken === isMultiToken),
+    );
 
     return [
         ...parentBindings,
