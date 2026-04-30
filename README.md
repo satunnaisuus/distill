@@ -101,6 +101,49 @@ container.resolve(Server).start();
 
 The `server` factory receives `{ config, logger }` with the correct inferred types. TypeScript reports dependencies outside the token list, singleton missing bindings, and eager cycles at the container definition. Scoped and transient services with unresolved dependencies are omitted from `resolve` until a scope supplies those dependencies.
 
+### Use provider helpers
+
+```ts
+import { bind, defineContainer, token } from "@satunnaisuus/distill";
+
+type Config = {
+    readonly port: number;
+};
+
+type Logger = {
+    readonly log: (message: string) => void;
+};
+
+type Server = {
+    readonly start: () => void;
+};
+
+class ServerImpl implements Server {
+    constructor(private readonly services: { readonly config: Config; readonly logger: Logger }) {}
+
+    start() {
+        this.services.logger.log(`Listening on ${this.services.config.port}`);
+    }
+}
+
+const Config = token("Config").of<Config>();
+const Logger = token("Logger").of<Logger>();
+const ConsoleLogger = token("ConsoleLogger").of<Logger>();
+const Server = token("Server").of<Server>();
+
+const container = defineContainer(
+    [Config, Logger, ConsoleLogger, Server],
+    bind.value(Config, { port: 3000 }),
+    bind.value(ConsoleLogger, console),
+    bind.alias(Logger, ConsoleLogger),
+    bind.class(Server, { config: Config, logger: Logger }, ServerImpl),
+).create();
+
+container.resolve(Server).start();
+```
+
+Provider helpers are shorthand for regular bindings. They keep the same explicit dependency maps and compile-time graph validation.
+
 ### Mark a dependency as optional
 
 ```ts
@@ -326,12 +369,24 @@ Disposing a scope closes only instances owned by that scope. The request scope c
 token(key).of<T>()
 bind(token, factory, options?)
 bind(token, dependencies, factory, options?)
+bind.value(token, value, options?)
+bind.factory(token, factory, options?)
+bind.factory(token, dependencies, factory, options?)
+bind.class(token, Class, options?)
+bind.class(token, dependencies, Class, options?)
+bind.alias(token, existingToken)
+bind.useExisting(token, existingToken)
 bind.singleton(token, factory, options?)
 bind.singleton(token, dependencies, factory, options?)
 bind.scoped(token, factory, options?)
 bind.scoped(token, dependencies, factory, options?)
 bind.transient(token, factory, options?)
 bind.transient(token, dependencies, factory, options?)
+bind.singleton|scoped|transient.value(...)
+bind.singleton|scoped|transient.factory(...)
+bind.singleton|scoped|transient.class(...)
+bind.singleton|scoped|transient.alias(...)
+bind.singleton|scoped|transient.useExisting(...)
 ref(token)
 ref(() => token)
 defineContainer([Config, Logger], ...bindings)
@@ -434,6 +489,33 @@ const container = defineContainer(
 ```
 
 The optional fourth argument is the same binding options object accepted by dependency-free bindings.
+
+### Provider helpers
+
+Provider helpers create the same `Binding` objects as `bind(...)`.
+
+```ts
+const configBinding = bind.value(Config, { port: 3000 });
+const serverBinding = bind.factory(Server, { config: Config }, ({ config }) => ({ port: config.port }));
+const classBinding = bind.class(Server, { config: Config }, ServerImpl);
+const aliasBinding = bind.alias(Logger, ConsoleLogger);
+```
+
+`bind.value(token, value, options?)` binds an already-created value. Use it for configuration objects, test doubles, and function-valued services that should be registered directly instead of returned from a factory.
+
+`bind.factory(...)` is an explicit provider-name alias for `bind(...)`; it accepts the same overloads and options.
+
+`bind.class(token, Class, options?)` creates the class with `new Class()`. `bind.class(token, dependencies, Class, options?)` resolves the dependency map and passes it as the single constructor argument:
+
+```ts
+class ServerImpl {
+    constructor(services: { readonly config: Config; readonly logger: Logger }) {}
+}
+```
+
+`bind.alias(token, existingToken)` and `bind.useExisting(token, existingToken)` resolve `existingToken` and return that value for `token`. The existing token must be a regular token; the bound token may be regular or multibind. The top-level alias helpers are transient so the alias follows the existing token's lifetime instead of caching the existing value on its own.
+
+All provider helpers are also available on `bind.singleton`, `bind.scoped`, and `bind.transient`. Use explicit lifetime alias helpers only when the alias itself should have that lifetime.
 
 ### `bind.singleton`, `bind.scoped`, and `bind.transient`
 

@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { bind, getBindingDependencies, getBindingLifetime, isBinding } from "../src/bind";
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/brands";
+import { defineContainer } from "../src/container";
 import { token } from "../src/token";
 
 describe("bind", () => {
@@ -55,6 +56,133 @@ describe("bind", () => {
         expect(getBindingLifetime(bind.transient(tokens.port, () => 3000))).toBe("transient");
     });
 
+    it("creates factory provider bindings", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
+        const dependencies = {
+            config: tokens.config,
+        };
+        const factory = ({ config }: { readonly config: { readonly port: number } }) => config.port;
+
+        const binding = bind.factory(tokens.port, dependencies, factory);
+
+        expect(binding.token).toBe(tokens.port);
+        expect(binding.factory).toBe(factory);
+        expect(binding.factory({ config: { port: 3000 } })).toBe(3000);
+        expect(getBindingLifetime(binding)).toBe("singleton");
+        expect(getBindingDependencies(binding)).toBe(dependencies);
+    });
+
+    it("creates value provider bindings for direct values", () => {
+        const tokens = {
+            empty: token("empty").of<undefined>(),
+            handler: token("handler").of<(message: string) => number>(),
+            port: token("port").of<number>(),
+        };
+        const handler = vi.fn((message: string) => message.length);
+        const dispose = vi.fn();
+
+        const portBinding = bind.value(tokens.port, 3000, { dispose });
+        const handlerBinding = bind.value(tokens.handler, handler);
+        const emptyBinding = bind.value(tokens.empty, undefined);
+
+        expect(portBinding.factory()).toBe(3000);
+        expect(portBinding.dispose).toBe(dispose);
+        expect(handlerBinding.factory()).toBe(handler);
+        expect(handlerBinding.factory()("ready")).toBe(5);
+        expect(emptyBinding.factory()).toBeUndefined();
+        expect(getBindingDependencies(portBinding)).toBeUndefined();
+    });
+
+    it("creates class provider bindings without dependencies", () => {
+        const Service = token("Service").of<{ readonly status: string }>();
+
+        class ServiceImpl {
+            readonly status = "ready";
+        }
+
+        const binding = bind.class(Service, ServiceImpl);
+        const instance = binding.factory();
+
+        expect(instance).toBeInstanceOf(ServiceImpl);
+        expect(instance.status).toBe("ready");
+        expect(getBindingLifetime(binding)).toBe("singleton");
+        expect(getBindingDependencies(binding)).toBeUndefined();
+    });
+
+    it("creates class provider bindings with dependencies", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            server: token("server").of<{ readonly port: number }>(),
+        };
+        const dependencies = { config: tokens.config };
+
+        class ServerImpl {
+            constructor(private readonly services: { readonly config: { readonly port: number } }) {}
+
+            get port(): number {
+                return this.services.config.port;
+            }
+        }
+
+        const binding = bind.class(tokens.server, dependencies, ServerImpl);
+        const instance = binding.factory({ config: { port: 3000 } });
+
+        expect(instance).toBeInstanceOf(ServerImpl);
+        expect(instance.port).toBe(3000);
+        expect(getBindingDependencies(binding)).toBe(dependencies);
+    });
+
+    it("creates alias provider bindings", () => {
+        const tokens = {
+            logger: token("logger").of<{ readonly log: (message: string) => void }>(),
+            consoleLogger: token("consoleLogger").of<{ readonly log: (message: string) => void }>(),
+        };
+        const logger = { log: vi.fn() };
+
+        const binding = bind.alias(tokens.logger, tokens.consoleLogger);
+        const useExistingBinding = bind.useExisting(tokens.logger, tokens.consoleLogger);
+        const singletonBinding = bind.singleton.alias(tokens.logger, tokens.consoleLogger);
+
+        expect(binding.factory({ existing: logger })).toBe(logger);
+        expect(useExistingBinding.factory({ existing: logger })).toBe(logger);
+        expect(getBindingDependencies(binding)).toEqual({ existing: tokens.consoleLogger });
+        expect(getBindingLifetime(binding)).toBe("transient");
+        expect(getBindingLifetime(useExistingBinding)).toBe("transient");
+        expect(getBindingLifetime(singletonBinding)).toBe("singleton");
+    });
+
+    it("resolves aliases through the existing token lifetime", () => {
+        const tokens = {
+            alias: token("alias").of<{ readonly id: number }>(),
+            scoped: token("scoped").of<{ readonly id: number }>(),
+            transient: token("transient").of<{ readonly id: number }>(),
+        };
+        let nextId = 1;
+        const container = defineContainer(
+            Object.values(tokens),
+            bind.transient(tokens.transient, () => ({ id: nextId++ })),
+            bind.scoped(tokens.scoped, () => ({ id: nextId++ })),
+            bind.alias(tokens.alias, tokens.transient),
+        ).create();
+
+        expect(container.resolve(tokens.alias)).toEqual({ id: 1 });
+        expect(container.resolve(tokens.alias)).toEqual({ id: 2 });
+
+        const scopedAliasContainer = defineContainer(
+            Object.values(tokens),
+            bind.scoped(tokens.scoped, () => ({ id: nextId++ })),
+            bind.alias(tokens.alias, tokens.scoped),
+        ).create();
+        const firstScope = scopedAliasContainer.createScope();
+        const secondScope = scopedAliasContainer.createScope();
+
+        expect(firstScope.resolve(tokens.alias)).toBe(firstScope.resolve(tokens.alias));
+        expect(secondScope.resolve(tokens.alias)).not.toBe(firstScope.resolve(tokens.alias));
+    });
+
     it("stores dispose options for bindings without dependencies", () => {
         const tokens = {
             port: token("port").of<number>(),
@@ -106,6 +234,13 @@ describe("bind", () => {
         expect(() => bind(tokens.port, {}, () => 3000, "not options" as never)).toThrowError(
             "Binding options must be an object",
         );
+        expect(() => bind.value(tokens.port, 3000, null as never)).toThrowError("Binding options must be an object");
+        expect(() => bind.class(tokens.port, class Port {}, "not options" as never)).toThrowError(
+            "Binding options must be an object",
+        );
+        expect(() => bind.class(tokens.port, {}, class Port {}, null as never)).toThrowError(
+            "Binding options must be an object",
+        );
     });
 
     it("throws when dependencies are provided without a factory", () => {
@@ -119,6 +254,22 @@ describe("bind", () => {
 
         expect(() => bindWithoutFactory(tokens.port, {})).toThrowError(
             "Factory is required when dependencies are provided",
+        );
+    });
+
+    it("throws when class bindings are missing a constructor at runtime", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
+        const bindClass = bind.class as unknown as (
+            token: typeof tokens.port,
+            dependenciesOrClass: unknown,
+            serviceClass?: unknown,
+        ) => unknown;
+
+        expect(() => bindClass(tokens.port, "not class")).toThrowError("Class constructor must be a function");
+        expect(() => bindClass(tokens.port, {})).toThrowError(
+            "Class constructor is required when dependencies are provided",
         );
     });
 });
