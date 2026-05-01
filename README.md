@@ -394,6 +394,20 @@ request.resolve(AuditLog).userId;
 
 Scope bindings can override parent bindings. Scoped instances are cached in the scope that resolves them, so separate request scopes receive separate `auditLog` instances.
 
+Use `runScoped` when a request or job scope should be disposed automatically:
+
+```ts
+const requestBindings = [
+    bind.scoped(CurrentUser, () => ({ id: "user-1" })),
+] as const;
+
+const userId = await app.runScoped(requestBindings, async (request) => {
+    return request.resolve(AuditLog).userId;
+});
+```
+
+Preserve tuple information for reusable binding arrays with `as const`, a typed tuple, or `satisfies`; widened `Binding[]` arrays cannot be fully validated by TypeScript.
+
 ### Dispose resources
 
 ```ts
@@ -482,6 +496,7 @@ definition.create(unbind(token))
 container.resolve(token)
 container.resolveAll(multibindToken)
 container.createScope(...bindings)
+container.runScoped(bindings, callback)
 container.dispose()
 container.disposed
 ```
@@ -750,6 +765,19 @@ const service = request.resolve(Service);
 Scope bindings are validated against the parent container and the token list. Duplicate bindings inside the same scope are rejected, but a child scope can override a parent binding for the same token.
 
 Singleton bindings are initialized from the scope where they are registered. Scoped and transient bindings resolve their dependencies from the scope that requested them, so parent scoped services can use child bindings and overrides.
+
+### `container.runScoped(bindings, callback)`
+
+Creates a child scope, passes it to `callback`, then disposes that scope whether the callback succeeds or throws.
+
+```ts
+const result = await app.runScoped(
+    [bind.scoped(CurrentUser, () => user)] as const,
+    async (request) => request.resolve(Service).run(),
+);
+```
+
+`runScoped` returns `Promise<Awaited<TResult>>` from the callback. If both the callback and scope disposal fail, it rejects with an `AggregateError` containing both failures.
 
 ### `container.resolve(token)`
 

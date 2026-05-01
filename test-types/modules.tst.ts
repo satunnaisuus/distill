@@ -85,6 +85,48 @@ test("imported exports preserve unresolved scoped dependencies", () => {
     expect(requestScope.resolve(App)).type.toBe<{ readonly requestId: string }>();
 });
 
+test("module runScoped preserves exported visibility and supplied request bindings", () => {
+    const Request = token("Request").of<{ readonly id: string }>();
+    const Service = token("Service").of<{ readonly requestId: string }>();
+    const App = token("App").of<{ readonly requestId: string }>();
+    const ApiModule = defineModule({
+        bindings: [exported(bind.scoped(Service, { request: Request }, ({ request }) => ({ requestId: request.id })))],
+    });
+    const AppModule = defineModule({
+        imports: [ApiModule],
+        bindings: [exported(bind.scoped(App, { service: Service }, ({ service }) => service))],
+    });
+    const app = defineContainer.module(AppModule).create();
+    const result = app.runScoped([bind.scoped(Request, () => ({ id: "request-1" }))] as const, (scope) => {
+        expect(scope.resolve(App)).type.toBe<{ readonly requestId: string }>();
+        expect(scope.resolve(Request)).type.toBe<{ readonly id: string }>();
+        expect(() => {
+            scope.resolve(Service);
+        }).type.toRaiseError();
+
+        return scope.resolve(App);
+    });
+
+    expect(result).type.toBe<Promise<{ readonly requestId: string }>>();
+});
+
+test("module runScoped rejects invalid scope bindings like createScope", () => {
+    const Request = token("Request").of<{ readonly id: string }>();
+    const WrongRequest = token("Request").of<{ readonly id: number }>();
+    const Service = token("Service").of<{ readonly requestId: string }>();
+    const AppModule = defineModule({
+        bindings: [
+            bind.scoped(Request, () => ({ id: "request-1" })),
+            exported(bind.scoped(Service, { request: Request }, ({ request }) => ({ requestId: request.id }))),
+        ],
+    });
+    const app = defineContainer.module(AppModule).create();
+
+    expect(() => {
+        app.runScoped([bind.scoped(WrongRequest, () => ({ id: 1 }))] as const, () => undefined);
+    }).type.toRaiseError("__token_not_in_tokens__");
+});
+
 test("imported export dependencies are not satisfied by importer local bindings", () => {
     const Request = token("Request").of<{ readonly id: string }>();
     const Service = token("Service").of<{ readonly requestId: string }>();

@@ -76,6 +76,49 @@ test("createScope allows scope bindings to depend on bindings declared later in 
     expect(scope.resolve(tokens.config)).type.toBe<Config>();
 });
 
+test("runScoped preserves parent bindings and adds tuple bindings in the callback scope", () => {
+    const app = defineContainer(
+        tokenList,
+        bind.scoped(tokens.config, () => ({ port: 3000 })),
+    ).create();
+    const result = app.runScoped([bind.scoped(tokens.port, () => 3000)] as const, (scope) => {
+        expect(scope.resolve(tokens.config)).type.toBe<Config>();
+        expect(scope.resolve(tokens.port)).type.toBe<number>();
+
+        return scope.resolve(tokens.port);
+    });
+
+    expect(result).type.toBe<Promise<number>>();
+    expect(() => {
+        app.resolve(tokens.port);
+    }).type.toRaiseError();
+});
+
+test("runScoped returns awaited async callback result types", () => {
+    const app = defineContainer(
+        tokenList,
+        bind.scoped(tokens.config, () => ({ port: 3000 })),
+    ).create();
+    const result = app.runScoped([] as const, async (scope) => scope.resolve(tokens.config));
+
+    expect(result).type.toBe<Promise<Config>>();
+});
+
+test("runScoped rejects invalid scope bindings like createScope", () => {
+    const app = defineContainer(tokenList).create();
+
+    expect(() => {
+        app.runScoped(
+            [
+                bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+                    port: config.port,
+                })),
+            ],
+            () => undefined,
+        );
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
 test("scoped and transient bindings can depend on scoped bindings", () => {
     const container = defineContainer(
         tokenList,

@@ -10,6 +10,10 @@ type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
     readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
+    readonly runScoped: (
+        bindings: readonly unknown[],
+        callback: (scope: RuntimeContainerForTest) => unknown,
+    ) => Promise<unknown>;
     readonly dispose: () => Promise<void>;
     readonly disposed: boolean;
 };
@@ -1083,6 +1087,142 @@ describe("defineContainer", () => {
         expect(events).toEqual(["second", "first"]);
         expect(firstScope.disposed).toBe(true);
         expect(secondScope.disposed).toBe(true);
+    });
+
+    it("runs a callback in a child scope and disposes it after success", async () => {
+        const events: string[] = [];
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        const result = await container.runScoped(
+            [
+                bind.scoped(tokens.service, () => ({ name: "request" }), {
+                    dispose: () => events.push("service"),
+                }),
+            ],
+            (scope) => {
+                expect(scope.disposed).toBe(false);
+                return scope.resolve(tokens.service).name;
+            },
+        );
+
+        expect(result).toBe("request");
+        expect(events).toEqual(["service"]);
+        expect(container.disposed).toBe(false);
+    });
+
+    it("returns an async runScoped callback result", async () => {
+        const tokens = {
+            service: token("service").of<{ readonly id: number }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        const result = await container.runScoped(
+            [bind.scoped(tokens.service, () => ({ id: 1 }))],
+            async (scope) => scope.resolve(tokens.service).id,
+        );
+
+        expect(result).toBe(1);
+    });
+
+    it("disposes a runScoped child scope after callback failure", async () => {
+        const events: string[] = [];
+        const callbackError = new Error("callback failed");
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        await expect(
+            container.runScoped(
+                [
+                    bind.scoped(tokens.service, () => ({ name: "request" }), {
+                        dispose: () => events.push("service"),
+                    }),
+                ],
+                (scope) => {
+                    scope.resolve(tokens.service);
+                    throw callbackError;
+                },
+            ),
+        ).rejects.toBe(callbackError);
+
+        expect(events).toEqual(["service"]);
+    });
+
+    it("rejects with the dispose error when a successful runScoped callback scope fails to dispose", async () => {
+        const disposeError = new Error("dispose failed");
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        let runError: unknown;
+
+        try {
+            await container.runScoped(
+                [
+                    bind.scoped(tokens.service, () => ({ name: "request" }), {
+                        dispose: () => {
+                            throw disposeError;
+                        },
+                    }),
+                ],
+                (scope) => scope.resolve(tokens.service).name,
+            );
+        } catch (error) {
+            runError = error;
+        }
+
+        expect(runError).toBeInstanceOf(AggregateError);
+        expect((runError as AggregateError).errors).toEqual([disposeError]);
+    });
+
+    it("rejects with an aggregate error when a runScoped callback and scope disposal both fail", async () => {
+        const callbackError = new Error("callback failed");
+        const disposeError = new Error("dispose failed");
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        let runError: unknown;
+
+        try {
+            await container.runScoped(
+                [
+                    bind.scoped(tokens.service, () => ({ name: "request" }), {
+                        dispose: () => {
+                            throw disposeError;
+                        },
+                    }),
+                ],
+                (scope) => {
+                    scope.resolve(tokens.service);
+                    throw callbackError;
+                },
+            );
+        } catch (error) {
+            runError = error;
+        }
+
+        expect(runError).toBeInstanceOf(AggregateError);
+        expect((runError as AggregateError).errors).toEqual([callbackError, disposeError]);
+    });
+
+    it("throws synchronously from runScoped when the parent container has been disposed", async () => {
+        const tokens = {
+            service: token("service").of<{ readonly name: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        await container.dispose();
+
+        expect(() => {
+            container.runScoped([], () => ({ name: "unused" }));
+        }).toThrowError("Container has been disposed");
     });
 
     it("cascades direct child scope dispose to grandchild scopes without disposing parent", async () => {

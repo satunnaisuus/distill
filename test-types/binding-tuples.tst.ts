@@ -189,3 +189,46 @@ test("createScope rejects valid bindings passed through readonly arrays", () => 
         app.createScope(...bindings);
     }).type.toRaiseError("__bindings_must_be_tuple__");
 });
+
+test("runScoped validates and preserves bindings passed as readonly tuples", () => {
+    const app = defineContainer(
+        tokenList,
+        bind(tokens.config, () => ({ port: 3000 })),
+    ).create();
+    const bindings = [
+        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+    ] as const;
+
+    const result = app.runScoped(bindings, (scope) => {
+        expect(scope.resolve(tokens.config)).type.toBe<Config>();
+        expect(scope.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+
+        return scope.resolve(tokens.server);
+    });
+
+    expect(result).type.toBe<Promise<{ readonly port: number }>>();
+});
+
+test("runScoped rejects invalid bindings passed as readonly tuples", () => {
+    const app = defineContainer(tokenList).create();
+    const bindings = [
+        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            port: config.port,
+        })),
+    ] as const;
+
+    expect(() => {
+        app.runScoped(bindings, () => undefined);
+    }).type.toRaiseError("__missing_dependencies__");
+});
+
+test("runScoped rejects valid bindings passed through mutable arrays", () => {
+    const app = defineContainer(tokenList).create();
+    const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+
+    expect(() => {
+        app.runScoped(bindings, () => undefined);
+    }).type.toRaiseError("__bindings_must_be_tuple__");
+});

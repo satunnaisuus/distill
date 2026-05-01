@@ -86,6 +86,10 @@ type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
     resolveAll<TToken extends AnyToken>(token: TToken): Array<TokenValue<TToken>>;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
+    runScoped<TResult>(
+        bindings: readonly AnyBinding[],
+        callback: (scope: RuntimeContainer) => TResult,
+    ): Promise<Awaited<TResult>>;
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
@@ -166,6 +170,21 @@ type CreateScopeFn<
 > = <const TScopeBindings extends readonly AnyBinding[]>(
     ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>
 ) => Container<readonly [...TBindings, ...TScopeBindings], TTokenArray, readonly [...TScopes, TScopeBindings]>;
+
+type RunScopedFn<
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+    TScopes extends BindingScopes,
+> = <const TScopeBindings extends readonly AnyBinding[], TResult>(
+    bindings: readonly [...TScopeBindings] & Readonly<ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>>,
+    callback: (
+        scope: Container<
+            readonly [...TBindings, ...TScopeBindings],
+            TTokenArray,
+            readonly [...TScopes, TScopeBindings]
+        >,
+    ) => TResult,
+) => Promise<Awaited<TResult>>;
 
 type BindingTokenArray<TBindings extends readonly AnyBinding[]> = readonly BindingTokens<TBindings>[];
 
@@ -394,6 +413,7 @@ export type Container<
     resolve: ResolveFn<TScopes>;
     resolveAll: ResolveAllFn<TScopes, TTokenArray>;
     createScope: CreateScopeFn<TBindings, TTokenArray, TScopes>;
+    runScoped: RunScopedFn<TBindings, TTokenArray, TScopes>;
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
@@ -506,6 +526,45 @@ type CreateModuleScopeFn<
     TOverrides
 >;
 
+type RunModuleScopedFn<
+    TModule extends AnyModuleDefinition,
+    TRootBindings extends readonly AnyBinding[],
+    TPublicBindings extends readonly AnyBinding[],
+    TPublicTokenArray extends AnyTokenArray,
+    TScopeBindings extends BindingScopes,
+    TOverrides extends readonly AnyBindingOverride[],
+> = <const TNewScopeBindings extends readonly AnyBinding[], TResult>(
+    bindings: readonly [...TNewScopeBindings] &
+        Readonly<
+            ValidateGraphBindings<
+                TNewScopeBindings,
+                readonly [
+                    ...ModulePublicScopes<
+                        TModule,
+                        TRootBindings,
+                        TPublicBindings,
+                        readonly [...TScopeBindings, TNewScopeBindings]
+                    >,
+                    TNewScopeBindings,
+                ]
+            >
+        > &
+        ScopeTokenCompatibilityError<
+            TNewScopeBindings,
+            ModuleScopeCompatibilityTokens<TModule, TRootBindings, TPublicBindings, TScopeBindings>
+        >,
+    callback: (
+        scope: ModuleContainer<
+            TModule,
+            TRootBindings,
+            TPublicBindings,
+            TPublicTokenArray,
+            readonly [...TScopeBindings, TNewScopeBindings],
+            TOverrides
+        >,
+    ) => TResult,
+) => Promise<Awaited<TResult>>;
+
 export type ModuleContainer<
     TModule extends AnyModuleDefinition = AnyModuleDefinition,
     TRootBindings extends readonly AnyBinding[] = ModuleLocalBindings<TModule>,
@@ -518,6 +577,14 @@ export type ModuleContainer<
     resolve: ModuleResolveFn<TPublicScopes, TPublicBindings, TScopeBindings>;
     resolveAll: ModuleResolveAllFn<TPublicScopes, TPublicTokenArray, TScopeBindings>;
     createScope: CreateModuleScopeFn<
+        TModule,
+        TRootBindings,
+        TPublicBindings,
+        TPublicTokenArray,
+        TScopeBindings,
+        TOverrides
+    >;
+    runScoped: RunModuleScopedFn<
         TModule,
         TRootBindings,
         TPublicBindings,
@@ -1475,8 +1542,70 @@ const assertPublicMultiTokenKey = (publicAccess: RuntimePublicAccess | undefined
     }
 };
 
+const collectRunScopedError = (errors: unknown[], error: unknown): void => {
+    if (error instanceof AggregateError) {
+        errors.push(...error.errors);
+        return;
+    }
+
+    errors.push(error);
+};
+
+const runScopedCallback = async <TResult>(
+    scopedContainer: RuntimeContainer,
+    callback: (scope: RuntimeContainer) => TResult,
+): Promise<Awaited<TResult>> => {
+    let callbackResult: Awaited<TResult> | undefined;
+    let callbackError: unknown;
+    let callbackFailed = false;
+
+    try {
+        callbackResult = (await callback(scopedContainer)) as Awaited<TResult>;
+    } catch (error) {
+        callbackFailed = true;
+        callbackError = error;
+    }
+
+    try {
+        await scopedContainer.dispose();
+    } catch (disposeError) {
+        if (callbackFailed) {
+            const errors: unknown[] = [];
+
+            collectRunScopedError(errors, callbackError);
+            collectRunScopedError(errors, disposeError);
+
+            throw new AggregateError(errors, "Scoped callback and dispose failed");
+        }
+
+        throw disposeError;
+    }
+
+    if (callbackFailed) {
+        throw callbackError;
+    }
+
+    return callbackResult as Awaited<TResult>;
+};
+
 const createRuntimeContainerForScope = (scope: RuntimeScope, publicAccess?: RuntimePublicAccess): RuntimeContainer => {
     const moduleContextId = publicAccess?.moduleContextId ?? defaultModuleContextId;
+    const createChildContainer = (bindings: readonly AnyBinding[]): RuntimeContainer => {
+        assertScopeIsActive(scope);
+
+        const childScope = createRuntimeScope(scope.context, scope);
+        registerBindings(
+            childScope,
+            bindings,
+            publicAccess ? { moduleContextId: publicAccess.moduleContextId } : undefined,
+        );
+        scope.children.add(childScope);
+
+        return createRuntimeContainerForScope(
+            childScope,
+            extendRuntimePublicAccess(childScope, publicAccess, bindings),
+        );
+    };
 
     return {
         get disposed() {
@@ -1495,20 +1624,10 @@ const createRuntimeContainerForScope = (scope: RuntimeScope, publicAccess?: Runt
             return resolveAllActual(scope, currentToken, moduleContextId);
         },
         createScope(...bindings) {
-            assertScopeIsActive(scope);
-
-            const childScope = createRuntimeScope(scope.context, scope);
-            registerBindings(
-                childScope,
-                bindings,
-                publicAccess ? { moduleContextId: publicAccess.moduleContextId } : undefined,
-            );
-            scope.children.add(childScope);
-
-            return createRuntimeContainerForScope(
-                childScope,
-                extendRuntimePublicAccess(childScope, publicAccess, bindings),
-            );
+            return createChildContainer(bindings);
+        },
+        runScoped(bindings, callback) {
+            return runScopedCallback(createChildContainer(bindings), callback);
         },
         dispose() {
             return disposeScope(scope);

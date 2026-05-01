@@ -408,6 +408,30 @@ test("createScope rejects structural bindings not created by bind", () => {
     }).type.toRaiseError();
 });
 
+test("runScoped rejects binding arrays that contain non-bindings", () => {
+    const container = defineContainer(tokenList).create();
+
+    expect(() => {
+        container.runScoped(["config"], () => undefined);
+    }).type.toRaiseError();
+});
+
+test("runScoped rejects structural bindings not created by bind", () => {
+    const container = defineContainer(tokenList).create();
+
+    expect(() => {
+        container.runScoped(
+            [
+                {
+                    token: tokens.port,
+                    factory: () => 3000,
+                },
+            ],
+            () => undefined,
+        );
+    }).type.toRaiseError();
+});
+
 test("ref rejects missing dependency tokens", () => {
     expect(() => {
         ref();

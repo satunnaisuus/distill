@@ -92,6 +92,7 @@ test("public helper types preserve their documented type relationships", () => {
         typeof tokens.port
     >();
     expect<ReturnType<Container<readonly [Binding<typeof tokens.port>]>["resolve"]>>().type.toBe<number>();
+    expect<ReturnType<Container["runScoped"]>>().type.toBe<Promise<unknown>>();
     expect<ReturnType<Container["dispose"]>>().type.toBe<Promise<void>>();
     expect<Container["disposed"]>().type.toBe<boolean>();
 });
@@ -110,9 +111,13 @@ test("public Container helper type exposes createScope relationships", () => {
         bind(tokens.config, () => ({ port: 3000 })),
     ).create();
     const typedScope = typedContainer.createScope(bind(tokens.port, () => 3000));
+    const runResult = typedContainer.runScoped([bind(tokens.port, () => 3000)] as const, (scope) =>
+        scope.resolve(tokens.port),
+    );
 
     expect(typedScope.resolve(tokens.config)).type.toBe<Config>();
     expect(typedScope.resolve(tokens.port)).type.toBe<number>();
+    expect(runResult).type.toBe<Promise<number>>();
     expect(() => {
         typedContainer.createScope(
             bind(tokens.server, { logger: tokens.logger }, () => ({
