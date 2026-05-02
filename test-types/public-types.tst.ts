@@ -9,8 +9,10 @@ import {
     type BindingOverrideAll,
     type BindingUnbind,
     bind,
+    type ComposedModuleDefinition,
     type Container,
     type ContainerDefinition,
+    composeModules,
     type DependencyMap,
     type Disposer,
     defineContainer,
@@ -47,6 +49,10 @@ test("public helper types preserve their documented type relationships", () => {
     const configModule = defineModule({
         bindings: [exportedConfigBinding],
     });
+    const configComposition = composeModules({
+        modules: [configModule],
+        exports: [tokens.config],
+    });
     const configOverride = override(configBinding);
     const configUnbind = unbind(tokens.config);
     const handlersOverride = overrideAll(handlers, []);
@@ -67,6 +73,9 @@ test("public helper types preserve their documented type relationships", () => {
     expect<BindingOptions<number>>().type.toBe<{ readonly dispose?: Disposer<number> }>();
     expect(exportedConfigBinding).type.toBe<ExportedBinding<typeof configBinding>>();
     expect(configModule).type.toBe<ModuleDefinition<readonly [], readonly [typeof exportedConfigBinding]>>();
+    expect(configComposition).type.toBe<
+        ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
+    >();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;

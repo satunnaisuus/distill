@@ -1,7 +1,7 @@
 import type { AllToken } from "./all";
 import type { AnyBinding, Binding, BindingLifetimeOf } from "./bind";
 import { isBinding } from "./bind";
-import { exportedBindingBrand, moduleDefinitionBrand } from "./brands";
+import { composedModuleDefinitionBrand, exportedBindingBrand, moduleDefinitionBrand } from "./brands";
 import type { DependencyMap } from "./dependencies";
 import type {
     BindingAllDependencyTokens,
@@ -12,7 +12,8 @@ import type {
     SameTokenKey,
 } from "./graph";
 import type { AnyMultiToken, AnyToken, IsMultiToken, TokenKey, TokensNotIn } from "./token";
-import type { HasTrue, IfNever } from "./type-utils";
+import { isRuntimeMultiToken, tokenKey } from "./token";
+import type { HasTrue, IfNever, IsExact } from "./type-utils";
 import type { ValidateGraphBindings } from "./validation";
 
 export type ExportedBinding<TBinding extends AnyBinding = AnyBinding> = {
@@ -25,18 +26,33 @@ export type ModuleBindingInput = AnyBinding | ExportedBinding<AnyBinding>;
 export type AnyModuleDefinition = {
     readonly [moduleDefinitionBrand]: true;
     readonly id: number;
-    readonly imports: readonly AnyModuleDefinition[];
+    readonly imports: readonly AnyToken[];
     readonly bindings: readonly ModuleBindingInput[];
 };
 
 export type ModuleDefinition<
-    TImports extends readonly AnyModuleDefinition[] = readonly AnyModuleDefinition[],
+    TImports extends readonly AnyToken[] = readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[] = readonly ModuleBindingInput[],
 > = {
     readonly [moduleDefinitionBrand]: true;
     readonly id: number;
     readonly imports: TImports;
     readonly bindings: TBindings;
+};
+
+export type AnyComposedModuleDefinition = {
+    readonly [composedModuleDefinitionBrand]: true;
+    readonly modules: readonly AnyModuleDefinition[];
+    readonly exports: readonly AnyToken[];
+};
+
+export type ComposedModuleDefinition<
+    TModules extends readonly AnyModuleDefinition[] = readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[] = readonly AnyToken[],
+> = {
+    readonly [composedModuleDefinitionBrand]: true;
+    readonly modules: TModules;
+    readonly exports: TExports;
 };
 
 export type UnwrapModuleBinding<TBinding extends ModuleBindingInput> =
@@ -80,6 +96,10 @@ export type ModuleExportedInterfaceBinding<
     readonly __module_exported_interface_binding__: true;
 };
 
+type ModuleImportedInterfaceBinding<TToken extends AnyToken = AnyToken> = Binding<TToken, undefined, "singleton"> & {
+    readonly __module_imported_interface_binding__: true;
+};
+
 type IsModuleExportedInterfaceBinding<TBinding extends AnyBinding> = TBinding extends {
     readonly __module_exported_interface_binding__: true;
 }
@@ -113,6 +133,12 @@ type BindingByExactToken<
     TToken extends AnyToken,
     TBinding extends AnyBinding = TBindings[number],
 > = TBinding extends AnyBinding ? (HasExactToken<TBinding["token"], TToken> extends true ? TBinding : never) : never;
+
+type BindingTokenMatchesRequest<TBindingToken extends AnyToken, TRequestedToken extends AnyToken> = IfNever<
+    TokensNotIn<TBindingToken, TRequestedToken>,
+    true,
+    false
+>;
 
 type ResolveExactBindingInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TScopes extends readonly [
     ...infer TRemainingScopes extends BindingScopes,
@@ -185,135 +211,114 @@ type ExternalDependencyTokensFromBinding<
                 >
               | ExternalDependencyTokensFromAllToken<TScopes, BindingAllDependencyTokens<TBinding>, TPath>;
 
-type ModuleExportedInterfaceDependencies<
-    TImports extends readonly AnyModuleDefinition[],
-    TBindings extends readonly ModuleBindingInput[],
-    TBinding extends AnyBinding,
-    _TAdditionalScopes extends BindingScopes,
-> = DependencyMapFromTokens<
-    ExternalDependencyTokensFromBinding<ModuleBindingScopesFromParts<TImports, TBindings>, TBinding>
->;
-
-type ModuleResolvedBindingScopesFromParts<
-    TImports extends readonly AnyModuleDefinition[],
-    TBindings extends readonly AnyBinding[],
-> = readonly [ModuleImportedExportedBindingsFromImports<TImports>, TBindings];
-
-type ModuleExportedInterfaceDependenciesFromResolvedBindings<
-    TImports extends readonly AnyModuleDefinition[],
-    TBindings extends readonly AnyBinding[],
-    TBinding extends AnyBinding,
-> = DependencyMapFromTokens<
-    ExternalDependencyTokensFromBinding<ModuleResolvedBindingScopesFromParts<TImports, TBindings>, TBinding>
->;
-
-export type ModuleExportedInterfaceBindingsFromResolvedBindings<
-    TImports extends readonly AnyModuleDefinition[],
-    TExportedBindings extends readonly AnyBinding[],
-    TResolvedBindings extends readonly AnyBinding[],
-> = number extends TExportedBindings["length"]
-    ? readonly AnyBinding[]
-    : TExportedBindings extends readonly [
-            infer TCurrentBinding extends AnyBinding,
-            ...infer TRemainingBindings extends readonly AnyBinding[],
-        ]
-      ? readonly [
-            ModuleExportedInterfaceBinding<
-                TCurrentBinding,
-                ModuleExportedInterfaceDependenciesFromResolvedBindings<TImports, TResolvedBindings, TCurrentBinding>
-            >,
-            ...ModuleExportedInterfaceBindingsFromResolvedBindings<TImports, TRemainingBindings, TResolvedBindings>,
-        ]
-      : readonly [];
-
-type ModuleExportedInterfaceBindingsFromParts<
-    TImports extends readonly AnyModuleDefinition[],
-    TBindings extends readonly ModuleBindingInput[],
-    TAdditionalScopes extends BindingScopes,
-    TAllBindings extends readonly ModuleBindingInput[] = TBindings,
-> = number extends TBindings["length"]
-    ? readonly AnyBinding[]
-    : TBindings extends readonly [
-            infer TCurrentBinding extends ModuleBindingInput,
-            ...infer TRemainingBindings extends readonly ModuleBindingInput[],
-        ]
-      ? TCurrentBinding extends ExportedBinding<infer TExportedBinding>
-          ? readonly [
-                ModuleExportedInterfaceBinding<
-                    TExportedBinding,
-                    ModuleExportedInterfaceDependencies<TImports, TAllBindings, TExportedBinding, TAdditionalScopes>
-                >,
-                ...ModuleExportedInterfaceBindingsFromParts<
-                    TImports,
-                    TRemainingBindings,
-                    TAdditionalScopes,
-                    TAllBindings
-                >,
-            ]
-          : ModuleExportedInterfaceBindingsFromParts<TImports, TRemainingBindings, TAdditionalScopes, TAllBindings>
-      : readonly [];
-
-export type ModuleExportedInterfaceBindings<
-    TModule extends AnyModuleDefinition,
-    TAdditionalScopes extends BindingScopes = readonly [],
-> = ModuleExportedInterfaceBindingsFromParts<TModule["imports"], TModule["bindings"], TAdditionalScopes>;
-
-export type ModuleImportedExportedBindingsFromImports<
-    TImports extends readonly AnyModuleDefinition[],
-    TAdditionalScopes extends BindingScopes = readonly [],
-> = number extends TImports["length"]
-    ? readonly AnyBinding[]
+type ModuleImportInterfaceBindingsFromTokens<TImports extends readonly AnyToken[]> = number extends TImports["length"]
+    ? readonly ModuleImportedInterfaceBinding<TImports[number]>[]
     : TImports extends readonly [
-            infer TCurrentModule extends AnyModuleDefinition,
-            ...infer TRemainingModules extends readonly AnyModuleDefinition[],
+            infer TCurrentToken extends AnyToken,
+            ...infer TRemainingTokens extends readonly AnyToken[],
         ]
       ? readonly [
-            ...ModuleExportedInterfaceBindings<TCurrentModule, TAdditionalScopes>,
-            ...ModuleImportedExportedBindingsFromImports<TRemainingModules, TAdditionalScopes>,
+            ModuleImportedInterfaceBinding<TCurrentToken>,
+            ...ModuleImportInterfaceBindingsFromTokens<TRemainingTokens>,
         ]
       : readonly [];
+
+export type ModuleImportedExportedBindingForToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+    TAdditionalScopes extends BindingScopes = readonly [],
+    TExcludedModule = never,
+> = TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
+    ? IsExact<TCurrentModule, TExcludedModule> extends true
+        ? never
+        : ModuleExportedInterfaceBindingByExactToken<TCurrentModule, TModules, TToken, TAdditionalScopes>
+    : never;
 
 export type ModuleImportedExportedBindings<
     TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
     TAdditionalScopes extends BindingScopes = readonly [],
-> = ModuleImportedExportedBindingsFromImports<TModule["imports"], TAdditionalScopes>;
+> = readonly ModuleImportedExportedBindingForToken<TModules, TModule["imports"][number], TAdditionalScopes, TModule>[];
 
-type ModuleImportedLocalBindingsFromImports<TImports extends readonly AnyModuleDefinition[]> =
-    number extends TImports["length"]
+type ModuleBindingScopesFromComposition<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TAdditionalScopes extends BindingScopes = readonly [],
+> = readonly [ModuleImportedExportedBindings<TModule, TModules, TAdditionalScopes>, ModuleLocalBindings<TModule>];
+
+type ModuleExportedInterfaceDependenciesFromComposition<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TBinding extends AnyBinding,
+    TAdditionalScopes extends BindingScopes,
+> = DependencyMapFromTokens<
+    ExternalDependencyTokensFromBinding<
+        ModuleBindingScopesFromComposition<TModule, TModules, TAdditionalScopes>,
+        TBinding
+    >
+>;
+
+type ModuleExportedInterfaceBindingByExactToken<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+    TAdditionalScopes extends BindingScopes,
+    TBinding extends AnyBinding = ModuleExportedBindings<TModule>[number],
+> = TBinding extends AnyBinding
+    ? BindingTokenMatchesRequest<TBinding["token"], TToken> extends true
+        ? ModuleExportedInterfaceBinding<
+              TBinding,
+              ModuleExportedInterfaceDependenciesFromComposition<TModule, TModules, TBinding, TAdditionalScopes>
+          >
+        : never
+    : never;
+
+export type CompositionPublicInterfaceBindings<
+    TModules extends readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[],
+    TAdditionalScopes extends BindingScopes = readonly [],
+> = number extends TExports["length"]
+    ? readonly ModuleImportedExportedBindingForToken<TModules, TExports[number], TAdditionalScopes>[]
+    : TExports extends readonly [
+            infer TCurrentExport extends AnyToken,
+            ...infer TRemainingExports extends readonly AnyToken[],
+        ]
+      ? readonly [
+            ModuleImportedExportedBindingForToken<TModules, TCurrentExport, TAdditionalScopes>,
+            ...CompositionPublicInterfaceBindings<TModules, TRemainingExports, TAdditionalScopes>,
+        ]
+      : readonly [];
+
+export type CompositionLocalBindings<TModules extends readonly AnyModuleDefinition[]> =
+    number extends TModules["length"]
         ? readonly AnyBinding[]
-        : TImports extends readonly [
+        : TModules extends readonly [
                 infer TCurrentModule extends AnyModuleDefinition,
                 ...infer TRemainingModules extends readonly AnyModuleDefinition[],
             ]
-          ? readonly [
-                ...ModuleLocalBindings<TCurrentModule>,
-                ...ModuleImportedLocalBindingsFromImports<TCurrentModule["imports"]>,
-                ...ModuleImportedLocalBindingsFromImports<TRemainingModules>,
-            ]
+          ? readonly [...ModuleLocalBindings<TCurrentModule>, ...CompositionLocalBindings<TRemainingModules>]
           : readonly [];
 
-export type ModuleImportedLocalBindings<TModule extends AnyModuleDefinition> = ModuleImportedLocalBindingsFromImports<
-    TModule["imports"]
->;
+export type CompositionPublicBindings<TComposition extends AnyComposedModuleDefinition> =
+    CompositionPublicInterfaceBindings<TComposition["modules"], TComposition["exports"]>;
 
-export type ModuleVisibleBindingsFromParts<
-    TImports extends readonly AnyModuleDefinition[],
+export type CompositionPublicTokenArray<TComposition extends AnyComposedModuleDefinition> = TComposition["exports"];
+
+type ModuleVisibleBindingsFromParts<
+    TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
-> = readonly [...ModuleImportedExportedBindingsFromImports<TImports>, ...UnwrapModuleBindings<TBindings>];
+> = readonly [...ModuleImportInterfaceBindingsFromTokens<TImports>, ...UnwrapModuleBindings<TBindings>];
 
-export type ModuleVisibleBindings<TModule extends AnyModuleDefinition> = ModuleVisibleBindingsFromParts<
-    TModule["imports"],
-    TModule["bindings"]
->;
-
-export type ModuleGraphScopes<
-    TModule extends AnyModuleDefinition,
+type ModuleBindingScopesFromParts<
+    TImports extends readonly AnyToken[],
+    TBindings extends readonly ModuleBindingInput[],
     TAdditionalScopes extends BindingScopes = readonly [],
-> = readonly [
-    ModuleImportedExportedBindings<TModule, TAdditionalScopes>,
-    ModuleLocalBindings<TModule>,
-    ...TAdditionalScopes,
-];
+> = readonly [ModuleImportInterfaceBindingsFromTokens<TImports>, UnwrapModuleBindings<TBindings>, ...TAdditionalScopes];
+
+type ModuleVisibleBindingsFromComposition<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+> = readonly [...ModuleImportedExportedBindings<TModule, TModules>, ...ModuleLocalBindings<TModule>];
 
 type TupleBindingsError<TBindings extends readonly ModuleBindingInput[]> = number extends TBindings["length"]
     ? {
@@ -321,9 +326,21 @@ type TupleBindingsError<TBindings extends readonly ModuleBindingInput[]> = numbe
       }
     : {};
 
-type TupleImportsError<TImports extends readonly AnyModuleDefinition[]> = number extends TImports["length"]
+type TupleImportsError<TImports extends readonly AnyToken[]> = number extends TImports["length"]
     ? {
           readonly __imports_must_be_tuple__: true;
+      }
+    : {};
+
+type TupleModulesError<TModules extends readonly AnyModuleDefinition[]> = number extends TModules["length"]
+    ? {
+          readonly __modules_must_be_tuple__: true;
+      }
+    : {};
+
+type TupleExportsError<TExports extends readonly AnyToken[]> = number extends TExports["length"]
+    ? {
+          readonly __exports_must_be_tuple__: true;
       }
     : {};
 
@@ -414,18 +431,31 @@ export type ScopeTokenCompatibilityError<
     }
 >;
 
-type ModuleBindingScopesFromParts<
-    TImports extends readonly AnyModuleDefinition[],
-    TBindings extends readonly ModuleBindingInput[],
-    TAdditionalScopes extends BindingScopes = readonly [],
-> = readonly [
-    ModuleImportedExportedBindingsFromImports<TImports, TAdditionalScopes>,
-    UnwrapModuleBindings<TBindings>,
-    ...TAdditionalScopes,
-];
+type DuplicateTokenKeys<
+    TTokenArray extends readonly AnyToken[],
+    TSeenTokens extends AnyToken = never,
+> = number extends TTokenArray["length"]
+    ? never
+    : TTokenArray extends readonly [infer TCurrentToken extends AnyToken, ...infer TRemainingTokens extends AnyToken[]]
+      ? HasTokenWithSameKey<TSeenTokens, TCurrentToken> extends true
+          ? TokenKey<TCurrentToken> | DuplicateTokenKeys<TRemainingTokens, TSeenTokens>
+          : DuplicateTokenKeys<TRemainingTokens, TSeenTokens | TCurrentToken>
+      : never;
+
+type DuplicateTokenListError<TTokenArray extends readonly AnyToken[], TProperty extends string> = IfNever<
+    DuplicateTokenKeys<TTokenArray>,
+    {},
+    TProperty extends "imports"
+        ? {
+              readonly __duplicate_import__: DuplicateTokenKeys<TTokenArray>;
+          }
+        : {
+              readonly __duplicate_export__: DuplicateTokenKeys<TTokenArray>;
+          }
+>;
 
 type ValidatedModuleLocalBindings<
-    TImports extends readonly AnyModuleDefinition[],
+    TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
 > = ValidateGraphBindings<
     UnwrapModuleBindings<TBindings>,
@@ -439,7 +469,7 @@ type RewrapModuleBindingInput<TInput extends ModuleBindingInput, TValidatedBindi
         : TValidatedBinding;
 
 type ValidateModuleBindingInputTuple<
-    TImports extends readonly AnyModuleDefinition[],
+    TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
     TValidatedBindings = ValidatedModuleLocalBindings<TImports, TBindings>,
 > = TupleBindingsError<TBindings> &
@@ -453,9 +483,114 @@ type ValidateModuleBindingInputTuple<
             : TBindings[TIndex];
     };
 
-type ValidateModuleImports<TImports extends readonly AnyModuleDefinition[]> = TupleImportsError<TImports> & {
-    [TIndex in keyof TImports]: TImports[TIndex] extends AnyModuleDefinition ? TImports[TIndex] : never;
+type ValidateModuleImports<TImports extends readonly AnyToken[]> = TupleImportsError<TImports> &
+    DuplicateTokenListError<TImports, "imports"> & {
+        [TIndex in keyof TImports]: TImports[TIndex] extends AnyToken ? TImports[TIndex] : never;
+    };
+
+type ModuleImportTokens<TModules extends readonly AnyModuleDefinition[]> = TModules[number]["imports"][number];
+
+type CompositionReferencedTokens<
+    TModules extends readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[],
+> = ModuleImportTokens<TModules> | TExports[number];
+
+type CompositionExportedBindingByExactToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+> = TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
+    ? BindingByExactToken<ModuleExportedBindings<TCurrentModule>, TToken>
+    : never;
+
+type CompositionExportedProviderTokens<TModules extends readonly AnyModuleDefinition[]> =
+    TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
+        ? ModuleExportedBindings<TCurrentModule>[number]["token"]
+        : never;
+
+type CompositionExportedBindings<TModules extends readonly AnyModuleDefinition[]> = number extends TModules["length"]
+    ? readonly AnyBinding[]
+    : TModules extends readonly [
+            infer TCurrentModule extends AnyModuleDefinition,
+            ...infer TRemainingModules extends readonly AnyModuleDefinition[],
+        ]
+      ? readonly [...ModuleExportedBindings<TCurrentModule>, ...CompositionExportedBindings<TRemainingModules>]
+      : readonly [];
+
+type MissingProviderTokens<
+    TModules extends readonly AnyModuleDefinition[],
+    TTokens extends AnyToken,
+> = TTokens extends AnyToken
+    ? IfNever<CompositionExportedBindingByExactToken<TModules, TTokens>, TTokens, never>
+    : never;
+
+type AmbiguousSingleProviderKeys<TModules extends readonly AnyModuleDefinition[]> = DuplicateVisibleSingleTokenKeys<
+    CompositionExportedBindings<TModules>
+>;
+
+type IncompatibleExportedMultibindProviderKeys<
+    TModules extends readonly AnyModuleDefinition[],
+    TProviderTokens extends AnyToken = CompositionExportedProviderTokens<TModules>,
+> = TProviderTokens extends AnyMultiToken
+    ? HasSameKeyIncompatibleToken<CompositionExportedProviderTokens<TModules>, TProviderTokens> extends true
+        ? TokenKey<TProviderTokens>
+        : never
+    : never;
+
+type InvalidComposedModuleBindings<TModules extends readonly AnyModuleDefinition[]> =
+    TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
+        ? ModuleLocalBindings<TCurrentModule> extends ValidateGraphBindings<
+              ModuleLocalBindings<TCurrentModule>,
+              ModuleBindingScopesFromComposition<TCurrentModule, TModules>,
+              ModuleVisibleBindingsFromComposition<TCurrentModule, TModules>
+          >
+            ? never
+            : ValidateGraphBindings<
+                  ModuleLocalBindings<TCurrentModule>,
+                  ModuleBindingScopesFromComposition<TCurrentModule, TModules>,
+                  ModuleVisibleBindingsFromComposition<TCurrentModule, TModules>
+              >
+        : never;
+
+type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
+
+type ValidateComposeOptions<
+    TModules extends readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[],
+> = ValidationErrorUnlessNever<
+    MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports>>,
+    {
+        readonly __missing_provider__: TokenKey<
+            MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports>>
+        >;
+    }
+> &
+    ValidationErrorUnlessNever<
+        AmbiguousSingleProviderKeys<TModules>,
+        {
+            readonly __ambiguous_provider__: AmbiguousSingleProviderKeys<TModules>;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        InvalidComposedModuleBindings<TModules>,
+        {
+            readonly __invalid_modules__: InvalidComposedModuleBindings<TModules>;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        IncompatibleExportedMultibindProviderKeys<TModules>,
+        {
+            readonly __incompatible_provider__: IncompatibleExportedMultibindProviderKeys<TModules>;
+        }
+    >;
+
+type ValidateComposeModules<TModules extends readonly AnyModuleDefinition[]> = TupleModulesError<TModules> & {
+    [TIndex in keyof TModules]: TModules[TIndex] extends AnyModuleDefinition ? TModules[TIndex] : never;
 };
+
+type ValidateComposeExports<TExports extends readonly AnyToken[]> = TupleExportsError<TExports> &
+    DuplicateTokenListError<TExports, "exports"> & {
+        [TIndex in keyof TExports]: TExports[TIndex] extends AnyToken ? TExports[TIndex] : never;
+    };
 
 let nextModuleId = 1;
 
@@ -482,27 +617,132 @@ export const isModuleDefinition = (value: unknown): value is AnyModuleDefinition
     return typeof value === "object" && value !== null && Object.hasOwn(value, moduleDefinitionBrand);
 };
 
+export const isComposedModuleDefinition = (value: unknown): value is AnyComposedModuleDefinition => {
+    return typeof value === "object" && value !== null && Object.hasOwn(value, composedModuleDefinitionBrand);
+};
+
+const isMultiToken = (currentToken: AnyToken): boolean => {
+    return isRuntimeMultiToken(currentToken as string);
+};
+
+const tokenRuntimeId = (currentToken: AnyToken): string => {
+    return currentToken as string;
+};
+
+function assertTokenInput(value: unknown, message: string): asserts value is AnyToken {
+    if (typeof value !== "string") {
+        throw new Error(message);
+    }
+}
+
+const assertNoDuplicateTokenKeys = (tokens: readonly AnyToken[], duplicateMessage: (key: string) => string): void => {
+    const seen = new Set<string>();
+
+    for (const currentToken of tokens) {
+        const currentTokenKey = tokenKey(currentToken);
+
+        if (seen.has(currentTokenKey)) {
+            throw new Error(duplicateMessage(currentTokenKey));
+        }
+
+        seen.add(currentTokenKey);
+    }
+};
+
+const assertNoImportedLocalSingleBindings = (
+    imports: readonly AnyToken[],
+    bindings: readonly ModuleBindingInput[],
+): void => {
+    const importedSingleTokenKeys = new Set<string>();
+    const importedTokenKinds = new Map<string, boolean>();
+
+    for (const currentImport of imports) {
+        const currentImportKey = tokenKey(currentImport);
+        const currentImportIsMulti = isMultiToken(currentImport);
+        const previousKind = importedTokenKinds.get(currentImportKey);
+
+        if (previousKind !== undefined && previousKind !== currentImportIsMulti) {
+            throw new Error(`Token "${currentImportKey}" is already included in module imports`);
+        }
+
+        importedTokenKinds.set(currentImportKey, currentImportIsMulti);
+
+        if (!currentImportIsMulti) {
+            importedSingleTokenKeys.add(currentImportKey);
+        }
+    }
+
+    for (const binding of bindings) {
+        const unwrappedBinding = unwrapModuleBinding(binding);
+        const bindingTokenKey = tokenKey(unwrappedBinding.token);
+        const bindingIsMulti = isMultiToken(unwrappedBinding.token);
+        const importedKind = importedTokenKinds.get(bindingTokenKey);
+
+        if (importedKind !== undefined && importedKind !== bindingIsMulti) {
+            throw new Error(`Token "${bindingTokenKey}" is already included in module imports`);
+        }
+
+        if (!bindingIsMulti && importedSingleTokenKeys.has(bindingTokenKey)) {
+            throw new Error(
+                `Service "${bindingTokenKey}" cannot be both imported and locally bound in the same module`,
+            );
+        }
+    }
+};
+
+const assertNoDuplicateLocalSingleBindings = (bindings: readonly ModuleBindingInput[]): void => {
+    const seenSingleTokenKeys = new Set<string>();
+    const seenTokenKinds = new Map<string, boolean>();
+
+    for (const binding of bindings) {
+        const unwrappedBinding = unwrapModuleBinding(binding);
+        const bindingTokenKey = tokenKey(unwrappedBinding.token);
+        const bindingIsMulti = isMultiToken(unwrappedBinding.token);
+        const previousKind = seenTokenKinds.get(bindingTokenKey);
+
+        if (previousKind !== undefined && previousKind !== bindingIsMulti) {
+            throw new Error(`Token "${bindingTokenKey}" is already included in module bindings`);
+        }
+
+        seenTokenKinds.set(bindingTokenKey, bindingIsMulti);
+
+        if (bindingIsMulti) {
+            continue;
+        }
+
+        if (seenSingleTokenKeys.has(bindingTokenKey)) {
+            throw new Error(`Service "${bindingTokenKey}" is already registered in the module context`);
+        }
+
+        seenSingleTokenKeys.add(bindingTokenKey);
+    }
+};
+
 export function defineModule<const TBindings extends readonly ModuleBindingInput[]>(options: {
     readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
 }): ModuleDefinition<readonly [], TBindings>;
 export function defineModule<
-    const TImports extends readonly AnyModuleDefinition[],
+    const TImports extends readonly AnyToken[],
     const TBindings extends readonly ModuleBindingInput[],
 >(options: {
     readonly imports: TImports & ValidateModuleImports<TImports>;
     readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
 }): ModuleDefinition<TImports, TBindings>;
 export function defineModule(options: {
-    readonly imports?: readonly AnyModuleDefinition[];
+    readonly imports?: readonly AnyToken[];
     readonly bindings: readonly ModuleBindingInput[];
 }): AnyModuleDefinition {
     const imports = options.imports ?? [];
 
-    for (const moduleImport of imports) {
-        if (!isModuleDefinition(moduleImport)) {
-            throw new Error("Module imports must be created with defineModule");
+    for (const currentImport of imports) {
+        if (isModuleDefinition(currentImport)) {
+            throw new Error("Module imports must be tokens; compose modules with composeModules(...)");
         }
+
+        assertTokenInput(currentImport, "Module imports must be tokens");
     }
+
+    assertNoDuplicateTokenKeys(imports, (currentTokenKey) => `Token "${currentTokenKey}" is already imported`);
 
     for (const binding of options.bindings) {
         const unwrappedBinding = isExportedBinding(binding) ? binding.binding : binding;
@@ -512,6 +752,9 @@ export function defineModule(options: {
         }
     }
 
+    assertNoImportedLocalSingleBindings(imports, options.bindings);
+    assertNoDuplicateLocalSingleBindings(options.bindings);
+
     return {
         [moduleDefinitionBrand]: true,
         id: nextModuleId++,
@@ -519,3 +762,147 @@ export function defineModule(options: {
         bindings: options.bindings,
     };
 }
+
+type RuntimeExportedEntry = {
+    readonly module: AnyModuleDefinition;
+    readonly binding: AnyBinding;
+};
+
+const collectExportedEntries = (modules: readonly AnyModuleDefinition[]): readonly RuntimeExportedEntry[] => {
+    const entries: RuntimeExportedEntry[] = [];
+
+    for (const currentModule of modules) {
+        for (const moduleBinding of currentModule.bindings) {
+            if (isExportedBinding(moduleBinding)) {
+                entries.push({ module: currentModule, binding: moduleBinding.binding });
+            }
+        }
+    }
+
+    return entries;
+};
+
+const findExportedProviders = (
+    entries: readonly RuntimeExportedEntry[],
+    currentToken: AnyToken,
+    excludedModule?: AnyModuleDefinition,
+): readonly RuntimeExportedEntry[] => {
+    const currentTokenId = tokenRuntimeId(currentToken);
+
+    return entries.filter(
+        (entry) => entry.module !== excludedModule && tokenRuntimeId(entry.binding.token) === currentTokenId,
+    );
+};
+
+const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], exports: readonly AnyToken[]): void => {
+    if (!Array.isArray(modules)) {
+        throw new Error("composeModules modules must be an array");
+    }
+
+    if (!Array.isArray(exports)) {
+        throw new Error("composeModules exports must be an array");
+    }
+
+    const moduleIds = new Set<number>();
+
+    for (const currentModule of modules) {
+        if (!isModuleDefinition(currentModule)) {
+            throw new Error("composeModules modules must be created with defineModule");
+        }
+
+        if (moduleIds.has(currentModule.id)) {
+            throw new Error("Module is already included in the composition");
+        }
+
+        moduleIds.add(currentModule.id);
+    }
+
+    for (const currentExport of exports) {
+        assertTokenInput(currentExport, "composeModules exports must be tokens");
+    }
+
+    assertNoDuplicateTokenKeys(exports, (currentTokenKey) => `Token "${currentTokenKey}" is already exported`);
+
+    const exportedEntries = collectExportedEntries(modules);
+    const exportedProviderKinds = new Map<string, boolean>();
+    const exportedSingleProviders = new Map<string, string>();
+
+    for (const entry of exportedEntries) {
+        const entryToken = entry.binding.token;
+        const entryTokenKey = tokenKey(entryToken);
+        const entryIsMultiToken = isMultiToken(entryToken);
+        const previousKind = exportedProviderKinds.get(entryTokenKey);
+
+        if (previousKind !== undefined && previousKind !== entryIsMultiToken) {
+            throw new Error(`Token "${entryTokenKey}" has incompatible exported providers`);
+        }
+
+        exportedProviderKinds.set(entryTokenKey, entryIsMultiToken);
+
+        if (entryIsMultiToken) {
+            continue;
+        }
+
+        const entryTokenId = tokenRuntimeId(entryToken);
+
+        if (exportedSingleProviders.has(entryTokenId)) {
+            throw new Error(`Service "${entryTokenKey}" has multiple exported providers`);
+        }
+
+        exportedSingleProviders.set(entryTokenId, entryTokenKey);
+    }
+
+    const assertProviders = (currentToken: AnyToken, providers: readonly RuntimeExportedEntry[], action: string) => {
+        const currentTokenKey = tokenKey(currentToken);
+
+        if (isMultiToken(currentToken)) {
+            if (providers.length === 0) {
+                throw new Error(`Multibind token "${currentTokenKey}" ${action}, but no exported contributions exist`);
+            }
+
+            return;
+        }
+
+        if (providers.length === 0) {
+            throw new Error(`Service "${currentTokenKey}" ${action}, but no exported provider exists`);
+        }
+
+        if (providers.length > 1) {
+            throw new Error(`Service "${currentTokenKey}" has multiple exported providers`);
+        }
+    };
+
+    for (const currentModule of modules) {
+        for (const currentImport of currentModule.imports) {
+            const excludedProviderModule = isMultiToken(currentImport) ? undefined : currentModule;
+
+            assertProviders(
+                currentImport,
+                findExportedProviders(exportedEntries, currentImport, excludedProviderModule),
+                "is imported by a module",
+            );
+        }
+    }
+
+    for (const currentExport of exports) {
+        assertProviders(currentExport, findExportedProviders(exportedEntries, currentExport), "is exported");
+    }
+};
+
+export const composeModules = <
+    const TModules extends readonly AnyModuleDefinition[],
+    const TExports extends readonly AnyToken[],
+>(
+    options: {
+        readonly modules: TModules & ValidateComposeModules<TModules>;
+        readonly exports: TExports & ValidateComposeExports<TExports>;
+    } & ValidateComposeOptions<TModules, TExports>,
+): ComposedModuleDefinition<TModules, TExports> => {
+    validateComposedModuleRuntime(options.modules, options.exports);
+
+    return {
+        [composedModuleDefinitionBrand]: true,
+        modules: options.modules,
+        exports: options.exports,
+    };
+};

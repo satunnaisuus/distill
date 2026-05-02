@@ -12,16 +12,18 @@ import { disposeScope } from "./disposal";
 import { assertDisposeOption } from "./dispose-option";
 import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes, SameTokenKey } from "./graph";
 import type {
+    AnyComposedModuleDefinition,
     AnyModuleDefinition,
-    ModuleExportedBindings,
+    CompositionLocalBindings,
+    CompositionPublicBindings,
+    CompositionPublicTokenArray,
+    ExportedBinding,
+    ModuleBindingInput,
     ModuleExportedInterfaceBinding,
-    ModuleExportedInterfaceBindingsFromResolvedBindings,
-    ModuleImportedExportedBindings,
-    ModuleImportedLocalBindings,
-    ModuleLocalBindings,
+    ModuleImportedExportedBindingForToken,
     ScopeTokenCompatibilityError,
 } from "./module";
-import { isExportedBinding, isModuleDefinition, unwrapModuleBinding } from "./module";
+import { isComposedModuleDefinition, isExportedBinding, unwrapModuleBinding } from "./module";
 import { isOptionalDependency } from "./optional";
 import type { AnyBindingOverride, BindingOverride, BindingOverrideAll, BindingUnbind } from "./override";
 import { isBindingOverride, isBindingOverrideAll, isBindingUnbind } from "./override";
@@ -418,18 +420,10 @@ export type Container<
     readonly disposed: boolean;
 };
 
-type ModulePublicInterfaceBindings<
-    TModule extends AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[],
-    TPublicBindings extends readonly AnyBinding[],
-> = ModuleExportedInterfaceBindingsFromResolvedBindings<TModule["imports"], TPublicBindings, TRootBindings>;
-
 type ModulePublicScopes<
-    TModule extends AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[],
     TPublicBindings extends readonly AnyBinding[],
     TScopeBindings extends BindingScopes,
-> = readonly [ModulePublicInterfaceBindings<TModule, TRootBindings, TPublicBindings>, ...TScopeBindings];
+> = readonly [TPublicBindings, ...TScopeBindings];
 
 type ModuleVisiblePublicBindings<
     TPublicBindings extends readonly AnyBinding[],
@@ -443,11 +437,15 @@ type ModuleResolvableTokenInScopes<
 
 type ModuleResolveFn<
     TModuleScopes extends BindingScopes,
+    TPublicTokenArray extends AnyTokenArray,
     TPublicBindings extends readonly AnyBinding[],
     TScopeBindings extends BindingScopes,
     TResolvableTokens extends AnyToken = ModuleResolvableTokenInScopes<
         TModuleScopes,
-        Extract<ModuleVisiblePublicBindings<TPublicBindings, TScopeBindings>, AnySingleToken>
+        Extract<
+            TPublicTokenArray[number] | ModuleVisiblePublicBindings<TPublicBindings, TScopeBindings>,
+            AnySingleToken
+        >
     >,
 > = IfNever<
     TResolvableTokens,
@@ -482,19 +480,15 @@ type ModuleResolveAllFn<
 >;
 
 type ModuleScopeCompatibilityTokens<
-    TModule extends AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[],
+    TComposition extends AnyComposedModuleDefinition,
     TPublicBindings extends readonly AnyBinding[],
     TScopeBindings extends BindingScopes,
 > = BindingTokens<
-    | ModulePublicScopes<TModule, TRootBindings, TPublicBindings, TScopeBindings>[number]
-    | TRootBindings
-    | ModuleImportedLocalBindings<TModule>
+    ModulePublicScopes<TPublicBindings, TScopeBindings>[number] | CompositionLocalBindings<TComposition["modules"]>
 >;
 
 type CreateModuleScopeFn<
-    TModule extends AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[],
+    TComposition extends AnyComposedModuleDefinition,
     TPublicBindings extends readonly AnyBinding[],
     TPublicTokenArray extends AnyTokenArray,
     TScopeBindings extends BindingScopes,
@@ -504,22 +498,16 @@ type CreateModuleScopeFn<
         ValidateGraphBindings<
             TNewScopeBindings,
             readonly [
-                ...ModulePublicScopes<
-                    TModule,
-                    TRootBindings,
-                    TPublicBindings,
-                    readonly [...TScopeBindings, TNewScopeBindings]
-                >,
+                ...ModulePublicScopes<TPublicBindings, readonly [...TScopeBindings, TNewScopeBindings]>,
                 TNewScopeBindings,
             ]
         > &
         ScopeTokenCompatibilityError<
             TNewScopeBindings,
-            ModuleScopeCompatibilityTokens<TModule, TRootBindings, TPublicBindings, TScopeBindings>
+            ModuleScopeCompatibilityTokens<TComposition, TPublicBindings, TScopeBindings>
         >
 ) => ModuleContainer<
-    TModule,
-    TRootBindings,
+    TComposition,
     TPublicBindings,
     TPublicTokenArray,
     readonly [...TScopeBindings, TNewScopeBindings],
@@ -527,8 +515,7 @@ type CreateModuleScopeFn<
 >;
 
 type RunModuleScopedFn<
-    TModule extends AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[],
+    TComposition extends AnyComposedModuleDefinition,
     TPublicBindings extends readonly AnyBinding[],
     TPublicTokenArray extends AnyTokenArray,
     TScopeBindings extends BindingScopes,
@@ -539,24 +526,18 @@ type RunModuleScopedFn<
             ValidateGraphBindings<
                 TNewScopeBindings,
                 readonly [
-                    ...ModulePublicScopes<
-                        TModule,
-                        TRootBindings,
-                        TPublicBindings,
-                        readonly [...TScopeBindings, TNewScopeBindings]
-                    >,
+                    ...ModulePublicScopes<TPublicBindings, readonly [...TScopeBindings, TNewScopeBindings]>,
                     TNewScopeBindings,
                 ]
             >
         > &
         ScopeTokenCompatibilityError<
             TNewScopeBindings,
-            ModuleScopeCompatibilityTokens<TModule, TRootBindings, TPublicBindings, TScopeBindings>
+            ModuleScopeCompatibilityTokens<TComposition, TPublicBindings, TScopeBindings>
         >,
     callback: (
         scope: ModuleContainer<
-            TModule,
-            TRootBindings,
+            TComposition,
             TPublicBindings,
             TPublicTokenArray,
             readonly [...TScopeBindings, TNewScopeBindings],
@@ -566,32 +547,17 @@ type RunModuleScopedFn<
 ) => Promise<Awaited<TResult>>;
 
 export type ModuleContainer<
-    TModule extends AnyModuleDefinition = AnyModuleDefinition,
-    TRootBindings extends readonly AnyBinding[] = ModuleLocalBindings<TModule>,
-    TPublicBindings extends readonly AnyBinding[] = ModuleExportedBindings<TModule>,
-    TPublicTokenArray extends AnyTokenArray = BindingTokenArray<TPublicBindings>,
+    TComposition extends AnyComposedModuleDefinition = AnyComposedModuleDefinition,
+    TPublicBindings extends readonly AnyBinding[] = CompositionPublicBindings<TComposition>,
+    TPublicTokenArray extends AnyTokenArray = CompositionPublicTokenArray<TComposition>,
     TScopeBindings extends BindingScopes = readonly [],
     TOverrides extends readonly AnyBindingOverride[] = readonly [],
-    TPublicScopes extends BindingScopes = ModulePublicScopes<TModule, TRootBindings, TPublicBindings, TScopeBindings>,
+    TPublicScopes extends BindingScopes = ModulePublicScopes<TPublicBindings, TScopeBindings>,
 > = {
-    resolve: ModuleResolveFn<TPublicScopes, TPublicBindings, TScopeBindings>;
+    resolve: ModuleResolveFn<TPublicScopes, TPublicTokenArray, TPublicBindings, TScopeBindings>;
     resolveAll: ModuleResolveAllFn<TPublicScopes, TPublicTokenArray, TScopeBindings>;
-    createScope: CreateModuleScopeFn<
-        TModule,
-        TRootBindings,
-        TPublicBindings,
-        TPublicTokenArray,
-        TScopeBindings,
-        TOverrides
-    >;
-    runScoped: RunModuleScopedFn<
-        TModule,
-        TRootBindings,
-        TPublicBindings,
-        TPublicTokenArray,
-        TScopeBindings,
-        TOverrides
-    >;
+    createScope: CreateModuleScopeFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;
+    runScoped: RunModuleScopedFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
@@ -620,36 +586,162 @@ type ModulePublicOverrideInterfaceBindings<
 > = ModuleOverrideInterfaceBindings<TOverrideBindings>;
 
 type ApplyModulePublicOverrides<
-    TModule extends AnyModuleDefinition,
+    TComposition extends AnyComposedModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
 > = ApplyContainerOverrideBindings<
-    ModuleExportedBindings<TModule>,
-    TOverrides,
-    ModulePublicOverrideInterfaceBindings<TOverrides>
->;
-
-type ApplyModuleRootOverrides<
-    TModule extends AnyModuleDefinition,
-    TOverrides extends readonly AnyBindingOverride[],
-> = ApplyContainerOverrideBindings<
-    ModuleLocalBindings<TModule>,
+    CompositionPublicBindings<TComposition>,
     TOverrides,
     ModulePublicOverrideInterfaceBindings<TOverrides>
 >;
 
 type ModuleResolvedPublicInterfaceBindings<
+    TComposition extends AnyComposedModuleDefinition,
+    TOverrides extends readonly AnyBindingOverride[],
+> = ApplyModulePublicOverrides<TComposition, TOverrides>;
+
+type ModuleRemainingLocalBindingInput<
+    TInput extends ModuleBindingInput,
+    TOverrides extends readonly AnyBindingOverride[],
+> =
+    TInput extends ExportedBinding<infer TBinding>
+        ? BindingIsOverridden<TBinding, TOverrides> extends true
+            ? never
+            : TBinding
+        : TInput extends AnyBinding
+          ? TInput
+          : never;
+
+type ModuleRemainingLocalBindings<
+    TInputs extends readonly ModuleBindingInput[],
+    TOverrides extends readonly AnyBindingOverride[],
+> = number extends TInputs["length"]
+    ? readonly ModuleRemainingLocalBindingInput<TInputs[number], TOverrides>[]
+    : TInputs extends readonly [
+            infer TCurrentInput extends ModuleBindingInput,
+            ...infer TRemainingInputs extends readonly ModuleBindingInput[],
+        ]
+      ? ModuleRemainingLocalBindingInput<TCurrentInput, TOverrides> extends infer TCurrentBinding
+          ? IfNever<
+                TCurrentBinding,
+                ModuleRemainingLocalBindings<TRemainingInputs, TOverrides>,
+                readonly [
+                    Extract<TCurrentBinding, AnyBinding>,
+                    ...ModuleRemainingLocalBindings<TRemainingInputs, TOverrides>,
+                ]
+            >
+          : never
+      : readonly [];
+
+type ModuleExportedInputTokens<TInputs extends readonly ModuleBindingInput[]> = TInputs[number] extends infer TInput
+    ? TInput extends ExportedBinding<infer TBinding>
+        ? TBinding["token"]
+        : never
+    : never;
+
+type ModuleOverrideInterfaceBindingForToken<
+    TOverrides extends readonly AnyBindingOverride[],
+    TToken extends AnyToken,
+    TBinding extends AnyBinding = ModuleOverrideBindings<TOverrides>[number],
+> = TBinding extends AnyBinding
+    ? HasTokenWithSameKey<TToken, TBinding["token"]> extends true
+        ? ModuleExportedInterfaceBinding<TBinding, BindingDependencies<TBinding>>
+        : never
+    : never;
+
+type ModuleImportedOverrideAwareBindingForToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TOverrides extends readonly AnyBindingOverride[],
+    TToken extends AnyToken,
+    TExcludedModule extends AnyModuleDefinition,
+> =
+    HasTokenWithSameKey<OverrideOperationTokens<TOverrides>, TToken> extends true
+        ? ModuleOverrideInterfaceBindingForToken<TOverrides, TToken>
+        : ModuleImportedExportedBindingForToken<TModules, TToken, readonly [], TExcludedModule>;
+
+type ModuleImportedOverrideAwareBindings<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TOverrides extends readonly AnyBindingOverride[],
+> = readonly ModuleImportedOverrideAwareBindingForToken<TModules, TOverrides, TModule["imports"][number], TModule>[];
+
+type ModuleProviderOverrideInterfaceBindings<
     TModule extends AnyModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
-> = ModulePublicInterfaceBindings<
-    TModule,
-    ApplyModuleRootOverrides<TModule, TOverrides>,
-    ApplyModulePublicOverrides<TModule, TOverrides>
->;
+> = readonly ModuleOverrideInterfaceBindingForToken<TOverrides, ModuleExportedInputTokens<TModule["bindings"]>>[];
+
+type ModuleResolvedLocalScope<
+    TModule extends AnyModuleDefinition,
+    TOverrides extends readonly AnyBindingOverride[],
+> = readonly (
+    | ModuleRemainingLocalBindings<TModule["bindings"], TOverrides>[number]
+    | ModuleProviderOverrideInterfaceBindings<TModule, TOverrides>[number]
+)[];
+
+type ModuleResolvedGraphScopes<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TOverrides extends readonly AnyBindingOverride[],
+    TResolvedPublicBindings extends readonly AnyBinding[],
+> = readonly [
+    TResolvedPublicBindings,
+    ModuleImportedOverrideAwareBindings<TModule, TModules, TOverrides>,
+    ModuleResolvedLocalScope<TModule, TOverrides>,
+];
+
+type ModuleResolvedVisibleBindings<
+    TModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TOverrides extends readonly AnyBindingOverride[],
+    TResolvedPublicBindings extends readonly AnyBinding[],
+> = readonly (
+    | TResolvedPublicBindings[number]
+    | ModuleImportedOverrideAwareBindings<TModule, TModules, TOverrides>[number]
+    | ModuleResolvedLocalScope<TModule, TOverrides>[number]
+)[];
+
+type InvalidResolvedCompositionModuleBindings<
+    TComposition extends AnyComposedModuleDefinition,
+    TOverrides extends readonly AnyBindingOverride[],
+    TResolvedPublicBindings extends readonly AnyBinding[],
+> = TComposition["modules"][number] extends infer TCurrentModule extends AnyModuleDefinition
+    ? ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides> extends ValidateGraphBindings<
+          ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides>,
+          ModuleResolvedGraphScopes<TCurrentModule, TComposition["modules"], TOverrides, TResolvedPublicBindings>,
+          ModuleResolvedVisibleBindings<TCurrentModule, TComposition["modules"], TOverrides, TResolvedPublicBindings>
+      >
+        ? never
+        : ValidateGraphBindings<
+              ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides>,
+              ModuleResolvedGraphScopes<TCurrentModule, TComposition["modules"], TOverrides, TResolvedPublicBindings>,
+              ModuleResolvedVisibleBindings<
+                  TCurrentModule,
+                  TComposition["modules"],
+                  TOverrides,
+                  TResolvedPublicBindings
+              >
+          >
+    : never;
+
+type InvalidResolvedPublicModuleBindings<TResolvedPublicBindings extends readonly AnyBinding[]> =
+    TResolvedPublicBindings extends ValidateGraphBindings<TResolvedPublicBindings, readonly [TResolvedPublicBindings]>
+        ? never
+        : ValidateGraphBindings<TResolvedPublicBindings, readonly [TResolvedPublicBindings]>;
+
+type InvalidResolvedModuleBindings<
+    TComposition extends AnyComposedModuleDefinition,
+    TOverrides extends readonly AnyBindingOverride[],
+    TResolvedPublicBindings extends readonly AnyBinding[],
+> =
+    | InvalidResolvedPublicModuleBindings<TResolvedPublicBindings>
+    | InvalidResolvedCompositionModuleBindings<TComposition, TOverrides, TResolvedPublicBindings>;
 
 type InvalidModuleOverrideBindingsError<
-    TModule extends AnyModuleDefinition,
+    TComposition extends AnyComposedModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
-    TResolvedPublicBindings extends readonly AnyBinding[] = ModuleResolvedPublicInterfaceBindings<TModule, TOverrides>,
+    TResolvedPublicBindings extends readonly AnyBinding[] = ModuleResolvedPublicInterfaceBindings<
+        TComposition,
+        TOverrides
+    >,
     TOverrideBindings extends readonly AnyBinding[] = ModuleOverrideBindings<TOverrides>,
 > = IfNever<
     TOverrideBindings[number],
@@ -667,43 +759,30 @@ type InvalidModuleOverrideBindingsError<
     >
 >;
 
-type ModuleResolvedGraphScopes<
-    TModule extends AnyModuleDefinition,
-    TResolvedRootBindings extends readonly AnyBinding[],
-> = readonly [ModuleImportedExportedBindings<TModule>, TResolvedRootBindings];
-
-type ModuleResolvedVisibleBindings<
-    TModule extends AnyModuleDefinition,
-    TResolvedRootBindings extends readonly AnyBinding[],
-> = readonly [...ModuleImportedExportedBindings<TModule>, ...TResolvedRootBindings];
-
 type InvalidModuleResolvedGraphError<
-    TModule extends AnyModuleDefinition,
+    TComposition extends AnyComposedModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
-    TResolvedRootBindings extends readonly AnyBinding[] = ApplyModuleRootOverrides<TModule, TOverrides>,
+    TResolvedPublicBindings extends readonly AnyBinding[] = ModuleResolvedPublicInterfaceBindings<
+        TComposition,
+        TOverrides
+    >,
 > = IfNever<
     TOverrides[number],
     {},
-    ValidationErrorIf<
-        TResolvedRootBindings extends ValidateGraphBindings<
-            TResolvedRootBindings,
-            ModuleResolvedGraphScopes<TModule, TResolvedRootBindings>,
-            ModuleResolvedVisibleBindings<TModule, TResolvedRootBindings>
-        >
-            ? false
-            : true,
+    ValidationErrorUnlessNever<
+        InvalidResolvedModuleBindings<TComposition, TOverrides, TResolvedPublicBindings>,
         {
-            readonly __invalid_overrides__: ValidateGraphBindings<
-                TResolvedRootBindings,
-                ModuleResolvedGraphScopes<TModule, TResolvedRootBindings>,
-                ModuleResolvedVisibleBindings<TModule, TResolvedRootBindings>
+            readonly __invalid_overrides__: InvalidResolvedModuleBindings<
+                TComposition,
+                TOverrides,
+                TResolvedPublicBindings
             >;
         }
     >
 >;
 
 type ValidateModuleContainerOverrides<
-    TModule extends AnyModuleDefinition,
+    TComposition extends AnyComposedModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
     TPublicBindings extends readonly AnyBinding[],
     TPublicTokenArray extends AnyTokenArray,
@@ -712,27 +791,37 @@ type ValidateModuleContainerOverrides<
     DuplicateOverridesError<TOverrides> &
     OverrideTokensOutsideTokenListError<TOverrides, TPublicTokenArray> &
     MissingSingleOverrideTargetsError<TOverrides, TPublicBindings> &
-    InvalidModuleOverrideBindingsError<TModule, TOverrides> &
-    InvalidModuleResolvedGraphError<TModule, TOverrides>;
+    InvalidModuleOverrideBindingsError<TComposition, TOverrides> &
+    InvalidModuleResolvedGraphError<TComposition, TOverrides>;
 
-type CreateModuleDefinitionContainerFn<TModule extends AnyModuleDefinition> = <
-    const TOverrides extends readonly AnyBindingOverride[],
-    TPublicBindings extends readonly AnyBinding[] = ModuleExportedBindings<TModule>,
-    TPublicTokenArray extends AnyTokenArray = BindingTokenArray<TPublicBindings>,
->(
-    ...overrides: TOverrides & ValidateModuleContainerOverrides<TModule, TOverrides, TPublicBindings, TPublicTokenArray>
-) => ModuleContainer<
-    TModule,
-    ApplyModuleRootOverrides<TModule, TOverrides>,
-    ApplyModulePublicOverrides<TModule, TOverrides>,
-    TPublicTokenArray,
-    readonly [],
-    TOverrides
->;
-
-export type ModuleContainerDefinition<TModule extends AnyModuleDefinition = AnyModuleDefinition> = {
-    create: CreateModuleDefinitionContainerFn<TModule>;
+type CreateModuleDefinitionContainerFn<TComposition extends AnyComposedModuleDefinition> = {
+    (): ModuleContainer<
+        TComposition,
+        CompositionPublicBindings<TComposition>,
+        CompositionPublicTokenArray<TComposition>,
+        readonly [],
+        readonly []
+    >;
+    <
+        const TOverrides extends readonly AnyBindingOverride[],
+        TPublicBindings extends readonly AnyBinding[] = CompositionPublicBindings<TComposition>,
+        TPublicTokenArray extends AnyTokenArray = CompositionPublicTokenArray<TComposition>,
+    >(
+        ...overrides: TOverrides &
+            ValidateModuleContainerOverrides<TComposition, TOverrides, TPublicBindings, TPublicTokenArray>
+    ): ModuleContainer<
+        TComposition,
+        ApplyModulePublicOverrides<TComposition, TOverrides>,
+        TPublicTokenArray,
+        readonly [],
+        TOverrides
+    >;
 };
+
+export type ModuleContainerDefinition<TComposition extends AnyComposedModuleDefinition = AnyComposedModuleDefinition> =
+    {
+        create: CreateModuleDefinitionContainerFn<TComposition>;
+    };
 
 type TokenListContext = {
     readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
@@ -1785,39 +1874,21 @@ type RuntimeModuleEntry = {
     readonly exported: boolean;
 };
 
+type RuntimeRegisteredModuleEntry = RuntimeModuleEntry & {
+    readonly runtimeBinding: RuntimeBinding;
+};
+
+type RuntimeRegisteredOverrideEntry = {
+    readonly binding: AnyBinding;
+    readonly runtimeBinding: RuntimeBinding;
+};
+
 type RuntimeModuleOverrideResult = {
     readonly entries: readonly RuntimeModuleEntry[];
     readonly overrideBindings: readonly AnyBinding[];
     readonly publicAccess: RuntimePublicAccess;
-};
-
-const collectReachableModules = (rootModule: AnyModuleDefinition): readonly AnyModuleDefinition[] => {
-    const visited = new Set<number>();
-    const visiting = new Set<number>();
-    const modules: AnyModuleDefinition[] = [];
-
-    const visit = (currentModule: AnyModuleDefinition): void => {
-        if (visiting.has(currentModule.id)) {
-            throw new Error("Module import cycle detected");
-        }
-
-        if (visited.has(currentModule.id)) {
-            return;
-        }
-
-        visiting.add(currentModule.id);
-
-        for (const moduleImport of currentModule.imports) {
-            visit(moduleImport);
-        }
-
-        visiting.delete(currentModule.id);
-        visited.add(currentModule.id);
-        modules.push(currentModule);
-    };
-
-    visit(rootModule);
-    return modules;
+    readonly excludedTokenIds: ReadonlySet<string>;
+    readonly overrideModuleContextIdsByTokenId: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
 const createRuntimeModuleEntries = (modules: readonly AnyModuleDefinition[]): readonly RuntimeModuleEntry[] => {
@@ -1836,98 +1907,95 @@ const createRuntimeModuleEntries = (modules: readonly AnyModuleDefinition[]): re
     return entries;
 };
 
-const assertNoVisibleDuplicateModuleBindings = (
-    tokenListContext: TokenListContext,
-    modules: readonly AnyModuleDefinition[],
-): void => {
-    const addVisibleBindingKey = (
-        seenSingleKeys: Set<string>,
-        seenTokenKinds: Map<string, boolean>,
-        binding: AnyBinding,
+const tokenRuntimeId = (currentToken: AnyToken): string => {
+    return currentToken as string;
+};
+
+const createRuntimeModuleGraph = (
+    composition: AnyComposedModuleDefinition,
+    entries: readonly RuntimeRegisteredModuleEntry[],
+    overrideEntries: readonly RuntimeRegisteredOverrideEntry[],
+    excludedTokenIds: ReadonlySet<string>,
+    overrideModuleContextIdsByTokenId: ReadonlyMap<string, ReadonlySet<number>>,
+): RuntimeModuleGraph => {
+    const visibleBindingIdsByModuleId = new Map<number, Set<number>>();
+    const exportedEntries = entries.filter((entry) => entry.exported);
+
+    const addVisibleProviders = (
+        visibleBindingIds: Set<number>,
+        currentToken: AnyToken,
+        excludedModuleId: number | undefined,
     ): void => {
-        const bindingTokenKey = tokenListContext.registerToken(binding.token);
-        const bindingIsMultiToken = isMultiToken(binding.token);
-        const seenTokenKind = seenTokenKinds.get(bindingTokenKey);
+        const currentTokenId = tokenRuntimeId(currentToken);
 
-        if (seenTokenKind !== undefined && seenTokenKind !== bindingIsMultiToken) {
-            throw new Error(`Token "${bindingTokenKey}" is already included in the token list`);
-        }
-
-        seenTokenKinds.set(bindingTokenKey, bindingIsMultiToken);
-
-        if (bindingIsMultiToken) {
-            return;
-        }
-
-        if (seenSingleKeys.has(bindingTokenKey)) {
-            throw new Error(`Service "${bindingTokenKey}" is already registered in the module context`);
-        }
-
-        seenSingleKeys.add(bindingTokenKey);
-    };
-
-    for (const currentModule of modules) {
-        const seenSingleKeys = new Set<string>();
-        const seenTokenKinds = new Map<string, boolean>();
-
-        for (const moduleImport of currentModule.imports) {
-            for (const moduleBinding of moduleImport.bindings) {
-                if (isExportedBinding(moduleBinding)) {
-                    addVisibleBindingKey(seenSingleKeys, seenTokenKinds, moduleBinding.binding);
+        if (!excludedTokenIds.has(currentTokenId)) {
+            for (const entry of exportedEntries) {
+                if (entry.moduleId !== excludedModuleId && tokenRuntimeId(entry.binding.token) === currentTokenId) {
+                    visibleBindingIds.add(entry.runtimeBinding.id);
                 }
             }
         }
 
-        for (const moduleBinding of currentModule.bindings) {
-            addVisibleBindingKey(seenSingleKeys, seenTokenKinds, unwrapModuleBinding(moduleBinding));
+        for (const entry of overrideEntries) {
+            if (tokenRuntimeId(entry.binding.token) === currentTokenId) {
+                visibleBindingIds.add(entry.runtimeBinding.id);
+            }
         }
-    }
-};
+    };
 
-const createRuntimeModuleGraph = (
-    rootModule: AnyModuleDefinition,
-    modules: readonly AnyModuleDefinition[],
-): RuntimeModuleGraph => {
-    const importsByModuleId = new Map<number, readonly number[]>();
-    const exportedBindingIdsByModuleId = new Map<number, Set<number>>();
+    for (const currentModule of composition.modules) {
+        const visibleBindingIds = new Set<number>();
 
-    for (const currentModule of modules) {
-        importsByModuleId.set(
-            currentModule.id,
-            currentModule.imports.map((moduleImport) => moduleImport.id),
-        );
-        exportedBindingIdsByModuleId.set(currentModule.id, new Set());
+        for (const currentImport of currentModule.imports) {
+            addVisibleProviders(visibleBindingIds, currentImport, currentModule.id);
+        }
+
+        for (const entry of overrideEntries) {
+            const entryTokenId = tokenRuntimeId(entry.binding.token);
+
+            if (overrideModuleContextIdsByTokenId.get(entryTokenId)?.has(currentModule.id)) {
+                visibleBindingIds.add(entry.runtimeBinding.id);
+            }
+        }
+
+        visibleBindingIdsByModuleId.set(currentModule.id, visibleBindingIds);
     }
+
+    const publicBindingIds = new Set<number>();
+
+    for (const currentExport of composition.exports) {
+        addVisibleProviders(publicBindingIds, currentExport, undefined);
+    }
+
+    visibleBindingIdsByModuleId.set(publicModuleContextId, publicBindingIds);
 
     return {
-        rootModuleId: rootModule.id,
-        moduleIds: modules.map((currentModule) => currentModule.id),
-        importsByModuleId,
-        exportedBindingIdsByModuleId,
+        moduleIds: composition.modules.map((currentModule) => currentModule.id),
+        visibleBindingIdsByModuleId,
     };
 };
 
 const collectPublicModuleAccess = (
     tokenListContext: TokenListContext,
-    rootModule: AnyModuleDefinition,
-    entries: readonly RuntimeModuleEntry[],
+    composition: AnyComposedModuleDefinition,
     singleOverrideKeys: ReadonlySet<string>,
     multiOverrideKeys: ReadonlySet<string>,
+    singleUnbindKeys: ReadonlySet<string>,
 ): RuntimePublicAccess => {
     const singleTokenKeys = new Set(singleOverrideKeys);
     const multiTokenKeys = new Set(multiOverrideKeys);
 
-    for (const entry of entries) {
-        if (entry.moduleId !== rootModule.id || !entry.exported) {
+    for (const currentExport of composition.exports) {
+        const exportTokenKey = tokenListContext.registerToken(currentExport);
+
+        if (singleUnbindKeys.has(exportTokenKey)) {
             continue;
         }
 
-        const entryTokenKey = tokenListContext.assertTokenIsInTokenList(entry.binding.token);
-
-        if (isMultiToken(entry.binding.token)) {
-            multiTokenKeys.add(entryTokenKey);
+        if (isMultiToken(currentExport)) {
+            multiTokenKeys.add(exportTokenKey);
         } else {
-            singleTokenKeys.add(entryTokenKey);
+            singleTokenKeys.add(exportTokenKey);
         }
     }
 
@@ -1940,42 +2008,42 @@ const collectPublicModuleAccess = (
 
 const applyModuleBindingOverrides = (
     tokenListContext: TokenListContext,
-    rootModule: AnyModuleDefinition,
+    composition: AnyComposedModuleDefinition,
     entries: readonly RuntimeModuleEntry[],
     overrides: readonly AnyBindingOverride[],
 ): RuntimeModuleOverrideResult => {
     const publicSingleBindingKeys = new Set<string>();
     const publicMultiBindingKeys = new Set<string>();
 
-    for (const entry of entries) {
-        if (entry.moduleId !== rootModule.id || !entry.exported) {
-            continue;
-        }
+    for (const currentExport of composition.exports) {
+        const entryTokenKey = tokenListContext.registerToken(currentExport);
 
-        const entryTokenKey = tokenListContext.assertTokenIsInTokenList(entry.binding.token);
-
-        if (isMultiToken(entry.binding.token)) {
+        if (isMultiToken(currentExport)) {
             publicMultiBindingKeys.add(entryTokenKey);
         } else {
             publicSingleBindingKeys.add(entryTokenKey);
         }
     }
 
-    const removedEntryIndexes = new Set<number>();
     const overrideBindings: AnyBinding[] = [];
+    const excludedTokenIds = new Set<string>();
     const singleOperationKeys = new Set<string>();
     const singleOverrideKeys = new Set<string>();
+    const singleUnbindKeys = new Set<string>();
     const multiOverrideKeys = new Set<string>();
-    const removeRootEntries = (tokenKeyToRemove: string, exportedOnly: boolean): void => {
-        entries.forEach((entry, index) => {
-            if (
-                entry.moduleId === rootModule.id &&
-                (!exportedOnly || entry.exported) &&
-                tokenListContext.assertTokenIsInTokenList(entry.binding.token) === tokenKeyToRemove
-            ) {
-                removedEntryIndexes.add(index);
+    const overrideModuleContextIdsByTokenId = new Map<string, Set<number>>();
+
+    const collectOverriddenProviderModuleIds = (currentToken: AnyToken): void => {
+        const currentTokenId = tokenRuntimeId(currentToken);
+        const moduleContextIds = overrideModuleContextIdsByTokenId.get(currentTokenId) ?? new Set<number>();
+
+        for (const entry of entries) {
+            if (entry.exported && tokenRuntimeId(entry.binding.token) === currentTokenId) {
+                moduleContextIds.add(entry.moduleId);
             }
-        });
+        }
+
+        overrideModuleContextIdsByTokenId.set(currentTokenId, moduleContextIds);
     };
 
     for (const currentOverride of overrides) {
@@ -1986,7 +2054,7 @@ const applyModuleBindingOverrides = (
                 throw new Error("Override bindings must be created with bind");
             }
 
-            const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+            const bindingTokenKey = tokenListContext.registerToken(binding.token);
 
             if (isMultiToken(binding.token)) {
                 throw new Error(`Multibind token "${bindingTokenKey}" must be overridden with overrideAll`);
@@ -2000,7 +2068,8 @@ const applyModuleBindingOverrides = (
                 throw new Error(`Service "${bindingTokenKey}" is already overridden`);
             }
 
-            removeRootEntries(bindingTokenKey, true);
+            collectOverriddenProviderModuleIds(binding.token);
+            excludedTokenIds.add(tokenRuntimeId(binding.token));
             singleOperationKeys.add(bindingTokenKey);
             singleOverrideKeys.add(bindingTokenKey);
             overrideBindings.push(binding);
@@ -2008,7 +2077,7 @@ const applyModuleBindingOverrides = (
         }
 
         if (isBindingUnbind(currentOverride)) {
-            const unbindTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            const unbindTokenKey = tokenListContext.registerToken(currentOverride.token);
 
             if (isMultiToken(currentOverride.token)) {
                 throw new Error(`Multibind token "${unbindTokenKey}" must be removed with overrideAll`);
@@ -2022,13 +2091,15 @@ const applyModuleBindingOverrides = (
                 throw new Error(`Service "${unbindTokenKey}" is already overridden`);
             }
 
-            removeRootEntries(unbindTokenKey, true);
+            collectOverriddenProviderModuleIds(currentOverride.token);
+            excludedTokenIds.add(tokenRuntimeId(currentOverride.token));
             singleOperationKeys.add(unbindTokenKey);
+            singleUnbindKeys.add(unbindTokenKey);
             continue;
         }
 
         if (isBindingOverrideAll(currentOverride)) {
-            const overrideTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            const overrideTokenKey = tokenListContext.registerToken(currentOverride.token);
 
             if (!isMultiToken(currentOverride.token)) {
                 throw new Error(`Token "${overrideTokenKey}" is not a multibind token`);
@@ -2051,7 +2122,7 @@ const applyModuleBindingOverrides = (
                     throw new Error("overrideAll bindings must be created with bind");
                 }
 
-                const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+                const bindingTokenKey = tokenListContext.registerToken(binding.token);
 
                 if (bindingTokenKey !== overrideTokenKey || !isMultiToken(binding.token)) {
                     throw new Error(
@@ -2060,7 +2131,8 @@ const applyModuleBindingOverrides = (
                 }
             }
 
-            removeRootEntries(overrideTokenKey, false);
+            collectOverriddenProviderModuleIds(currentOverride.token);
+            excludedTokenIds.add(tokenRuntimeId(currentOverride.token));
             multiOverrideKeys.add(overrideTokenKey);
             overrideBindings.push(...currentOverride.bindings);
             continue;
@@ -2069,17 +2141,19 @@ const applyModuleBindingOverrides = (
         throw new Error("Overrides must be created with override, overrideAll, or unbind");
     }
 
-    const resolvedEntries = entries.filter((_, index) => !removedEntryIndexes.has(index));
-
     return {
-        entries: resolvedEntries,
+        entries: entries.filter(
+            (entry) => !entry.exported || !excludedTokenIds.has(tokenRuntimeId(entry.binding.token)),
+        ),
         overrideBindings,
+        excludedTokenIds,
+        overrideModuleContextIdsByTokenId,
         publicAccess: collectPublicModuleAccess(
             tokenListContext,
-            rootModule,
-            resolvedEntries,
+            composition,
             singleOverrideKeys,
             multiOverrideKeys,
+            singleUnbindKeys,
         ),
     };
 };
@@ -2098,18 +2172,15 @@ const createRuntimeContainer = (
 };
 
 const createRuntimeModuleContainer = (
-    rootModule: AnyModuleDefinition,
+    composition: AnyComposedModuleDefinition,
     overrides: readonly AnyBindingOverride[],
 ): RuntimeContainer => {
     const tokenListContext = createTokenListContext([], { allowUnknownTokens: true });
-    const modules = collectReachableModules(rootModule);
+    const modules = composition.modules;
     const entries = createRuntimeModuleEntries(modules);
-
-    assertNoVisibleDuplicateModuleBindings(tokenListContext, modules);
-
-    const moduleGraph = createRuntimeModuleGraph(rootModule, modules);
-    const rootScope = createRootScope(tokenListContext, moduleGraph);
-    const overrideResult = applyModuleBindingOverrides(tokenListContext, rootModule, entries, overrides);
+    const rootScope = createRootScope(tokenListContext);
+    const overrideResult = applyModuleBindingOverrides(tokenListContext, composition, entries, overrides);
+    const registeredEntries: RuntimeRegisteredModuleEntry[] = [];
 
     for (const entry of overrideResult.entries) {
         const [runtimeBinding] = registerBindings(rootScope, [entry.binding], {
@@ -2119,18 +2190,28 @@ const createRuntimeModuleContainer = (
             validateCircularDependencies: false,
         });
 
-        if (entry.exported) {
-            moduleGraph.exportedBindingIdsByModuleId.get(entry.moduleId)?.add(runtimeBinding.id);
-        }
+        registeredEntries.push({ ...entry, runtimeBinding });
     }
 
-    registerBindings(rootScope, overrideResult.overrideBindings, {
+    const overrideRuntimeBindings = registerBindings(rootScope, overrideResult.overrideBindings, {
         moduleContextId: publicModuleContextId,
         visibleInAllModuleContexts: false,
-        visibleModuleContextIds: [rootModule.id],
         allowDuplicateSingleBindings: true,
         validateCircularDependencies: false,
     });
+    const registeredOverrideEntries = overrideResult.overrideBindings.map((binding, index) => ({
+        binding,
+        runtimeBinding: overrideRuntimeBindings[index],
+    }));
+    const moduleGraph = createRuntimeModuleGraph(
+        composition,
+        registeredEntries,
+        registeredOverrideEntries,
+        overrideResult.excludedTokenIds,
+        overrideResult.overrideModuleContextIdsByTokenId,
+    );
+
+    rootScope.context.moduleGraph = moduleGraph;
     assertNoCircularDependencies(rootScope);
 
     return createRuntimeContainerForScope(rootScope, overrideResult.publicAccess);
@@ -2141,7 +2222,9 @@ type DefineContainer = {
         tokens: TTokenArray & ValidateTokenList<TTokenArray>,
         ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
     ): ContainerDefinition<TBindings, TTokenArray>;
-    readonly module: <const TModule extends AnyModuleDefinition>(module: TModule) => ModuleContainerDefinition<TModule>;
+    readonly module: <const TComposition extends AnyComposedModuleDefinition>(
+        composition: TComposition,
+    ) => ModuleContainerDefinition<TComposition>;
 };
 
 const defineContainerFlat = <const TTokenArray extends AnyTokenArray, const TBindings extends readonly AnyBinding[]>(
@@ -2158,20 +2241,20 @@ const defineContainerFlat = <const TTokenArray extends AnyTokenArray, const TBin
     } as unknown as ContainerDefinition<TBindings, TTokenArray>;
 };
 
-const defineModuleContainer = <const TModule extends AnyModuleDefinition>(
-    rootModule: TModule,
-): ModuleContainerDefinition<TModule> => {
-    if (!isModuleDefinition(rootModule)) {
-        throw new Error("Root module must be created with defineModule");
+const defineModuleContainer = <const TComposition extends AnyComposedModuleDefinition>(
+    composition: TComposition,
+): ModuleContainerDefinition<TComposition> => {
+    if (!isComposedModuleDefinition(composition)) {
+        throw new Error("Module container root must be created with composeModules");
     }
 
-    createRuntimeModuleContainer(rootModule, []);
+    createRuntimeModuleContainer(composition, []);
 
     return {
         create(...overrides: AnyBindingOverride[]) {
-            return createRuntimeModuleContainer(rootModule, overrides);
+            return createRuntimeModuleContainer(composition, overrides);
         },
-    } as unknown as ModuleContainerDefinition<TModule>;
+    } as unknown as ModuleContainerDefinition<TComposition>;
 };
 
 export const defineContainer = Object.assign(defineContainerFlat, {

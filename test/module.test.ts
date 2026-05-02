@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { all } from "../src/all";
 import { bind } from "../src/bind";
 import { defineContainer } from "../src/container";
-import { defineModule, exported } from "../src/module";
+import { composeModules, defineModule, exported } from "../src/module";
 import { optional } from "../src/optional";
 import { override, overrideAll } from "../src/override";
 import { ref } from "../src/ref";
@@ -17,20 +17,27 @@ type RuntimeContainerForTest = {
 };
 
 describe("defineContainer.module", () => {
-    it("resolves exported root bindings and hides internal root bindings", () => {
+    it("resolves imported single-token providers through an explicit composition root", () => {
         const Config = token("Config").of<{ readonly url: string }>();
         const Pool = token("Pool").of<{ readonly url: string }>();
         const Db = token("Db").of<{ readonly url: string }>();
 
+        const ConfigModule = defineModule({
+            bindings: [exported(bind(Config, () => ({ url: "postgres://localhost" })))],
+        });
         const DbModule = defineModule({
+            imports: [Config],
             bindings: [
-                bind(Config, () => ({ url: "postgres://localhost" })),
                 bind(Pool, { config: Config }, ({ config }) => ({ url: config.url })),
                 exported(bind(Db, { pool: Pool }, ({ pool }) => ({ url: pool.url }))),
             ],
         });
+        const App = composeModules({
+            modules: [DbModule, ConfigModule],
+            exports: [Db],
+        });
 
-        const app = defineContainer.module(DbModule).create();
+        const app = defineContainer.module(App).create();
 
         expect(app.resolve(Db)).toEqual({ url: "postgres://localhost" });
         expect(() => (app as RuntimeContainerForTest).resolve(Pool)).toThrowError(
@@ -38,222 +45,276 @@ describe("defineContainer.module", () => {
         );
     });
 
-    it("allows imported exported bindings inside importers but hides imported internals", () => {
-        const Config = token("Config").of<{ readonly port: number }>();
+    it("keeps provider internals private across token imports", () => {
         const Secret = token("Secret").of<{ readonly value: string }>();
-        const Server = token("Server").of<{ readonly port: number }>();
-        const Broken = token("Broken").of<{ readonly value: string }>();
+        const Config = token("Config").of<{ readonly value: string }>();
+        const Server = token("Server").of<{ readonly value: string }>();
 
         const ConfigModule = defineModule({
-            bindings: [bind(Secret, () => ({ value: "internal" })), exported(bind(Config, () => ({ port: 3000 })))],
+            bindings: [
+                bind(Secret, () => ({ value: "secret" })),
+                exported(bind(Config, { secret: Secret }, ({ secret }) => ({ value: secret.value }))),
+            ],
         });
         const ServerModule = defineModule({
-            imports: [ConfigModule],
+            imports: [Config],
+            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ value: config.value })))],
+        });
+        const App = composeModules({
+            modules: [ConfigModule, ServerModule],
+            exports: [Server],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Server)).toEqual({ value: "secret" });
+        expect(() => (app as RuntimeContainerForTest).resolve(Secret)).toThrowError(
+            'Service "Secret" is not exported by the module',
+        );
+    });
+
+    it("uses composition exports as the only public resolve and override surface", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+
+        const ConfigModule = defineModule({
+            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        });
+        const ServerModule = defineModule({
+            imports: [Config],
+            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
+        });
+        const App = composeModules({
+            modules: [ConfigModule, ServerModule],
+            exports: [Server],
+        });
+        const definition = defineContainer.module(App);
+
+        expect(() => (definition.create() as RuntimeContainerForTest).resolve(Config)).toThrowError(
+            'Service "Config" is not exported by the module',
+        );
+        expect(() => definition.create(override(bind(Config, () => ({ port: 4000 }))))).toThrowError(
+            'Service "Config" is not exported by the module',
+        );
+
+        const app = definition.create(override(bind(Server, () => ({ port: 5000 }))));
+
+        expect(app.resolve(Server)).toEqual({ port: 5000 });
+    });
+
+    it("applies public overrides to same-module exported dependencies", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+
+        const AppModule = defineModule({
             bindings: [
+                exported(bind(Config, () => ({ port: 3000 }))),
                 exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port }))),
-                exported(bind(Broken, { secret: Secret }, ({ secret }) => ({ value: secret.value })) as never),
             ],
-        } as never);
+        });
+        const App = composeModules({
+            modules: [AppModule],
+            exports: [Config, Server],
+        });
 
-        const app = defineContainer.module(ServerModule).create();
+        const app = defineContainer.module(App).create(override(bind(Config, () => ({ port: 4000 }))));
 
-        expect(app.resolve(Server)).toEqual({ port: 3000 });
-        expect(() => app.resolve(Broken)).toThrowError('Service "Secret" is not registered in the container');
+        expect(app.resolve(Config)).toEqual({ port: 4000 });
+        expect(app.resolve(Server)).toEqual({ port: 4000 });
     });
 
-    it("keeps same-key internals isolated across unrelated modules", () => {
-        const Shared = token("Shared").of<{ readonly value: string }>();
-        const First = token("First").of<{ readonly value: string }>();
-        const Second = token("Second").of<{ readonly value: string }>();
-        const Combined = token("Combined").of<{ readonly values: readonly string[] }>();
-
-        const FirstModule = defineModule({
-            bindings: [
-                bind(Shared, () => ({ value: "first" })),
-                exported(bind(First, { shared: Shared }, ({ shared }) => ({ value: shared.value }))),
-            ],
-        });
-        const SecondModule = defineModule({
-            bindings: [
-                bind(Shared, () => ({ value: "second" })),
-                exported(bind(Second, { shared: Shared }, ({ shared }) => ({ value: shared.value }))),
-            ],
-        });
-        const AppModule = defineModule({
-            imports: [FirstModule, SecondModule],
-            bindings: [
-                exported(
-                    bind(Combined, { first: First, second: Second }, ({ first, second }) => ({
-                        values: [first.value, second.value],
-                    })),
-                ),
-            ],
+    it("rejects direct module containers and old module-to-module imports", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const ConfigModule = defineModule({
+            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
         });
 
-        const app = defineContainer.module(AppModule).create();
-
-        expect(app.resolve(Combined)).toEqual({ values: ["first", "second"] });
-    });
-
-    it("keeps private same-key single and multibind tokens isolated across unrelated modules", () => {
-        const Shared = token("Shared").of<{ readonly value: string }>();
-        const SharedMany = multiToken("Shared").of<{ readonly value: string }>();
-        const First = token("First").of<{ readonly value: string }>();
-        const Second = token("Second").of<{ readonly values: readonly string[] }>();
-        const Combined = token("Combined").of<{ readonly first: string; readonly second: readonly string[] }>();
-
-        const FirstModule = defineModule({
-            bindings: [
-                bind(Shared, () => ({ value: "single" })),
-                exported(bind(First, { shared: Shared }, ({ shared }) => ({ value: shared.value }))),
-            ],
-        });
-        const SecondModule = defineModule({
-            bindings: [
-                bind(SharedMany, () => ({ value: "multi" })),
-                exported(
-                    bind(Second, { shared: all(SharedMany) }, ({ shared }) => ({
-                        values: shared.map((item) => item.value),
-                    })),
-                ),
-            ],
-        });
-        const AppModule = defineModule({
-            imports: [FirstModule, SecondModule],
-            bindings: [
-                exported(
-                    bind(Combined, { first: First, second: Second }, ({ first, second }) => ({
-                        first: first.value,
-                        second: second.values,
-                    })),
-                ),
-            ],
-        });
-
-        const app = defineContainer.module(AppModule).create();
-
-        expect(app.resolve(Combined)).toEqual({ first: "single", second: ["multi"] });
-    });
-
-    it("keeps root module overrides out of imported module internals", () => {
-        const Shared = token("Shared").of<{ readonly value: string }>();
-        const Imported = token("Imported").of<{ readonly sharedValue: string }>();
-        const App = token("App").of<{
-            readonly importedSharedValue: string;
-            readonly rootSharedValue: string;
-        }>();
-
-        const ImportedModule = defineModule({
-            bindings: [
-                bind(Shared, () => ({ value: "imported-private" })),
-                exported(bind(Imported, { shared: Shared }, ({ shared }) => ({ sharedValue: shared.value }))),
-            ],
-        });
-        const AppModule = defineModule({
-            imports: [ImportedModule],
-            bindings: [
-                exported(bind(Shared, () => ({ value: "root-public" }))),
-                exported(
-                    bind(App, { imported: Imported, shared: Shared }, ({ imported, shared }) => ({
-                        importedSharedValue: imported.sharedValue,
-                        rootSharedValue: shared.value,
-                    })),
-                ),
-            ],
-        });
-
-        const app = defineContainer
-            .module(AppModule)
-            .create(override(bind(Shared, () => ({ value: "root-override" }))));
-
-        expect(app.resolve(App)).toEqual({
-            importedSharedValue: "imported-private",
-            rootSharedValue: "root-override",
-        });
-    });
-
-    it("rejects duplicate visible exported single tokens", () => {
-        const Shared = token("Shared").of<{ readonly value: string }>();
-        const FirstModule = defineModule({
-            bindings: [exported(bind(Shared, () => ({ value: "first" })))],
-        });
-        const SecondModule = defineModule({
-            bindings: [exported(bind(Shared, () => ({ value: "second" })))],
-        });
-        const AppModule = defineModule({
-            imports: [FirstModule, SecondModule],
-            bindings: [],
-        } as never);
-
-        expect(() => defineContainer.module(AppModule)).toThrowError(
-            'Service "Shared" is already registered in the module context',
+        expect(() => defineContainer.module(ConfigModule as never)).toThrowError(
+            "Module container root must be created with composeModules",
         );
+        expect(() =>
+            defineModule({
+                imports: [ConfigModule],
+                bindings: [],
+            } as never),
+        ).toThrowError("Module imports must be tokens");
     });
 
-    it("exports concrete multibind contributions without exposing internal contributions", () => {
-        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
-        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+    it("rejects duplicate local single-token bindings at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
 
-        const AppModule = defineModule({
-            bindings: [
-                bind(Hooks, () => ({ name: "internal" })),
-                exported(bind(Hooks, () => ({ name: "public" }))),
-                exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
-                        names: hooks.map((hook) => hook.name),
-                    })),
-                ),
-            ],
+        expect(() =>
+            defineModule({
+                bindings: [bind(Config, () => ({ port: 3000 })), bind(Config, () => ({ port: 4000 }))],
+            } as never),
+        ).toThrowError('Service "Config" is already registered in the module context');
+    });
+
+    it("rejects missing and ambiguous single-token import providers", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+
+        const ServerModule = defineModule({
+            imports: [Config],
+            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
         });
 
-        const app = defineContainer.module(AppModule).create();
+        expect(() =>
+            composeModules({
+                modules: [ServerModule],
+                exports: [Server],
+            } as never),
+        ).toThrowError('Service "Config" is imported by a module, but no exported provider exists');
 
-        expect(app.resolveAll(Hooks)).toEqual([{ name: "public" }]);
-        expect(app.resolve(Registry)).toEqual({ names: ["internal", "public"] });
-    });
-
-    it("does not type-check or instantiate private multibind contributions through public resolveAll", () => {
-        const Request = token("Request").of<{ readonly id: string }>();
-        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
-
-        const AppModule = defineModule({
-            bindings: [
-                bind.scoped(Hooks, { request: Request }, ({ request }) => ({ name: request.id })),
-                exported(bind(Hooks, () => ({ name: "public" }))),
-            ],
+        const FirstConfigModule = defineModule({
+            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        });
+        const SecondConfigModule = defineModule({
+            bindings: [exported(bind(Config, () => ({ port: 4000 })))],
         });
 
-        const app = defineContainer.module(AppModule).create();
-
-        expect(app.resolveAll(Hooks)).toEqual([{ name: "public" }]);
+        expect(() =>
+            composeModules({
+                modules: [ServerModule, FirstConfigModule, SecondConfigModule],
+                exports: [Server],
+            } as never),
+        ).toThrowError('Service "Config" has multiple exported providers');
     });
 
-    it("does not let failed public lookups reserve token keys", () => {
+    it("rejects mixed single and multibind exported providers with the same key", () => {
+        const SingleHooks = token("Hooks").of<{ readonly name: string }>();
+        const ManyHooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Public = token("Public").of<{ readonly ok: true }>();
-        const Future = token("Future").of<{ readonly value: string }>();
-        const FutureMany = multiToken("Future").of<{ readonly value: string }>();
-        const AppModule = defineModule({
-            bindings: [exported(bind(Public, () => ({ ok: true })))],
+
+        const SingleHooksModule = defineModule({
+            bindings: [exported(bind(SingleHooks, () => ({ name: "single" })))],
         });
-        const app = defineContainer.module(AppModule).create();
+        const ManyHooksModule = defineModule({
+            bindings: [exported(bind(ManyHooks, () => ({ name: "many" })))],
+        });
+        const PublicModule = defineModule({
+            bindings: [exported(bind(Public, () => ({ ok: true as const })))],
+        });
 
-        expect(() => (app as RuntimeContainerForTest).resolve(Future)).toThrowError(
-            'Token "Future" is not included in the token list',
-        );
-
-        const scope = app.createScope(bind(FutureMany, () => ({ value: "scoped" })));
-
-        expect(scope.resolveAll(FutureMany)).toEqual([{ value: "scoped" }]);
+        expect(() =>
+            composeModules({
+                modules: [PublicModule, SingleHooksModule, ManyHooksModule],
+                exports: [Public],
+            } as never),
+        ).toThrowError('Token "Hooks" has incompatible exported providers');
     });
 
-    it("removes private root multibind contributions when overrideAll replaces an exported token", () => {
+    it("requires composition public exports to have exported providers", () => {
+        const Public = token("Public").of<{ readonly ok: true }>();
+        const Internal = token("Internal").of<{ readonly ok: true }>();
+        const AppModule = defineModule({
+            bindings: [bind(Internal, () => ({ ok: true as const }))],
+        });
+
+        expect(() =>
+            composeModules({
+                modules: [AppModule],
+                exports: [Public],
+            } as never),
+        ).toThrowError('Service "Public" is exported, but no exported provider exists');
+    });
+
+    it("aggregates imported multibind contributions from exported providers only", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
-        const AppModule = defineModule({
+        const FirstPluginModule = defineModule({
+            bindings: [exported(bind(Hooks, () => ({ name: "first" })))],
+        });
+        const SecondPluginModule = defineModule({
             bindings: [
-                bind(Hooks, () => ({ name: "internal" })),
-                exported(bind(Hooks, () => ({ name: "public" }))),
+                bind(Hooks, () => ({ name: "private-plugin" })),
+                exported(bind(Hooks, () => ({ name: "second" }))),
+            ],
+        });
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
+                exported(
+                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                        names: hooks.map((hook) => hook.name),
+                    })),
+                ),
+            ],
+        });
+        const App = composeModules({
+            modules: [RegistryModule, FirstPluginModule, SecondPluginModule],
+            exports: [Registry, Hooks],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Registry)).toEqual({ names: ["first", "second"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+    });
+
+    it("keeps local private multibind contributions visible only inside the owning module", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const PluginModule = defineModule({
+            bindings: [exported(bind(Hooks, () => ({ name: "public" })))],
+        });
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
+                bind(Hooks, () => ({ name: "local-private" })),
+                exported(
+                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                        names: hooks.map((hook) => hook.name),
+                    })),
+                ),
+            ],
+        });
+        const App = composeModules({
+            modules: [RegistryModule, PluginModule],
+            exports: [Registry, Hooks],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Registry)).toEqual({ names: ["local-private", "public"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "public" }]);
+    });
+
+    it("allows multibind modules to consume their own exported contributions", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
+                exported(bind(Hooks, () => ({ name: "self" }))),
+                exported(
+                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                        names: hooks.map((hook) => hook.name),
+                    })),
+                ),
+            ],
+        });
+        const App = composeModules({
+            modules: [RegistryModule],
+            exports: [Registry, Hooks],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Registry)).toEqual({ names: ["self"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "self" }]);
+    });
+
+    it("rejects imported and public multibind tokens without exported contributions", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
                 exported(
                     bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
@@ -262,13 +323,52 @@ describe("defineContainer.module", () => {
             ],
         });
 
-        const app = defineContainer.module(AppModule).create(overrideAll(Hooks, []));
+        expect(() =>
+            composeModules({
+                modules: [RegistryModule],
+                exports: [Registry],
+            } as never),
+        ).toThrowError('Multibind token "Hooks" is imported by a module, but no exported contributions exist');
 
-        expect(app.resolveAll(Hooks)).toEqual([]);
-        expect(app.resolve(Registry)).toEqual({ names: [] });
+        const EmptyModule = defineModule({ bindings: [] });
+
+        expect(() =>
+            composeModules({
+                modules: [EmptyModule],
+                exports: [Hooks],
+            } as never),
+        ).toThrowError('Multibind token "Hooks" is exported, but no exported contributions exist');
     });
 
-    it("supports optional, ref, scoped bindings, and disposal through module boundaries", async () => {
+    it("allows imported multibind contributions to be replaced through public overrideAll", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const PluginModule = defineModule({
+            bindings: [exported(bind(Hooks, () => ({ name: "public" })))],
+        });
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
+                exported(
+                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                        names: hooks.map((hook) => hook.name),
+                    })),
+                ),
+            ],
+        });
+        const App = composeModules({
+            modules: [RegistryModule, PluginModule],
+            exports: [Registry, Hooks],
+        });
+
+        const app = defineContainer.module(App).create(overrideAll(Hooks, [bind(Hooks, () => ({ name: "override" }))]));
+
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "override" }]);
+        expect(app.resolve(Registry)).toEqual({ names: ["override"] });
+    });
+
+    it("supports optional, ref, scoped bindings, and disposal through composed modules", async () => {
         const events: string[] = [];
         const Config = token("Config").of<{ readonly name: string }>();
         const Request = token("Request").of<{ readonly id: string }>();
@@ -294,8 +394,12 @@ describe("defineContainer.module", () => {
                 ),
             ],
         });
+        const App = composeModules({
+            modules: [AppModule],
+            exports: [Service],
+        });
 
-        const app = defineContainer.module(AppModule).create();
+        const app = defineContainer.module(App).create();
         const rootService = app.resolve(Service);
         const request = app.createScope(bind.scoped(Request, () => ({ id: "request-1" })));
         const requestService = request.resolve(Service);
@@ -309,43 +413,5 @@ describe("defineContainer.module", () => {
         await app.dispose();
 
         expect(events).toEqual(["service", "service", "config"]);
-    });
-
-    it("applies public overrides without giving override factories access to internals", () => {
-        const Internal = token("Internal").of<{ readonly value: string }>();
-        const Public = token("Public").of<{ readonly value: string }>();
-
-        const AppModule = defineModule({
-            bindings: [
-                bind(Internal, () => ({ value: "internal" })),
-                exported(bind(Public, { internal: Internal }, ({ internal }) => ({ value: internal.value }))),
-            ],
-        });
-        const definition = defineContainer.module(AppModule);
-
-        expect(() => definition.create(override(bind(Internal, () => ({ value: "override" }))))).toThrowError(
-            'Service "Internal" is not exported by the module',
-        );
-
-        const app = definition.create(
-            override(bind(Public, { internal: Internal }, ({ internal }) => ({ value: internal.value }))),
-        );
-
-        expect(() => app.resolve(Public)).toThrowError('Service "Internal" is not registered in the container');
-    });
-
-    it("detects module import cycles", () => {
-        const Service = token("Service").of<{ readonly name: string }>();
-        const FirstModule = defineModule({
-            bindings: [exported(bind(Service, () => ({ name: "first" })))],
-        });
-        const SecondModule = defineModule({
-            imports: [FirstModule],
-            bindings: [],
-        });
-
-        (FirstModule as { imports: readonly unknown[] }).imports = [SecondModule];
-
-        expect(() => defineContainer.module(FirstModule)).toThrowError("Module import cycle detected");
     });
 });

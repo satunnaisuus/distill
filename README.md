@@ -14,7 +14,7 @@ npm install @satunnaisuus/distill
 - Compile-time checks for unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles.
 - Lazy service creation with singleton, scoped, and transient lifetimes.
 - Child scopes for request-local overrides and per-scope service instances.
-- Modules with internal bindings, explicit imports, and inline exports.
+- Modules with internal bindings, explicit token imports, inline provider exports, and explicit composition roots.
 - Multibind tokens for collecting multiple services with `resolveAll`.
 - Async resource disposal for containers and scopes.
 - Explicit dependency maps instead of decorators, reflection, or global state.
@@ -105,7 +105,7 @@ The `server` factory receives `{ config, logger }` with the correct inferred typ
 ### Compose modules with private bindings
 
 ```ts
-import { bind, defineContainer, defineModule, exported, token } from "@satunnaisuus/distill";
+import { bind, composeModules, defineContainer, defineModule, exported, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly url: string;
@@ -128,14 +128,19 @@ const ConfigModule = defineModule({
 } as const);
 
 const DbModule = defineModule({
-    imports: [ConfigModule],
+    imports: [Config],
     bindings: [
         bind(Pool, { config: Config }, ({ config }) => ({ url: config.url })),
         exported(bind(Db, { pool: Pool }, ({ pool }) => createDb(pool))),
     ],
 } as const);
 
-const app = defineContainer.module(DbModule).create();
+const App = composeModules({
+    modules: [DbModule, ConfigModule],
+    exports: [Db],
+} as const);
+
+const app = defineContainer.module(App).create();
 
 app.resolve(Db);
 //    ^? Db
@@ -144,14 +149,16 @@ app.resolve(Pool);
 // TypeScript error: Pool is internal to DbModule.
 ```
 
-Module bindings can depend on local bindings and on exported bindings from direct imports. Only bindings wrapped with `exported(...)` become visible outside the module. Imports are not re-exported automatically; export an alias or another binding from the importing module when you want to make a service public.
+Module `imports` are tokens, not other modules. A module binding can depend on local bindings and on imported tokens; `composeModules(...)` then wires those imports to exported providers from the listed modules. The composition `exports` list is the full public interface of the container.
+
+Only bindings wrapped with `exported(...)` can satisfy another module's token import or a composition public export. Local bindings stay private to their module.
 
 Modules are visibility boundaries, not disposal scopes. Singleton, scoped, transient, `ref`, `optional`, `all`, `createScope`, overrides, and disposal keep the same lifetime behavior as regular containers.
 
 ### Export selected multibind contributions
 
 ```ts
-import { all, bind, defineContainer, defineModule, exported, multiToken, token } from "@satunnaisuus/distill";
+import { all, bind, composeModules, defineContainer, defineModule, exported, multiToken, token } from "@satunnaisuus/distill";
 
 type Hook = {
     readonly name: string;
@@ -172,7 +179,12 @@ const AppModule = defineModule({
     ],
 } as const);
 
-const app = defineContainer.module(AppModule).create();
+const App = composeModules({
+    modules: [AppModule],
+    exports: [Hooks, Registry],
+} as const);
+
+const app = defineContainer.module(App).create();
 
 app.resolveAll(Hooks);
 // [{ name: "public" }]
@@ -487,8 +499,9 @@ ref(token)
 ref(() => token)
 exported(binding)
 defineModule({ imports?, bindings })
+composeModules({ modules, exports })
 defineContainer([Config, Logger], ...bindings)
-defineContainer.module(module)
+defineContainer.module(composedModule)
 definition.create()
 definition.create(override(binding))
 definition.create(overrideAll(multibindToken, bindings))

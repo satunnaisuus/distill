@@ -8,5 +8,6 @@ export const bindingOverrideAllBrand: unique symbol = Symbol("bindingOverrideAll
 export const bindingUnbindBrand: unique symbol = Symbol("bindingUnbindBrand");
 export const exportedBindingBrand: unique symbol = Symbol("exportedBindingBrand");
 export const moduleDefinitionBrand: unique symbol = Symbol("moduleDefinitionBrand");
+export const composedModuleDefinitionBrand: unique symbol = Symbol("composedModuleDefinitionBrand");
 export const optionalDependencyBrand: unique symbol = Symbol("optionalDependency");
 export const refDependencyBrand: unique symbol = Symbol("refDependency");

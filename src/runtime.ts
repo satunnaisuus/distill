@@ -10,10 +10,8 @@ export type RuntimeFactory = (scope: RuntimeScope, dependencyTracker: RuntimeDep
 export type RuntimeDisposer = UnknownDisposer;
 
 export type RuntimeModuleGraph = {
-    readonly rootModuleId: number;
     readonly moduleIds: readonly number[];
-    readonly importsByModuleId: ReadonlyMap<number, readonly number[]>;
-    readonly exportedBindingIdsByModuleId: ReadonlyMap<number, Set<number>>;
+    readonly visibleBindingIdsByModuleId: ReadonlyMap<number, ReadonlySet<number>>;
 };
 
 export type RuntimeBinding = {
@@ -40,7 +38,7 @@ export type RefResolver = <TToken extends AnyToken>(
 export type RuntimeContext = {
     readonly assertTokenIsInTokenList: AssertTokenIsInTokenList;
     readonly registerToken: RegisterToken;
-    readonly moduleGraph?: RuntimeModuleGraph;
+    moduleGraph?: RuntimeModuleGraph;
     readonly resolvingPath: RuntimeResolutionFrame[];
 };
 
@@ -191,20 +189,7 @@ const isBindingVisibleInModuleContext = (
         return true;
     }
 
-    if (moduleContextId === publicModuleContextId) {
-        return (
-            binding.dependencyModuleContextId === moduleGraph.rootModuleId &&
-            (moduleGraph.exportedBindingIdsByModuleId.get(moduleGraph.rootModuleId)?.has(binding.id) ?? false)
-        );
-    }
-
-    const importedModuleIds = moduleGraph.importsByModuleId.get(moduleContextId) ?? [];
-
-    if (!importedModuleIds.includes(binding.dependencyModuleContextId)) {
-        return false;
-    }
-
-    return moduleGraph.exportedBindingIdsByModuleId.get(binding.dependencyModuleContextId)?.has(binding.id) ?? false;
+    return moduleGraph.visibleBindingIdsByModuleId.get(moduleContextId)?.has(binding.id) ?? false;
 };
 
 export const getRuntimeRefCacheKey = (moduleContextId: number, tokenKey: string): string => {
