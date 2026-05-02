@@ -255,7 +255,7 @@ test("module bindings reject same-key dependencies with incompatible token types
             imports: [NumberPort],
             bindings: [exported(bind(Server, { port: StringPort }, ({ port }) => ({ port })))],
         });
-    }).type.toRaiseError("__dependencies_not_in_tokens__");
+    }).type.toRaiseError("__missing_dependencies__");
 });
 
 test("multibind imports aggregate exported contributions and owner-local contributions", () => {

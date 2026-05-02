@@ -4,7 +4,7 @@ import { defineContainer } from "../src/container";
 import { optional } from "../src/optional";
 import { override, overrideAll, unbind } from "../src/override";
 import { ref } from "../src/ref";
-import { multiToken, type Token, token } from "../src/token";
+import { multiToken, qualified, qualifier, type Token, token } from "../src/token";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
@@ -48,6 +48,44 @@ const createDeferred = (): Deferred => {
 };
 
 describe("defineContainer", () => {
+    it("resolves qualified tokens through bind.qualified", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+
+        const container = defineContainer(
+            [JsonLogger],
+            bind.qualified(Logger, Json, () => ({ name: "json" })),
+        ).create();
+
+        expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
+    });
+
+    it("treats qualified tokens with different qualifiers as distinct single tokens", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const Human = qualifier("human");
+        const JsonLogger = qualified(Logger, Json);
+        const HumanLogger = qualified(Logger, Human);
+
+        const container = defineContainer(
+            [JsonLogger, HumanLogger],
+            bind.qualified(Logger, Json, () => ({ name: "json" })),
+            bind.qualified(Logger, Human, () => ({ name: "human" })),
+        ).create();
+
+        expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
+        expect(container.resolve(HumanLogger)).toEqual({ name: "human" });
+
+        expect(() =>
+            defineContainer(
+                [JsonLogger],
+                bind.qualified(Logger, Json, () => ({ name: "first" })),
+                bind.qualified(Logger, Json, () => ({ name: "second" })),
+            ),
+        ).toThrowError('Service "Logger:json" is already registered in the container');
+    });
+
     it("accepts an explicit array of tokens", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const Logger = token("Logger").of<{ readonly log: (message: string) => void }>();

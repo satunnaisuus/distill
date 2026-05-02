@@ -14,15 +14,21 @@ export type RuntimeModuleGraph = {
     readonly visibleBindingIdsByModuleId: ReadonlyMap<number, ReadonlySet<number>>;
 };
 
+export type RuntimeTokenReference = {
+    readonly tokenKey: string;
+    readonly tokenId: string;
+};
+
 export type RuntimeBinding = {
     readonly id: number;
+    readonly tokenId: string;
     readonly factory: RuntimeFactory;
     readonly lifetime: BindingLifetime;
     readonly isMultiToken: boolean;
     readonly dependencyModuleContextId: number;
     readonly visibleInAllModuleContexts: boolean;
     readonly visibleModuleContextIds?: readonly number[];
-    readonly eagerDependencies?: readonly string[];
+    readonly eagerDependencies?: readonly RuntimeTokenReference[];
     readonly dispose?: RuntimeDisposer;
 };
 
@@ -192,8 +198,8 @@ const isBindingVisibleInModuleContext = (
     return moduleGraph.visibleBindingIdsByModuleId.get(moduleContextId)?.has(binding.id) ?? false;
 };
 
-export const getRuntimeRefCacheKey = (moduleContextId: number, tokenKey: string): string => {
-    return `${moduleContextId}\u0000${tokenKey}`;
+export const getRuntimeRefCacheKey = (moduleContextId: number, tokenId: string): string => {
+    return `${moduleContextId}\u0000${tokenId}`;
 };
 
 export const findBinding = (
@@ -201,12 +207,14 @@ export const findBinding = (
     tokenKey: string,
     moduleContextId = defaultModuleContextId,
     isMultiToken?: boolean,
+    tokenId?: string,
 ): ResolvedRuntimeBinding | undefined => {
     const bindings = scope.bindings.get(tokenKey);
     const visibleBindings = bindings?.filter(
         (binding) =>
             isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
-            (isMultiToken === undefined || binding.isMultiToken === isMultiToken),
+            (isMultiToken === undefined || binding.isMultiToken === isMultiToken) &&
+            (tokenId === undefined || binding.tokenId === tokenId),
     );
 
     if (visibleBindings && visibleBindings.length > 0) {
@@ -216,7 +224,7 @@ export const findBinding = (
         };
     }
 
-    return scope.parent ? findBinding(scope.parent, tokenKey, moduleContextId, isMultiToken) : undefined;
+    return scope.parent ? findBinding(scope.parent, tokenKey, moduleContextId, isMultiToken, tokenId) : undefined;
 };
 
 export const findBindings = (
@@ -224,12 +232,16 @@ export const findBindings = (
     tokenKey: string,
     moduleContextId = defaultModuleContextId,
     isMultiToken?: boolean,
+    tokenId?: string,
 ): ResolvedRuntimeBinding[] => {
-    const parentBindings = scope.parent ? findBindings(scope.parent, tokenKey, moduleContextId, isMultiToken) : [];
+    const parentBindings = scope.parent
+        ? findBindings(scope.parent, tokenKey, moduleContextId, isMultiToken, tokenId)
+        : [];
     const bindings = (scope.bindings.get(tokenKey) ?? []).filter(
         (binding) =>
             isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
-            (isMultiToken === undefined || binding.isMultiToken === isMultiToken),
+            (isMultiToken === undefined || binding.isMultiToken === isMultiToken) &&
+            (tokenId === undefined || binding.tokenId === tokenId),
     );
 
     return [

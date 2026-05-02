@@ -1,7 +1,8 @@
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "./brands";
 import type { DependencyMap, ResolvedDependencies } from "./dependencies";
 import { getDisposeOption } from "./dispose-option";
-import type { AnySingleToken, AnyToken, TokenValue } from "./token";
+import type { AnyQualifier, AnySingleToken, AnyToken, QualifiedToken, TokenValue } from "./token";
+import { qualified as createQualifiedToken } from "./token";
 import type { IfNever, IsAny } from "./type-utils";
 
 export type BindingLifetime = "singleton" | "scoped" | "transient";
@@ -90,6 +91,23 @@ type BindFunction<TLifetime extends BindingLifetime> = {
     ): Binding<TToken, TDependencies, TLifetime>;
 };
 
+type BindQualifiedFunction<TLifetime extends BindingLifetime> = {
+    <TBaseToken extends AnySingleToken, TQualifier extends AnyQualifier>(
+        baseToken: TBaseToken,
+        currentQualifier: TQualifier,
+        factory: () => NoInfer<TokenValue<TBaseToken>>,
+        options?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
+    ): Binding<QualifiedToken<TBaseToken, TQualifier>, undefined, TLifetime>;
+
+    <TBaseToken extends AnySingleToken, TQualifier extends AnyQualifier, TDependencies extends DependencyMap>(
+        baseToken: TBaseToken,
+        currentQualifier: TQualifier,
+        dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
+        factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TBaseToken>>,
+        options?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
+    ): Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies, TLifetime>;
+};
+
 type BindValueFunction<TLifetime extends BindingLifetime> = <TToken extends AnyToken>(
     currentToken: TToken,
     value: NoInfer<TokenValue<TToken>>,
@@ -132,6 +150,7 @@ type BindProviderFunctions<TLifetime extends BindingLifetime, TAliasLifetime ext
     readonly class: BindClassFunction<TLifetime>;
     readonly alias: BindAliasFunction<TAliasLifetime>;
     readonly useExisting: BindAliasFunction<TAliasLifetime>;
+    readonly qualified: BindQualifiedFunction<TLifetime>;
 };
 
 type BindWithProviders<TLifetime extends BindingLifetime> = BindFunction<TLifetime> & BindProviderFunctions<TLifetime>;
@@ -292,6 +311,46 @@ const createBindAlias = <const TLifetime extends BindingLifetime>(
     return bindAlias as BindAliasFunction<TLifetime>;
 };
 
+const createBindQualified = <const TLifetime extends BindingLifetime>(
+    lifetime: TLifetime,
+): BindQualifiedFunction<TLifetime> => {
+    const bindWithLifetime = createBind(lifetime);
+    const bindQualified = <
+        TBaseToken extends AnySingleToken,
+        TQualifier extends AnyQualifier,
+        TDependencies extends DependencyMap,
+    >(
+        baseToken: TBaseToken,
+        currentQualifier: TQualifier,
+        dependenciesOrFactory: TDependencies | (() => NoInfer<TokenValue<TBaseToken>>),
+        maybeFactoryOrOptions?:
+            | ((dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TBaseToken>>)
+            | BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
+        maybeOptions?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
+    ): Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies | undefined, TLifetime> => {
+        const currentToken = createQualifiedToken(baseToken, currentQualifier);
+
+        if (typeof dependenciesOrFactory === "function") {
+            return bindWithLifetime(
+                currentToken,
+                dependenciesOrFactory as () => TokenValue<QualifiedToken<TBaseToken, TQualifier>>,
+                maybeFactoryOrOptions as BindingOptions<TokenValue<QualifiedToken<TBaseToken, TQualifier>>> | undefined,
+            ) as Binding<QualifiedToken<TBaseToken, TQualifier>, undefined, TLifetime>;
+        }
+
+        return bindWithLifetime(
+            currentToken,
+            dependenciesOrFactory as TDependencies & DefinedDependencyMap<TDependencies>,
+            maybeFactoryOrOptions as (
+                dependencies: ResolvedDependencies<TDependencies>,
+            ) => TokenValue<QualifiedToken<TBaseToken, TQualifier>>,
+            maybeOptions as BindingOptions<TokenValue<QualifiedToken<TBaseToken, TQualifier>>> | undefined,
+        ) as Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies, TLifetime>;
+    };
+
+    return bindQualified as BindQualifiedFunction<TLifetime>;
+};
+
 const createBindWithProviders = <const TLifetime extends BindingLifetime>(
     lifetime: TLifetime,
 ): BindWithProviders<TLifetime> => {
@@ -304,6 +363,7 @@ const createBindWithProviders = <const TLifetime extends BindingLifetime>(
         class: createBindClass(lifetime),
         alias,
         useExisting: alias,
+        qualified: createBindQualified(lifetime),
     }) as BindWithProviders<TLifetime>;
 };
 

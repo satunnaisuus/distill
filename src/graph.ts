@@ -8,7 +8,7 @@ import type {
     EagerSingleDependencyToken,
     SingleDependencyToken,
 } from "./ref";
-import type { AnyToken, TokenKey } from "./token";
+import type { AnyToken, TokenIdentity, TokenKey, TokensNotIn } from "./token";
 import type { HasTrue, IfNever, IsExact } from "./type-utils";
 
 export type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> = IsExact<
@@ -24,7 +24,7 @@ export type BindingByToken<
     TBindings extends readonly AnyBinding[],
     TToken extends AnyToken,
     TBinding extends AnyBinding = TBindings[number],
-> = TBinding extends AnyBinding ? (SameTokenKey<TBinding["token"], TToken> extends true ? TBinding : never) : never;
+> = TBinding extends AnyBinding ? IfNever<TokensNotIn<TToken, TBinding["token"]>, TBinding, never> : never;
 
 export type HasBindingToken<TBindings extends readonly AnyBinding[], TToken extends AnyToken> = IfNever<
     BindingByToken<TBindings, TToken>,
@@ -127,6 +127,7 @@ export type BindingContextInScopes<
 
 type ResolutionNodeIdentity<TNode extends ResolutionNode> = readonly [
     TokenKey<TNode["token"]>,
+    TokenIdentity<TNode["token"]>,
     TNode["ownerScopes"],
     TNode["resolutionScopes"],
 ];

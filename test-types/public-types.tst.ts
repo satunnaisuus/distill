@@ -20,17 +20,24 @@ import {
     type ExportedBinding,
     exported,
     type ModuleDefinition,
+    type ModuleImportWire,
     type MultiToken,
     multiToken,
     type OptionalToken,
     optional,
     override,
     overrideAll,
+    provideImport,
+    type QualifiedToken,
+    type Qualifier,
+    qualified,
+    qualifier,
     type Ref,
     type RefToken,
     type ResolvedDependencies,
     type Token,
     type TokenBuilder,
+    type TokenValue,
     token,
     unbind,
 } from "@satunnaisuus/distill";
@@ -44,7 +51,10 @@ test("public helper types preserve their documented type relationships", () => {
         readonly logger: RefToken<typeof tokens.logger>;
     };
     const handlers = multiToken("handlers").of<(message: string) => number>();
+    const json = qualifier("json");
+    const jsonConfig = qualified(tokens.config, json);
     const configBinding = bind(tokens.config, () => ({ port: 3000 }));
+    const jsonConfigBinding = bind.qualified(tokens.config, json, () => ({ port: 3001 }));
     const exportedConfigBinding = exported(configBinding);
     const configModule = defineModule({
         bindings: [exportedConfigBinding],
@@ -64,6 +74,10 @@ test("public helper types preserve their documented type relationships", () => {
     expect(token("config")).type.toBe<TokenBuilder<"config">>();
     expect(token("config").of<Config>()).type.toBe<Token<"config", Config>>();
     expect(handlers).type.toBe<MultiToken<"handlers", (message: string) => number>>();
+    expect(json).type.toBe<Qualifier<"json">>();
+    expect(jsonConfig).type.toBe<QualifiedToken<typeof tokens.config, typeof json>>();
+    expect<TokenValue<typeof jsonConfig>>().type.toBe<Config>();
+    expect(jsonConfigBinding.token).type.toBe<QualifiedToken<typeof tokens.config, typeof json>>();
     expect(all(handlers)).type.toBe<AllToken<typeof handlers>>();
     expect(optional(tokens.config)).type.toBe<OptionalToken<typeof tokens.config>>();
     expect(token("unknown").of()).type.toBe<Token<"unknown", unknown>>();
@@ -75,6 +89,12 @@ test("public helper types preserve their documented type relationships", () => {
     expect(configModule).type.toBe<ModuleDefinition<readonly [], readonly [typeof exportedConfigBinding]>>();
     expect(configComposition).type.toBe<
         ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
+    >();
+    expect(provideImport).type.toBeAssignableTo<
+        (
+            module: ModuleDefinition<readonly [typeof tokens.config], readonly []>,
+            importToken: typeof tokens.config,
+        ) => { readonly with: (providerToken: typeof tokens.config) => ModuleImportWire }
     >();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;

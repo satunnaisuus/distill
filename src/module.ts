@@ -1,7 +1,12 @@
 import type { AllToken } from "./all";
-import type { AnyBinding, Binding, BindingLifetimeOf } from "./bind";
+import type { AnyBinding, Binding, BindingDependencies, BindingLifetimeOf } from "./bind";
 import { isBinding } from "./bind";
-import { composedModuleDefinitionBrand, exportedBindingBrand, moduleDefinitionBrand } from "./brands";
+import {
+    composedModuleDefinitionBrand,
+    exportedBindingBrand,
+    moduleDefinitionBrand,
+    moduleImportWireBrand,
+} from "./brands";
 import type { DependencyMap } from "./dependencies";
 import type {
     BindingAllDependencyTokens,
@@ -9,9 +14,19 @@ import type {
     BindingOptionalSingleDependencyTokens,
     BindingRequiredSingleDependencyTokens,
     BindingScopes,
+    BindingSingleDependencyTokens,
     SameTokenKey,
 } from "./graph";
-import type { AnyMultiToken, AnyToken, IsMultiToken, TokenKey, TokensNotIn } from "./token";
+import type {
+    AnyMultiToken,
+    AnySingleToken,
+    AnyToken,
+    IsMultiToken,
+    TokenIdentity,
+    TokenKey,
+    TokensNotIn,
+    TokenValue,
+} from "./token";
 import { isRuntimeMultiToken, tokenKey } from "./token";
 import type { HasTrue, IfNever, IsExact } from "./type-utils";
 import type { ValidateGraphBindings } from "./validation";
@@ -40,19 +55,35 @@ export type ModuleDefinition<
     readonly bindings: TBindings;
 };
 
+export type ModuleImportWire<
+    TModule extends AnyModuleDefinition = AnyModuleDefinition,
+    TImportToken extends AnySingleToken = AnySingleToken,
+    TProviderToken extends AnySingleToken = AnySingleToken,
+> = {
+    readonly [moduleImportWireBrand]: true;
+    readonly module: TModule;
+    readonly importToken: TImportToken;
+    readonly providerToken: TProviderToken;
+};
+
+export type AnyModuleImportWire = ModuleImportWire<AnyModuleDefinition, AnySingleToken, AnySingleToken>;
+
 export type AnyComposedModuleDefinition = {
     readonly [composedModuleDefinitionBrand]: true;
     readonly modules: readonly AnyModuleDefinition[];
     readonly exports: readonly AnyToken[];
+    readonly wire: readonly AnyModuleImportWire[];
 };
 
 export type ComposedModuleDefinition<
     TModules extends readonly AnyModuleDefinition[] = readonly AnyModuleDefinition[],
     TExports extends readonly AnyToken[] = readonly AnyToken[],
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
 > = {
     readonly [composedModuleDefinitionBrand]: true;
     readonly modules: TModules;
     readonly exports: TExports;
+    readonly wire: TWire;
 };
 
 export type UnwrapModuleBinding<TBinding extends ModuleBindingInput> =
@@ -98,6 +129,31 @@ export type ModuleExportedInterfaceBinding<
 
 type ModuleImportedInterfaceBinding<TToken extends AnyToken = AnyToken> = Binding<TToken, undefined, "singleton"> & {
     readonly __module_imported_interface_binding__: true;
+};
+
+type ModuleWiredImportedInterfaceBinding<
+    TImportToken extends AnySingleToken,
+    TProviderBinding extends AnyBinding,
+> = Binding<TImportToken, BindingDependencies<TProviderBinding>, BindingLifetimeOf<TProviderBinding>> & {
+    readonly __module_exported_interface_binding__: true;
+};
+
+type ModuleSingleImportTokens<TModule extends AnyModuleDefinition> = Extract<
+    TModule["imports"][number],
+    AnySingleToken
+>;
+
+type WireProviderValueConstraint<TImportToken extends AnySingleToken, TProviderToken extends AnySingleToken> =
+    TokenValue<TProviderToken> extends NoInfer<TokenValue<TImportToken>>
+        ? unknown
+        : {
+              readonly __wire_provider_value_not_assignable__: TokenValue<TProviderToken>;
+          };
+
+type ModuleImportWireBuilder<TModule extends AnyModuleDefinition, TImportToken extends AnySingleToken> = {
+    readonly with: <const TProviderToken extends AnySingleToken>(
+        providerToken: TProviderToken & WireProviderValueConstraint<TImportToken, TProviderToken>,
+    ) => ModuleImportWire<TModule, TImportToken, TProviderToken>;
 };
 
 type IsModuleExportedInterfaceBinding<TBinding extends AnyBinding> = TBinding extends {
@@ -223,37 +279,177 @@ type ModuleImportInterfaceBindingsFromTokens<TImports extends readonly AnyToken[
         ]
       : readonly [];
 
+type ModuleImportWireForEntry<
+    TModules extends readonly AnyModuleDefinition[],
+    TCurrentWire extends AnyModuleImportWire,
+    TModule extends AnyModuleDefinition,
+    TToken extends AnySingleToken,
+> = TCurrentWire extends AnyModuleImportWire
+    ? HasMultipleExactModules<TModules, TModule> extends true
+        ? never
+        : IsExact<TCurrentWire["module"], TModule> extends true
+          ? HasExactToken<TCurrentWire["importToken"], TToken> extends true
+              ? TCurrentWire
+              : never
+          : never
+    : never;
+
+type ModuleImportWireFor<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+    TModule extends AnyModuleDefinition,
+    TToken extends AnySingleToken,
+> = ModuleImportWireForEntry<TModules, TWire[number], TModule, TToken>;
+
+type ExactModuleMatch<TCurrentModule, TModule extends AnyModuleDefinition> = TCurrentModule extends AnyModuleDefinition
+    ? IsExact<TCurrentModule, TModule>
+    : false;
+
+type HasExactModule<TModules extends readonly AnyModuleDefinition[], TModule extends AnyModuleDefinition> = HasTrue<
+    ExactModuleMatch<TModules[number], TModule>
+>;
+
+type HasMultipleExactModules<
+    TModules extends readonly AnyModuleDefinition[],
+    TModule extends AnyModuleDefinition,
+    TSeen extends boolean = false,
+> = number extends TModules["length"]
+    ? false
+    : TModules extends readonly [
+            infer TCurrentModule extends AnyModuleDefinition,
+            ...infer TRemainingModules extends readonly AnyModuleDefinition[],
+        ]
+      ? IsExact<TCurrentModule, TModule> extends true
+          ? TSeen extends true
+              ? true
+              : HasMultipleExactModules<TRemainingModules, TModule, true>
+          : HasMultipleExactModules<TRemainingModules, TModule, TSeen>
+      : false;
+
+type AmbiguousWireModuleTargets<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> = IfNever<
+    TWire[number],
+    never,
+    TWire[number] extends infer TCurrentWire extends AnyModuleImportWire
+        ? HasMultipleExactModules<TModules, TCurrentWire["module"]> extends true
+            ? true
+            : never
+        : never
+>;
+
+type ModuleExportedInterfaceBindingForTokenInModule<
+    TCurrentModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+    TAdditionalScopes extends BindingScopes = readonly [],
+    TExcludedModule = never,
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> =
+    IsExact<TCurrentModule, TExcludedModule> extends true
+        ? never
+        : ModuleExportedInterfaceBindingByExactToken<TCurrentModule, TModules, TToken, TAdditionalScopes, TWire>;
+
+type ModuleExportedInterfaceBindingForToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+    TAdditionalScopes extends BindingScopes = readonly [],
+    TExcludedModule = never,
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = TModules[number] extends infer TCurrentModule
+    ? TCurrentModule extends AnyModuleDefinition
+        ? ModuleExportedInterfaceBindingForTokenInModule<
+              TCurrentModule,
+              TModules,
+              TToken,
+              TAdditionalScopes,
+              TExcludedModule,
+              TWire
+          >
+        : never
+    : never;
+
+type ModuleWiredImportedExportedBindingForToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnySingleToken,
+    TAdditionalScopes extends BindingScopes,
+    TWireEntry extends AnyModuleImportWire,
+    TWire extends readonly AnyModuleImportWire[],
+> =
+    ModuleExportedInterfaceBindingForToken<
+        TModules,
+        TWireEntry["providerToken"],
+        TAdditionalScopes,
+        never,
+        TWire
+    > extends infer TProviderBinding extends AnyBinding
+        ? ModuleWiredImportedInterfaceBinding<TToken, TProviderBinding>
+        : never;
+
 export type ModuleImportedExportedBindingForToken<
     TModules extends readonly AnyModuleDefinition[],
     TToken extends AnyToken,
     TAdditionalScopes extends BindingScopes = readonly [],
     TExcludedModule = never,
-> = TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
-    ? IsExact<TCurrentModule, TExcludedModule> extends true
-        ? never
-        : ModuleExportedInterfaceBindingByExactToken<TCurrentModule, TModules, TToken, TAdditionalScopes>
-    : never;
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = [TExcludedModule] extends [AnyModuleDefinition]
+    ? TToken extends AnySingleToken
+        ? IfNever<
+              ModuleImportWireFor<TModules, TWire, TExcludedModule, TToken>,
+              ModuleExportedInterfaceBindingForToken<TModules, TToken, TAdditionalScopes, TExcludedModule, TWire>,
+              ModuleImportWireFor<TModules, TWire, TExcludedModule, TToken> extends infer TWireEntry extends
+                  AnyModuleImportWire
+                  ? ModuleWiredImportedExportedBindingForToken<TModules, TToken, TAdditionalScopes, TWireEntry, TWire>
+                  : never
+          >
+        : ModuleExportedInterfaceBindingForToken<TModules, TToken, TAdditionalScopes, TExcludedModule, TWire>
+    : ModuleExportedInterfaceBindingForToken<TModules, TToken, TAdditionalScopes, TExcludedModule, TWire>;
+
+type ModuleImportedExportedBindingsFromTokens<
+    TImports extends readonly AnyToken[],
+    TModules extends readonly AnyModuleDefinition[],
+    TModule extends AnyModuleDefinition,
+    TAdditionalScopes extends BindingScopes = readonly [],
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = number extends TImports["length"]
+    ? readonly ModuleImportedExportedBindingForToken<TModules, TImports[number], TAdditionalScopes, TModule, TWire>[]
+    : TImports extends readonly [
+            infer TCurrentImport extends AnyToken,
+            ...infer TRemainingImports extends readonly AnyToken[],
+        ]
+      ? readonly [
+            ModuleImportedExportedBindingForToken<TModules, TCurrentImport, TAdditionalScopes, TModule, TWire>,
+            ...ModuleImportedExportedBindingsFromTokens<TRemainingImports, TModules, TModule, TAdditionalScopes, TWire>,
+        ]
+      : readonly [];
 
 export type ModuleImportedExportedBindings<
     TModule extends AnyModuleDefinition,
     TModules extends readonly AnyModuleDefinition[],
     TAdditionalScopes extends BindingScopes = readonly [],
-> = readonly ModuleImportedExportedBindingForToken<TModules, TModule["imports"][number], TAdditionalScopes, TModule>[];
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = ModuleImportedExportedBindingsFromTokens<TModule["imports"], TModules, TModule, TAdditionalScopes, TWire>;
 
 type ModuleBindingScopesFromComposition<
     TModule extends AnyModuleDefinition,
     TModules extends readonly AnyModuleDefinition[],
     TAdditionalScopes extends BindingScopes = readonly [],
-> = readonly [ModuleImportedExportedBindings<TModule, TModules, TAdditionalScopes>, ModuleLocalBindings<TModule>];
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = readonly [
+    ModuleImportedExportedBindings<TModule, TModules, TAdditionalScopes, TWire>,
+    ModuleLocalBindings<TModule>,
+];
 
 type ModuleExportedInterfaceDependenciesFromComposition<
     TModule extends AnyModuleDefinition,
     TModules extends readonly AnyModuleDefinition[],
     TBinding extends AnyBinding,
     TAdditionalScopes extends BindingScopes,
+    TWire extends readonly AnyModuleImportWire[],
 > = DependencyMapFromTokens<
     ExternalDependencyTokensFromBinding<
-        ModuleBindingScopesFromComposition<TModule, TModules, TAdditionalScopes>,
+        ModuleBindingScopesFromComposition<TModule, TModules, TAdditionalScopes, TWire>,
         TBinding
     >
 >;
@@ -263,12 +459,13 @@ type ModuleExportedInterfaceBindingByExactToken<
     TModules extends readonly AnyModuleDefinition[],
     TToken extends AnyToken,
     TAdditionalScopes extends BindingScopes,
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
     TBinding extends AnyBinding = ModuleExportedBindings<TModule>[number],
 > = TBinding extends AnyBinding
     ? BindingTokenMatchesRequest<TBinding["token"], TToken> extends true
         ? ModuleExportedInterfaceBinding<
               TBinding,
-              ModuleExportedInterfaceDependenciesFromComposition<TModule, TModules, TBinding, TAdditionalScopes>
+              ModuleExportedInterfaceDependenciesFromComposition<TModule, TModules, TBinding, TAdditionalScopes, TWire>
           >
         : never
     : never;
@@ -277,15 +474,16 @@ export type CompositionPublicInterfaceBindings<
     TModules extends readonly AnyModuleDefinition[],
     TExports extends readonly AnyToken[],
     TAdditionalScopes extends BindingScopes = readonly [],
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
 > = number extends TExports["length"]
-    ? readonly ModuleImportedExportedBindingForToken<TModules, TExports[number], TAdditionalScopes>[]
+    ? readonly ModuleImportedExportedBindingForToken<TModules, TExports[number], TAdditionalScopes, never, TWire>[]
     : TExports extends readonly [
             infer TCurrentExport extends AnyToken,
             ...infer TRemainingExports extends readonly AnyToken[],
         ]
       ? readonly [
-            ModuleImportedExportedBindingForToken<TModules, TCurrentExport, TAdditionalScopes>,
-            ...CompositionPublicInterfaceBindings<TModules, TRemainingExports, TAdditionalScopes>,
+            ModuleImportedExportedBindingForToken<TModules, TCurrentExport, TAdditionalScopes, never, TWire>,
+            ...CompositionPublicInterfaceBindings<TModules, TRemainingExports, TAdditionalScopes, TWire>,
         ]
       : readonly [];
 
@@ -300,7 +498,12 @@ export type CompositionLocalBindings<TModules extends readonly AnyModuleDefiniti
           : readonly [];
 
 export type CompositionPublicBindings<TComposition extends AnyComposedModuleDefinition> =
-    CompositionPublicInterfaceBindings<TComposition["modules"], TComposition["exports"]>;
+    CompositionPublicInterfaceBindings<
+        TComposition["modules"],
+        TComposition["exports"],
+        readonly [],
+        TComposition["wire"]
+    >;
 
 export type CompositionPublicTokenArray<TComposition extends AnyComposedModuleDefinition> = TComposition["exports"];
 
@@ -318,7 +521,11 @@ type ModuleBindingScopesFromParts<
 type ModuleVisibleBindingsFromComposition<
     TModule extends AnyModuleDefinition,
     TModules extends readonly AnyModuleDefinition[],
-> = readonly [...ModuleImportedExportedBindings<TModule, TModules>, ...ModuleLocalBindings<TModule>];
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = readonly [
+    ...ModuleImportedExportedBindings<TModule, TModules, readonly [], TWire>,
+    ...ModuleLocalBindings<TModule>,
+];
 
 type TupleBindingsError<TBindings extends readonly ModuleBindingInput[]> = number extends TBindings["length"]
     ? {
@@ -344,8 +551,18 @@ type TupleExportsError<TExports extends readonly AnyToken[]> = number extends TE
       }
     : {};
 
+type TupleWireError<TWire extends readonly AnyModuleImportWire[]> = number extends TWire["length"]
+    ? {
+          readonly __wire_must_be_tuple__: true;
+      }
+    : {};
+
 type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
     TTokens extends AnyToken ? SameTokenKey<TTokens, TToken> : false
+>;
+
+type HasTokenWithSameIdentity<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
+    TTokens extends AnyToken ? IsExact<TokenIdentity<TTokens>, TokenIdentity<TToken>> : false
 >;
 
 type DuplicateVisibleSingleTokenKeys<
@@ -488,12 +705,48 @@ type ValidateModuleImports<TImports extends readonly AnyToken[]> = TupleImportsE
         [TIndex in keyof TImports]: TImports[TIndex] extends AnyToken ? TImports[TIndex] : never;
     };
 
-type ModuleImportTokens<TModules extends readonly AnyModuleDefinition[]> = TModules[number]["imports"][number];
+type ModuleImportTokenIsWired<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+    TModule extends AnyModuleDefinition,
+    TToken extends AnyToken,
+> = TToken extends AnySingleToken ? IfNever<ModuleImportWireFor<TModules, TWire, TModule, TToken>, false, true> : false;
+
+type UnwiredModuleImportToken<
+    TModules extends readonly AnyModuleDefinition[],
+    TModule extends AnyModuleDefinition,
+    TWire extends readonly AnyModuleImportWire[],
+    TToken extends AnyToken,
+> = TToken extends AnyToken
+    ? ModuleImportTokenIsWired<TModules, TWire, TModule, TToken> extends true
+        ? never
+        : TToken
+    : never;
+
+type UnwiredModuleImportTokensFromModule<
+    TModules extends readonly AnyModuleDefinition[],
+    TModule extends AnyModuleDefinition,
+    TWire extends readonly AnyModuleImportWire[],
+> = TModule extends AnyModuleDefinition
+    ? TModule["imports"][number] extends infer TCurrentImport extends AnyToken
+        ? UnwiredModuleImportToken<TModules, TModule, TWire, TCurrentImport>
+        : never
+    : never;
+
+type UnwiredModuleImportTokens<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> = TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
+    ? UnwiredModuleImportTokensFromModule<TModules, TCurrentModule, TWire>
+    : never;
+
+type WireProviderTokens<TWire extends readonly AnyModuleImportWire[]> = TWire[number]["providerToken"];
 
 type CompositionReferencedTokens<
     TModules extends readonly AnyModuleDefinition[],
     TExports extends readonly AnyToken[],
-> = ModuleImportTokens<TModules> | TExports[number];
+    TWire extends readonly AnyModuleImportWire[],
+> = UnwiredModuleImportTokens<TModules, TWire> | WireProviderTokens<TWire> | TExports[number];
 
 type CompositionExportedBindingByExactToken<
     TModules extends readonly AnyModuleDefinition[],
@@ -523,7 +776,23 @@ type MissingProviderTokens<
     ? IfNever<CompositionExportedBindingByExactToken<TModules, TTokens>, TTokens, never>
     : never;
 
-type AmbiguousSingleProviderKeys<TModules extends readonly AnyModuleDefinition[]> = DuplicateVisibleSingleTokenKeys<
+type DuplicateExportedSingleProviderKeys<
+    TBindings extends readonly AnyBinding[],
+    TSeenTokens extends AnyToken = never,
+> = number extends TBindings["length"]
+    ? never
+    : TBindings extends readonly [
+            infer TCurrentBinding extends AnyBinding,
+            ...infer TRemainingBindings extends readonly AnyBinding[],
+        ]
+      ? IsMultiToken<TCurrentBinding["token"]> extends true
+          ? DuplicateExportedSingleProviderKeys<TRemainingBindings, TSeenTokens>
+          : HasTokenWithSameIdentity<TSeenTokens, TCurrentBinding["token"]> extends true
+            ? TokenKey<TCurrentBinding["token"]> | DuplicateExportedSingleProviderKeys<TRemainingBindings, TSeenTokens>
+            : DuplicateExportedSingleProviderKeys<TRemainingBindings, TSeenTokens | TCurrentBinding["token"]>
+      : never;
+
+type AmbiguousSingleProviderKeys<TModules extends readonly AnyModuleDefinition[]> = DuplicateExportedSingleProviderKeys<
     CompositionExportedBindings<TModules>
 >;
 
@@ -536,19 +805,154 @@ type IncompatibleExportedMultibindProviderKeys<
         : never
     : never;
 
-type InvalidComposedModuleBindings<TModules extends readonly AnyModuleDefinition[]> =
-    TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
-        ? ModuleLocalBindings<TCurrentModule> extends ValidateGraphBindings<
+type InvalidComposedModuleBindingsForModule<
+    TCurrentModule extends AnyModuleDefinition,
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> =
+    ModuleLocalBindings<TCurrentModule> extends ValidateGraphBindings<
+        ModuleLocalBindings<TCurrentModule>,
+        ModuleBindingScopesFromComposition<TCurrentModule, TModules, readonly [], TWire>,
+        ModuleVisibleBindingsFromComposition<TCurrentModule, TModules, TWire>
+    >
+        ? never
+        : ValidateGraphBindings<
               ModuleLocalBindings<TCurrentModule>,
-              ModuleBindingScopesFromComposition<TCurrentModule, TModules>,
-              ModuleVisibleBindingsFromComposition<TCurrentModule, TModules>
-          >
+              ModuleBindingScopesFromComposition<TCurrentModule, TModules, readonly [], TWire>,
+              ModuleVisibleBindingsFromComposition<TCurrentModule, TModules, TWire>
+          >;
+
+type InvalidComposedModuleBindings<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> = TModules[number] extends infer TCurrentModule
+    ? TCurrentModule extends AnyModuleDefinition
+        ? InvalidComposedModuleBindingsForModule<TCurrentModule, TModules, TWire>
+        : never
+    : never;
+
+type WireModulesOutsideComposition<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> = IfNever<
+    TWire[number],
+    never,
+    TWire[number] extends infer TCurrentWire extends AnyModuleImportWire
+        ? HasExactModule<TModules, TCurrentWire["module"]> extends true
             ? never
-            : ValidateGraphBindings<
-                  ModuleLocalBindings<TCurrentModule>,
-                  ModuleBindingScopesFromComposition<TCurrentModule, TModules>,
-                  ModuleVisibleBindingsFromComposition<TCurrentModule, TModules>
-              >
+            : true
+        : never
+>;
+
+type WireImportTokensOutsideModule<TWire extends readonly AnyModuleImportWire[]> = IfNever<
+    TWire[number],
+    never,
+    TWire[number] extends infer TCurrentWire extends AnyModuleImportWire
+        ? HasExactToken<TCurrentWire["module"]["imports"][number], TCurrentWire["importToken"]> extends true
+            ? never
+            : TokenKey<TCurrentWire["importToken"]>
+        : never
+>;
+
+type IncompatibleWireProviderTokens<TWire extends readonly AnyModuleImportWire[]> = IfNever<
+    TWire[number],
+    never,
+    TWire[number] extends infer TCurrentWire extends AnyModuleImportWire
+        ? TokenValue<TCurrentWire["providerToken"]> extends TokenValue<TCurrentWire["importToken"]>
+            ? never
+            : TokenKey<TCurrentWire["providerToken"]>
+        : never
+>;
+
+type SameWireTarget<TLeftWire extends AnyModuleImportWire, TRightWire extends AnyModuleImportWire> =
+    IsExact<TLeftWire["module"], TRightWire["module"]> extends true
+        ? HasExactToken<TLeftWire["importToken"], TRightWire["importToken"]>
+        : false;
+
+type HasWireTarget<TWireTargets extends AnyModuleImportWire, TWire extends AnyModuleImportWire> = HasTrue<
+    TWireTargets extends AnyModuleImportWire ? SameWireTarget<TWireTargets, TWire> : false
+>;
+
+type DuplicateWireTokenKeys<
+    TWire extends readonly AnyModuleImportWire[],
+    TSeenWireTargets extends AnyModuleImportWire = never,
+> = number extends TWire["length"]
+    ? never
+    : TWire extends readonly [
+            infer TCurrentWire extends AnyModuleImportWire,
+            ...infer TRemainingWire extends readonly AnyModuleImportWire[],
+        ]
+      ? HasWireTarget<TSeenWireTargets, TCurrentWire> extends true
+          ? TokenKey<TCurrentWire["importToken"]> | DuplicateWireTokenKeys<TRemainingWire, TSeenWireTargets>
+          : DuplicateWireTokenKeys<TRemainingWire, TSeenWireTargets | TCurrentWire>
+      : never;
+
+type WiredScopedImportTokenForModule<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+    TModule extends AnyModuleDefinition,
+    TCurrentImport extends AnyToken,
+> = TCurrentImport extends AnySingleToken
+    ? IfNever<
+          ModuleImportWireFor<TModules, TWire, TModule, TCurrentImport>,
+          never,
+          ModuleImportWireFor<TModules, TWire, TModule, TCurrentImport> extends infer TCurrentWire extends
+              AnyModuleImportWire
+              ? ModuleExportedInterfaceBindingForToken<
+                    TModules,
+                    TCurrentWire["providerToken"],
+                    readonly [],
+                    never,
+                    TWire
+                > extends infer TProviderBinding
+                  ? TProviderBinding extends AnyBinding
+                      ? BindingLifetimeOf<TProviderBinding> extends "scoped"
+                          ? TCurrentImport
+                          : never
+                      : never
+                  : never
+              : never
+      >
+    : never;
+
+type WiredScopedImportTokensForModule<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+    TModule extends AnyModuleDefinition,
+> = IfNever<
+    TWire[number],
+    never,
+    TModule["imports"][number] extends infer TCurrentImport extends AnyToken
+        ? WiredScopedImportTokenForModule<TModules, TWire, TModule, TCurrentImport>
+        : never
+>;
+
+type HasWiredScopedDependencyInSingletonBinding<TBinding extends AnyBinding, TScopedImportTokens extends AnyToken> =
+    BindingLifetimeOf<TBinding> extends "singleton"
+        ? HasTrue<
+              TScopedImportTokens extends AnyToken
+                  ? HasExactToken<BindingSingleDependencyTokens<TBinding>, TScopedImportTokens>
+                  : false
+          >
+        : false;
+
+type WiredScopedDependencyInSingletonModules<
+    TModules extends readonly AnyModuleDefinition[],
+    TWire extends readonly AnyModuleImportWire[],
+> =
+    HasTrue<
+        TModules[number] extends infer TCurrentModule
+            ? TCurrentModule extends AnyModuleDefinition
+                ? ModuleLocalBindings<TCurrentModule>[number] extends infer TCurrentBinding extends AnyBinding
+                    ? HasWiredScopedDependencyInSingletonBinding<
+                          TCurrentBinding,
+                          WiredScopedImportTokensForModule<TModules, TWire, TCurrentModule>
+                      >
+                    : false
+                : false
+            : false
+    > extends true
+        ? true
         : never;
 
 type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
@@ -556,11 +960,12 @@ type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
 type ValidateComposeOptions<
     TModules extends readonly AnyModuleDefinition[],
     TExports extends readonly AnyToken[],
+    TWire extends readonly AnyModuleImportWire[],
 > = ValidationErrorUnlessNever<
-    MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports>>,
+    MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports, TWire>>,
     {
         readonly __missing_provider__: TokenKey<
-            MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports>>
+            MissingProviderTokens<TModules, CompositionReferencedTokens<TModules, TExports, TWire>>
         >;
     }
 > &
@@ -571,15 +976,51 @@ type ValidateComposeOptions<
         }
     > &
     ValidationErrorUnlessNever<
-        InvalidComposedModuleBindings<TModules>,
+        WiredScopedDependencyInSingletonModules<TModules, TWire>,
         {
-            readonly __invalid_modules__: InvalidComposedModuleBindings<TModules>;
+            readonly __scoped_dependency_in_singleton__: true;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        InvalidComposedModuleBindings<TModules, TWire>,
+        {
+            readonly __invalid_modules__: InvalidComposedModuleBindings<TModules, TWire>;
         }
     > &
     ValidationErrorUnlessNever<
         IncompatibleExportedMultibindProviderKeys<TModules>,
         {
             readonly __incompatible_provider__: IncompatibleExportedMultibindProviderKeys<TModules>;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        WireModulesOutsideComposition<TModules, TWire>,
+        {
+            readonly __wire_module_not_in_modules__: true;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        AmbiguousWireModuleTargets<TModules, TWire>,
+        {
+            readonly __ambiguous_wire_module__: true;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        WireImportTokensOutsideModule<TWire>,
+        {
+            readonly __wire_import_not_in_module__: WireImportTokensOutsideModule<TWire>;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        DuplicateWireTokenKeys<TWire>,
+        {
+            readonly __duplicate_wire__: DuplicateWireTokenKeys<TWire>;
+        }
+    > &
+    ValidationErrorUnlessNever<
+        IncompatibleWireProviderTokens<TWire>,
+        {
+            readonly __wire_provider_value_not_assignable__: IncompatibleWireProviderTokens<TWire>;
         }
     >;
 
@@ -591,6 +1032,10 @@ type ValidateComposeExports<TExports extends readonly AnyToken[]> = TupleExports
     DuplicateTokenListError<TExports, "exports"> & {
         [TIndex in keyof TExports]: TExports[TIndex] extends AnyToken ? TExports[TIndex] : never;
     };
+
+type ValidateComposeWire<TWire extends readonly AnyModuleImportWire[]> = TupleWireError<TWire> & {
+    [TIndex in keyof TWire]: TWire[TIndex] extends AnyModuleImportWire ? TWire[TIndex] : never;
+};
 
 let nextModuleId = 1;
 
@@ -619,6 +1064,31 @@ export const isModuleDefinition = (value: unknown): value is AnyModuleDefinition
 
 export const isComposedModuleDefinition = (value: unknown): value is AnyComposedModuleDefinition => {
     return typeof value === "object" && value !== null && Object.hasOwn(value, composedModuleDefinitionBrand);
+};
+
+export const isModuleImportWire = (value: unknown): value is AnyModuleImportWire => {
+    return typeof value === "object" && value !== null && Object.hasOwn(value, moduleImportWireBrand);
+};
+
+export const provideImport = <
+    const TModule extends AnyModuleDefinition,
+    const TImportToken extends ModuleSingleImportTokens<TModule>,
+>(
+    module: TModule,
+    importToken: TImportToken,
+): ModuleImportWireBuilder<TModule, TImportToken> => {
+    const builder = {
+        with(providerToken: AnySingleToken): ModuleImportWire<TModule, TImportToken> {
+            return {
+                [moduleImportWireBrand]: true,
+                module,
+                importToken,
+                providerToken,
+            };
+        },
+    };
+
+    return builder as ModuleImportWireBuilder<TModule, TImportToken>;
 };
 
 const isMultiToken = (currentToken: AnyToken): boolean => {
@@ -794,7 +1264,11 @@ const findExportedProviders = (
     );
 };
 
-const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], exports: readonly AnyToken[]): void => {
+const validateComposedModuleRuntime = (
+    modules: readonly AnyModuleDefinition[],
+    exports: readonly AnyToken[],
+    wire: readonly AnyModuleImportWire[],
+): void => {
     if (!Array.isArray(modules)) {
         throw new Error("composeModules modules must be an array");
     }
@@ -803,7 +1277,12 @@ const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], 
         throw new Error("composeModules exports must be an array");
     }
 
+    if (!Array.isArray(wire)) {
+        throw new Error("composeModules wire must be an array");
+    }
+
     const moduleIds = new Set<number>();
+    const moduleSet = new Set<AnyModuleDefinition>();
 
     for (const currentModule of modules) {
         if (!isModuleDefinition(currentModule)) {
@@ -815,6 +1294,7 @@ const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], 
         }
 
         moduleIds.add(currentModule.id);
+        moduleSet.add(currentModule);
     }
 
     for (const currentExport of exports) {
@@ -822,6 +1302,52 @@ const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], 
     }
 
     assertNoDuplicateTokenKeys(exports, (currentTokenKey) => `Token "${currentTokenKey}" is already exported`);
+
+    const wireTargetId = (currentModule: AnyModuleDefinition, currentImport: AnyToken): string => {
+        return `${currentModule.id}\u0000${tokenRuntimeId(currentImport)}`;
+    };
+    const wireProviderByTarget = new Map<string, AnySingleToken>();
+
+    for (const currentWire of wire) {
+        if (!isModuleImportWire(currentWire)) {
+            throw new Error("composeModules wire entries must be created with provideImport");
+        }
+
+        if (!isModuleDefinition(currentWire.module) || !moduleSet.has(currentWire.module)) {
+            throw new Error("Wire module must be included in composeModules modules");
+        }
+
+        assertTokenInput(currentWire.importToken, "Wire import token must be a token");
+        assertTokenInput(currentWire.providerToken, "Wire provider token must be a token");
+
+        const importTokenKey = tokenKey(currentWire.importToken);
+
+        if (isMultiToken(currentWire.importToken)) {
+            throw new Error(`Multibind token "${importTokenKey}" cannot be wired with provideImport`);
+        }
+
+        const providerTokenKey = tokenKey(currentWire.providerToken);
+
+        if (isMultiToken(currentWire.providerToken)) {
+            throw new Error(`Multibind token "${providerTokenKey}" cannot be used as a wired provider`);
+        }
+
+        if (
+            !currentWire.module.imports.some(
+                (currentImport) => tokenRuntimeId(currentImport) === tokenRuntimeId(currentWire.importToken),
+            )
+        ) {
+            throw new Error(`Service "${importTokenKey}" is not imported by the wired module`);
+        }
+
+        const targetId = wireTargetId(currentWire.module, currentWire.importToken);
+
+        if (wireProviderByTarget.has(targetId)) {
+            throw new Error(`Service "${importTokenKey}" is already wired for the module`);
+        }
+
+        wireProviderByTarget.set(targetId, currentWire.providerToken);
+    }
 
     const exportedEntries = collectExportedEntries(modules);
     const exportedProviderKinds = new Map<string, boolean>();
@@ -874,6 +1400,17 @@ const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], 
 
     for (const currentModule of modules) {
         for (const currentImport of currentModule.imports) {
+            const wiredProvider = wireProviderByTarget.get(wireTargetId(currentModule, currentImport));
+
+            if (wiredProvider) {
+                assertProviders(
+                    wiredProvider,
+                    findExportedProviders(exportedEntries, wiredProvider),
+                    `is wired to import "${tokenKey(currentImport)}"`,
+                );
+                continue;
+            }
+
             const excludedProviderModule = isMultiToken(currentImport) ? undefined : currentModule;
 
             assertProviders(
@@ -889,20 +1426,42 @@ const validateComposedModuleRuntime = (modules: readonly AnyModuleDefinition[], 
     }
 };
 
-export const composeModules = <
-    const TModules extends readonly AnyModuleDefinition[],
-    const TExports extends readonly AnyToken[],
->(
-    options: {
-        readonly modules: TModules & ValidateComposeModules<TModules>;
-        readonly exports: TExports & ValidateComposeExports<TExports>;
-    } & ValidateComposeOptions<TModules, TExports>,
-): ComposedModuleDefinition<TModules, TExports> => {
-    validateComposedModuleRuntime(options.modules, options.exports);
+type ComposeModules = {
+    <const TModules extends readonly AnyModuleDefinition[], const TExports extends readonly AnyToken[]>(
+        options: {
+            readonly modules: TModules & ValidateComposeModules<TModules>;
+            readonly exports: TExports & ValidateComposeExports<TExports>;
+        } & ValidateComposeOptions<TModules, TExports, readonly []>,
+    ): ComposedModuleDefinition<TModules, TExports, readonly []>;
+
+    <
+        const TModules extends readonly AnyModuleDefinition[],
+        const TExports extends readonly AnyToken[],
+        const TWire extends readonly AnyModuleImportWire[],
+    >(
+        options: {
+            readonly modules: TModules & ValidateComposeModules<TModules>;
+            readonly exports: TExports & ValidateComposeExports<TExports>;
+            readonly wire: TWire & ValidateComposeWire<TWire>;
+        } & ValidateComposeOptions<TModules, TExports, TWire>,
+    ): ComposedModuleDefinition<TModules, TExports, TWire>;
+};
+
+const composeModulesImplementation = (options: {
+    readonly modules: readonly AnyModuleDefinition[];
+    readonly exports: readonly AnyToken[];
+    readonly wire?: readonly AnyModuleImportWire[];
+}): AnyComposedModuleDefinition => {
+    const wire = options.wire ?? [];
+
+    validateComposedModuleRuntime(options.modules, options.exports, wire);
 
     return {
         [composedModuleDefinitionBrand]: true,
         modules: options.modules,
         exports: options.exports,
+        wire,
     };
 };
+
+export const composeModules = composeModulesImplementation as unknown as ComposeModules;

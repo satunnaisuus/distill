@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type Token, token, tokenKey } from "../src/token";
+import { isRuntimeMultiToken, qualified, qualifier, type Token, token, tokenKey } from "../src/token";
 
 describe("tokenKey", () => {
     it("returns the key for a token created by token().of()", () => {
@@ -23,6 +23,19 @@ describe("tokenKey", () => {
         const token = "feature-flags" as Token<"feature-flags", { readonly enabled: boolean }>;
 
         expect(tokenKey(token)).toBe("feature-flags");
+    });
+
+    it("returns stable keys for qualified single tokens", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const Human = qualifier("human");
+        const JsonLogger = qualified(Logger, Json);
+        const HumanLogger = qualified(Logger, Human);
+
+        expect(tokenKey(JsonLogger)).toBe("Logger:json");
+        expect(tokenKey(HumanLogger)).toBe("Logger:human");
+        expect(JsonLogger).not.toBe(HumanLogger);
+        expect(isRuntimeMultiToken(JsonLogger)).toBe(false);
     });
 });
 

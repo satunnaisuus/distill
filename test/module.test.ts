@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { all } from "../src/all";
 import { bind } from "../src/bind";
 import { defineContainer } from "../src/container";
-import { composeModules, defineModule, exported } from "../src/module";
+import { composeModules, defineModule, exported, provideImport } from "../src/module";
 import { optional } from "../src/optional";
-import { override, overrideAll } from "../src/override";
+import { override, overrideAll, unbind } from "../src/override";
 import { ref } from "../src/ref";
-import { multiToken, token } from "../src/token";
+import { multiToken, qualified, qualifier, token } from "../src/token";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
@@ -17,6 +17,242 @@ type RuntimeContainerForTest = {
 };
 
 describe("defineContainer.module", () => {
+    it("wires module imports to different qualified providers", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const Human = qualifier("human");
+        const JsonLogger = qualified(Logger, Json);
+        const HumanLogger = qualified(Logger, Human);
+        const FirstConsumer = token("FirstConsumer").of<{ readonly loggerName: string }>();
+        const SecondConsumer = token("SecondConsumer").of<{ readonly loggerName: string }>();
+
+        const FirstConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(FirstConsumer, { logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const SecondConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(SecondConsumer, { logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [
+                exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
+                exported(bind.qualified(Logger, Human, () => ({ name: "human" }))),
+            ],
+        });
+        const App = composeModules({
+            modules: [FirstConsumerModule, SecondConsumerModule, LoggerModule],
+            wire: [
+                provideImport(FirstConsumerModule, Logger).with(JsonLogger),
+                provideImport(SecondConsumerModule, Logger).with(HumanLogger),
+            ],
+            exports: [FirstConsumer, SecondConsumer],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(FirstConsumer)).toEqual({ loggerName: "json" });
+        expect(app.resolve(SecondConsumer)).toEqual({ loggerName: "human" });
+        expect(() => (app as RuntimeContainerForTest).resolve(JsonLogger)).toThrowError(
+            'Service "Logger:json" is not exported by the module',
+        );
+    });
+
+    it("does not expose qualified tokens through same-key plain exports", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+        const PlainJsonLogger = token("Logger:json").of<{ readonly name: string }>();
+
+        const PlainLoggerModule = defineModule({
+            bindings: [exported(bind(PlainJsonLogger, () => ({ name: "plain" })))],
+        });
+        const QualifiedLoggerModule = defineModule({
+            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "qualified" })))],
+        });
+        const App = composeModules({
+            modules: [PlainLoggerModule, QualifiedLoggerModule],
+            exports: [PlainJsonLogger],
+        });
+        const definition = defineContainer.module(App);
+        const app = definition.create();
+
+        expect(app.resolve(PlainJsonLogger)).toEqual({ name: "plain" });
+        expect(() => (app as RuntimeContainerForTest).resolve(JsonLogger)).toThrowError(
+            'Service "Logger:json" is not exported by the module',
+        );
+        expect(() => definition.create(override(bind(JsonLogger, () => ({ name: "override" }))))).toThrowError(
+            'Service "Logger:json" is not exported by the module',
+        );
+    });
+
+    it("wires same-key plain imports to qualified providers by runtime identity", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+        const PlainJsonLogger = token("Logger:json").of<{ readonly name: string }>();
+        const Consumer = token("Consumer").of<{ readonly loggerName: string }>();
+
+        const ConsumerModule = defineModule({
+            imports: [PlainJsonLogger],
+            bindings: [
+                exported(
+                    bind(Consumer, { logger: PlainJsonLogger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "qualified" })))],
+        });
+        const App = composeModules({
+            modules: [ConsumerModule, LoggerModule],
+            wire: [provideImport(ConsumerModule, PlainJsonLogger).with(JsonLogger)],
+            exports: [Consumer],
+        });
+
+        expect(defineContainer.module(App).create().resolve(Consumer)).toEqual({ loggerName: "qualified" });
+    });
+
+    it("lets public base-token overrides take precedence over wired imports", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+        const Consumer = token("Consumer").of<{ readonly loggerName: string }>();
+
+        const ConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [
+                exported(bind(Logger, () => ({ name: "plain" }))),
+                exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
+            ],
+        });
+        const App = composeModules({
+            modules: [ConsumerModule, LoggerModule],
+            wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+            exports: [Consumer, Logger],
+        });
+
+        const app = defineContainer.module(App).create(override(bind(Logger, () => ({ name: "override" }))));
+
+        expect(app.resolve(Consumer)).toEqual({ loggerName: "override" });
+        expect(app.resolve(Logger)).toEqual({ name: "override" });
+    });
+
+    it("rejects unbinding a public provider used by a wired import", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+        const Consumer = token("Consumer").of<{ readonly loggerName: string }>();
+
+        const ConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+        });
+        const App = composeModules({
+            modules: [ConsumerModule, LoggerModule],
+            wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+            exports: [Consumer, JsonLogger],
+        });
+        const definition = defineContainer.module(App);
+
+        expect(() => definition.create(unbind(JsonLogger) as never)).toThrowError(
+            'Service "Logger:json" is wired to import "Logger", but no exported provider exists',
+        );
+    });
+
+    it("rejects invalid import wires at runtime", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Other = token("Other").of<{ readonly name: string }>();
+        const Consumer = token("Consumer").of<{ readonly loggerName: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(Logger, Json);
+
+        const ConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+        });
+        const OutsideModule = defineModule({
+            imports: [Logger],
+            bindings: [],
+        });
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule],
+                wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+                exports: [Consumer],
+            } as never),
+        ).toThrowError('Service "Logger:json" is wired to import "Logger", but no exported provider exists');
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, LoggerModule],
+                wire: [
+                    provideImport(ConsumerModule, Logger).with(JsonLogger),
+                    provideImport(ConsumerModule, Logger).with(JsonLogger),
+                ],
+                exports: [Consumer],
+            } as never),
+        ).toThrowError('Service "Logger" is already wired for the module');
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, LoggerModule],
+                wire: [provideImport(ConsumerModule as never, Other as never).with(JsonLogger as never)],
+                exports: [Consumer],
+            } as never),
+        ).toThrowError('Service "Other" is not imported by the wired module');
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, LoggerModule],
+                wire: [provideImport(OutsideModule, Logger).with(JsonLogger)],
+                exports: [Consumer],
+            } as never),
+        ).toThrowError("Wire module must be included in composeModules modules");
+    });
+
     it("resolves imported single-token providers through an explicit composition root", () => {
         const Config = token("Config").of<{ readonly url: string }>();
         const Pool = token("Pool").of<{ readonly url: string }>();

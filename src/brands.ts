@@ -1,4 +1,6 @@
 export const tokenBrand: unique symbol = Symbol("tokenBrand");
+export const qualifierBrand: unique symbol = Symbol("qualifierBrand");
+export const qualifiedTokenBrand: unique symbol = Symbol("qualifiedTokenBrand");
 export const allDependencyBrand: unique symbol = Symbol("allDependency");
 export const bindingBrand: unique symbol = Symbol("bindingBrand");
 export const bindingDependenciesBrand: unique symbol = Symbol("bindingDependencies");
@@ -8,6 +10,7 @@ export const bindingOverrideAllBrand: unique symbol = Symbol("bindingOverrideAll
 export const bindingUnbindBrand: unique symbol = Symbol("bindingUnbindBrand");
 export const exportedBindingBrand: unique symbol = Symbol("exportedBindingBrand");
 export const moduleDefinitionBrand: unique symbol = Symbol("moduleDefinitionBrand");
+export const moduleImportWireBrand: unique symbol = Symbol("moduleImportWireBrand");
 export const composedModuleDefinitionBrand: unique symbol = Symbol("composedModuleDefinitionBrand");
 export const optionalDependencyBrand: unique symbol = Symbol("optionalDependency");
 export const refDependencyBrand: unique symbol = Symbol("refDependency");
