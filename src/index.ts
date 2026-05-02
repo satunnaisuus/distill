@@ -21,6 +21,7 @@ export type {
     Token,
     TokenBuilder,
     TokenKey,
+    TokenKeyInput,
     TokenValue,
 } from "./token";
 export { multiToken, qualified, qualifier, token } from "./token";

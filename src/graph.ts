@@ -8,13 +8,18 @@ import type {
     EagerSingleDependencyToken,
     SingleDependencyToken,
 } from "./ref";
-import type { AnyToken, TokenIdentity, TokenKey, TokensNotIn } from "./token";
+import type { AnyToken, HasClassTokenKey, QualifiedToken, TokenIdentity, TokenKey, TokensNotIn } from "./token";
 import type { HasTrue, IfNever, IsExact } from "./type-utils";
 
-export type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> = IsExact<
-    TokenKey<TLeftToken>,
-    TokenKey<TRightToken>
->;
+type RuntimeTokenKeyIdentity<TToken extends AnyToken> =
+    TToken extends QualifiedToken<infer _TBaseToken, infer _TQualifier> ? TokenIdentity<TToken> : TokenKey<TToken>;
+
+export type SameTokenKey<TLeftToken extends AnyToken, TRightToken extends AnyToken> =
+    HasClassTokenKey<TLeftToken> extends true
+        ? false
+        : HasClassTokenKey<TRightToken> extends true
+          ? false
+          : IsExact<RuntimeTokenKeyIdentity<TLeftToken>, RuntimeTokenKeyIdentity<TRightToken>>;
 
 export type BindingScopes = readonly (readonly AnyBinding[])[];
 

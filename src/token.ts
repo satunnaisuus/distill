@@ -1,8 +1,19 @@
 import { qualifiedTokenBrand, qualifierBrand, tokenBrand } from "./brands";
 import type { HasTrue, IsAny, IsExact } from "./type-utils";
 
-type TokenRuntimeKey<TKey> = IsAny<TKey> extends true ? string : TKey extends string ? TKey : never;
+type TokenClassKey = abstract new (...args: any[]) => unknown;
+export type TokenKeyInput = string | symbol | TokenClassKey;
+
+declare const runtimeTokenObjectBrand: unique symbol;
+
+type RuntimeTokenObject<TKey = TokenKeyInput> = object & {
+    readonly [runtimeTokenObjectBrand]: TKey;
+};
+
+type TokenRuntimeKey<TKey> = IsAny<TKey> extends true ? string : TKey extends TokenKeyInput ? TKey : never;
 type QualifierRuntimeKey<TKey> = IsAny<TKey> extends true ? string : TKey extends string ? TKey : never;
+type TokenDefaultValue<TKey> =
+    IsAny<TKey> extends true ? unknown : TKey extends abstract new (...args: any[]) => infer TValue ? TValue : unknown;
 
 type PlainTokenIdentity<TKey> = readonly ["single", TokenRuntimeKey<TKey>];
 type MultiTokenIdentity<TKey> = readonly ["multi", TokenRuntimeKey<TKey>];
@@ -11,6 +22,8 @@ type QualifiedTokenIdentity<TBaseToken extends AnySingleToken, TQualifier extend
     TokenIdentity<TBaseToken>,
     QualifierKey<TQualifier>,
 ];
+type QualifiedTokenKey<TBaseToken extends AnySingleToken, TQualifier extends AnyQualifier> =
+    TokenKey<TBaseToken> extends string ? `${TokenKey<TBaseToken>}:${QualifierKey<TQualifier>}` : string;
 
 type TokenBrand<TKey, TValue, TMulti extends boolean, TIdentity> = {
     readonly [tokenBrand]: {
@@ -33,10 +46,18 @@ type QualifierBrand<TKey> = {
 const multiTokenPrefix = "\u0000distill:multi\u0000";
 const qualifiedTokenPrefix = "\u0000distill:qualified\u0000";
 
-export type Token<TKey = string, TValue = unknown> = TokenRuntimeKey<TKey> &
+type SingleTokenRuntimeValue<TKey> = TokenRuntimeKey<TKey>;
+type MultiTokenRuntimeValue<TKey> =
+    TokenRuntimeKey<TKey> extends string ? string : RuntimeTokenObject<TokenRuntimeKey<TKey>>;
+type QualifiedTokenRuntimeValue<TBaseToken extends AnySingleToken> = TBaseToken extends string
+    ? string
+    : RuntimeTokenObject<TokenKey<TBaseToken>>;
+type AnyRuntimeTokenValue = string | symbol | TokenClassKey | object;
+
+export type Token<TKey = string, TValue = unknown> = SingleTokenRuntimeValue<TKey> &
     TokenBrand<TKey, TValue, false, PlainTokenIdentity<TKey>>;
 
-export type MultiToken<TKey = string, TValue = unknown> = string &
+export type MultiToken<TKey = string, TValue = unknown> = MultiTokenRuntimeValue<TKey> &
     TokenBrand<TKey, TValue, true, MultiTokenIdentity<TKey>>;
 
 export type Qualifier<TKey = string> = QualifierRuntimeKey<TKey> & QualifierBrand<TKey>;
@@ -48,17 +69,17 @@ export type AnyQualifier = string & {
     };
 };
 
-export type TokenBuilder<TKey extends string> = {
-    readonly of: <TValue = unknown>() => Token<TKey, TValue>;
+export type TokenBuilder<TKey extends TokenKeyInput> = {
+    readonly of: <TValue = TokenDefaultValue<TKey>>() => Token<TKey, TValue>;
 };
 
-export type MultiTokenBuilder<TKey extends string> = {
-    readonly of: <TValue = unknown>() => MultiToken<TKey, TValue>;
+export type MultiTokenBuilder<TKey extends TokenKeyInput> = {
+    readonly of: <TValue = TokenDefaultValue<TKey>>() => MultiToken<TKey, TValue>;
 };
 
-export type AnySingleToken = string & {
+export type AnySingleToken = AnyRuntimeTokenValue & {
     readonly [tokenBrand]: {
-        readonly key: string;
+        readonly key: TokenKeyInput;
         readonly type: any;
         readonly anyKey: boolean;
         readonly anyType: boolean;
@@ -66,9 +87,9 @@ export type AnySingleToken = string & {
         readonly identity: unknown;
     };
 };
-export type AnyMultiToken = string & {
+export type AnyMultiToken = AnyRuntimeTokenValue & {
     readonly [tokenBrand]: {
-        readonly key: string;
+        readonly key: TokenKeyInput;
         readonly type: any;
         readonly anyKey: boolean;
         readonly anyType: boolean;
@@ -85,9 +106,9 @@ export type QualifierKey<TQualifier extends AnyQualifier> = TQualifier[typeof qu
 export type QualifiedToken<
     TBaseToken extends AnySingleToken = AnySingleToken,
     TQualifier extends AnyQualifier = AnyQualifier,
-> = string &
+> = QualifiedTokenRuntimeValue<TBaseToken> &
     TokenBrand<
-        `${TokenKey<TBaseToken>}:${QualifierKey<TQualifier>}`,
+        QualifiedTokenKey<TBaseToken, TQualifier>,
         TokenValue<TBaseToken>,
         false,
         QualifiedTokenIdentity<TBaseToken, TQualifier>
@@ -97,6 +118,13 @@ export type QualifiedToken<
             readonly qualifier: TQualifier;
         };
     };
+
+export type HasClassTokenKey<TToken extends AnyToken> =
+    TToken extends QualifiedToken<infer TBaseToken>
+        ? HasClassTokenKey<TBaseToken>
+        : TokenKey<TToken> extends TokenClassKey
+          ? true
+          : false;
 
 export type AnyTokenArray = readonly AnyToken[];
 export type TokenArrayTokens<TTokenArray extends AnyTokenArray> = TTokenArray[number];
@@ -132,6 +160,23 @@ export type TokensNotIn<TTokens extends AnyToken, TCandidates extends AnyToken> 
         : TTokens
     : never;
 
+type RuntimeTokenKey = string | symbol | Function;
+
+type RuntimeTokenMetadata = {
+    readonly key: RuntimeTokenKey;
+    readonly displayKey: string;
+    readonly keyId: string;
+    readonly tokenId: string;
+    readonly multi: boolean;
+    readonly qualified: boolean;
+};
+
+const objectTokenMetadata = new WeakMap<object, RuntimeTokenMetadata>();
+const symbolTokenMetadata = new Map<symbol, RuntimeTokenMetadata>();
+const objectKeyIds = new WeakMap<object, string>();
+const symbolKeyIds = new Map<symbol, string>();
+let nextRuntimeKeyId = 1;
+
 const parseQualifiedToken = (runtimeToken: string): [string, string] => {
     return JSON.parse(runtimeToken.slice(qualifiedTokenPrefix.length)) as [string, string];
 };
@@ -140,59 +185,259 @@ const createQualifiedRuntimeToken = (baseToken: string, qualifierKey: string): s
     return `${qualifiedTokenPrefix}${JSON.stringify([baseToken, qualifierKey])}`;
 };
 
-export const isRuntimeQualifiedToken = (token: string): boolean => {
-    return token.startsWith(qualifiedTokenPrefix);
+const qualifiedRuntimeId = (baseTokenId: string, qualifierKey: string): string => {
+    return `qualified:${JSON.stringify([baseTokenId, qualifierKey])}`;
 };
 
-export const isRuntimeMultiToken = (token: string): boolean => {
-    return token.startsWith(multiTokenPrefix);
+const isClassConstructor = (value: Function): boolean => {
+    return /^class\s/.test(Function.prototype.toString.call(value));
 };
 
-export const tokenKey = <TToken extends AnyToken>(token: TToken): TokenKey<TToken> => {
-    const runtimeToken = token as string;
-
-    if (isRuntimeMultiToken(runtimeToken)) {
-        return runtimeToken.slice(multiTokenPrefix.length) as TokenKey<TToken>;
+const formatTokenKey = (key: RuntimeTokenKey): string => {
+    if (typeof key === "string") {
+        return key;
     }
 
-    if (isRuntimeQualifiedToken(runtimeToken)) {
-        const [baseToken, qualifierKey] = parseQualifiedToken(runtimeToken);
-
-        return `${tokenKey(baseToken as AnyToken)}:${qualifierKey}` as TokenKey<TToken>;
+    if (typeof key === "symbol") {
+        return String(key);
     }
 
-    return runtimeToken as TokenKey<TToken>;
+    return key.name || "<anonymous class>";
 };
 
-const assertTokenKey = (key: string): void => {
-    if (typeof key !== "string") {
-        throw new Error("Token key must be a string");
+const runtimeKeyId = (key: RuntimeTokenKey): string => {
+    if (typeof key === "string") {
+        return `string:${key}`;
     }
 
-    if (key.startsWith(multiTokenPrefix) || key.startsWith(qualifiedTokenPrefix)) {
-        throw new Error("Token key uses a reserved prefix");
+    if (typeof key === "symbol") {
+        const existingId = symbolKeyIds.get(key);
+
+        if (existingId) {
+            return existingId;
+        }
+
+        const keyId = `symbol:${nextRuntimeKeyId++}`;
+
+        symbolKeyIds.set(key, keyId);
+        return keyId;
     }
+
+    const existingId = objectKeyIds.get(key);
+
+    if (existingId) {
+        return existingId;
+    }
+
+    const keyId = `object:${nextRuntimeKeyId++}`;
+
+    objectKeyIds.set(key, keyId);
+    return keyId;
 };
 
-const assertQualifierKey = (key: string): void => {
-    if (typeof key !== "string") {
-        throw new Error("Qualifier key must be a string");
-    }
-};
-
-export const token = <const TKey extends string>(key: TKey): TokenBuilder<TKey> => {
-    assertTokenKey(key);
+const createPlainRuntimeTokenMetadata = (key: RuntimeTokenKey, multi: boolean): RuntimeTokenMetadata => {
+    const keyId = runtimeKeyId(key);
 
     return {
-        of: <TValue = unknown>() => key as Token<TKey, TValue>,
+        key,
+        displayKey: formatTokenKey(key),
+        keyId,
+        tokenId: `${multi ? "multi" : "single"}:${keyId}`,
+        multi,
+        qualified: false,
     };
 };
 
-export const multiToken = <const TKey extends string>(key: TKey): MultiTokenBuilder<TKey> => {
+const createQualifiedRuntimeTokenMetadata = (
+    baseToken: AnySingleToken,
+    currentQualifier: AnyQualifier,
+): RuntimeTokenMetadata => {
+    const baseMetadata = runtimeTokenMetadata(baseToken);
+    const qualifierKey = currentQualifier as string;
+    const displayKey = `${baseMetadata.displayKey}:${qualifierKey}`;
+    const runtimeId = qualifiedRuntimeId(baseMetadata.tokenId, qualifierKey);
+
+    return {
+        key: displayKey,
+        displayKey,
+        keyId: runtimeId,
+        tokenId: runtimeId,
+        multi: false,
+        qualified: true,
+    };
+};
+
+const registerDirectTokenMetadata = (key: TokenKeyInput, metadata: RuntimeTokenMetadata): void => {
+    if (typeof key === "symbol") {
+        symbolTokenMetadata.set(key, metadata);
+        return;
+    }
+
+    if (typeof key === "function") {
+        objectTokenMetadata.set(key, metadata);
+    }
+};
+
+const runtimeTokenMetadataFromString = (runtimeToken: string): RuntimeTokenMetadata => {
+    if (runtimeToken.startsWith(multiTokenPrefix)) {
+        return createPlainRuntimeTokenMetadata(runtimeToken.slice(multiTokenPrefix.length), true);
+    }
+
+    if (runtimeToken.startsWith(qualifiedTokenPrefix)) {
+        const [baseToken, qualifierKey] = parseQualifiedToken(runtimeToken);
+        const baseMetadata = runtimeTokenMetadata(baseToken as AnySingleToken);
+        const displayKey = `${baseMetadata.displayKey}:${qualifierKey}`;
+        const runtimeId = qualifiedRuntimeId(baseMetadata.tokenId, qualifierKey);
+
+        return {
+            key: displayKey,
+            displayKey,
+            keyId: runtimeId,
+            tokenId: runtimeId,
+            multi: false,
+            qualified: true,
+        };
+    }
+
+    return createPlainRuntimeTokenMetadata(runtimeToken, false);
+};
+
+const runtimeTokenMetadata = (currentToken: AnyToken): RuntimeTokenMetadata => {
+    if (typeof currentToken === "string") {
+        return runtimeTokenMetadataFromString(currentToken);
+    }
+
+    if (typeof currentToken === "symbol") {
+        const existingMetadata = symbolTokenMetadata.get(currentToken);
+
+        if (existingMetadata) {
+            return existingMetadata;
+        }
+
+        const metadata = createPlainRuntimeTokenMetadata(currentToken, false);
+
+        symbolTokenMetadata.set(currentToken, metadata);
+        return metadata;
+    }
+
+    const existingMetadata = objectTokenMetadata.get(currentToken);
+
+    if (existingMetadata) {
+        return existingMetadata;
+    }
+
+    if (typeof currentToken === "function") {
+        const metadata = createPlainRuntimeTokenMetadata(currentToken, false);
+
+        objectTokenMetadata.set(currentToken, metadata);
+        return metadata;
+    }
+
+    throw new Error("Token must be created with token, multiToken, or qualified");
+};
+
+export const isRuntimeToken = (value: unknown): value is AnyToken => {
+    if (typeof value === "string" || typeof value === "symbol") {
+        return true;
+    }
+
+    if (typeof value === "function") {
+        return objectTokenMetadata.has(value) || isClassConstructor(value);
+    }
+
+    if (typeof value === "object" && value !== null) {
+        return objectTokenMetadata.has(value);
+    }
+
+    return false;
+};
+
+export const isRuntimeQualifiedToken = (currentToken: unknown): boolean => {
+    if (typeof currentToken === "string") {
+        return currentToken.startsWith(qualifiedTokenPrefix);
+    }
+
+    if ((typeof currentToken === "object" && currentToken !== null) || typeof currentToken === "function") {
+        return objectTokenMetadata.get(currentToken)?.qualified ?? false;
+    }
+
+    return false;
+};
+
+export const isRuntimeMultiToken = (currentToken: unknown): boolean => {
+    if (typeof currentToken === "string") {
+        return currentToken.startsWith(multiTokenPrefix);
+    }
+
+    if (typeof currentToken === "symbol") {
+        return symbolTokenMetadata.get(currentToken)?.multi ?? false;
+    }
+
+    if ((typeof currentToken === "object" && currentToken !== null) || typeof currentToken === "function") {
+        return objectTokenMetadata.get(currentToken)?.multi ?? false;
+    }
+
+    return false;
+};
+
+export const tokenKey = <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
+    return runtimeTokenMetadata(currentToken).key as TokenKey<TToken>;
+};
+
+export const tokenDisplayKey = (currentToken: AnyToken): string => {
+    return runtimeTokenMetadata(currentToken).displayKey;
+};
+
+export const tokenKeyRuntimeId = (currentToken: AnyToken): string => {
+    return runtimeTokenMetadata(currentToken).keyId;
+};
+
+export const tokenRuntimeId = (currentToken: AnyToken): string => {
+    return runtimeTokenMetadata(currentToken).tokenId;
+};
+
+function assertTokenKey(key: unknown): asserts key is TokenKeyInput {
+    if (typeof key !== "string" && typeof key !== "symbol" && typeof key !== "function") {
+        throw new Error("Token key must be a string, symbol, or class");
+    }
+
+    if (typeof key === "string" && (key.startsWith(multiTokenPrefix) || key.startsWith(qualifiedTokenPrefix))) {
+        throw new Error("Token key uses a reserved prefix");
+    }
+}
+
+function assertQualifierKey(key: string): void {
+    if (typeof key !== "string") {
+        throw new Error("Qualifier key must be a string");
+    }
+}
+
+export const token = <const TKey extends TokenKeyInput>(key: TKey): TokenBuilder<TKey> => {
+    assertTokenKey(key);
+
+    const metadata = createPlainRuntimeTokenMetadata(key, false);
+    registerDirectTokenMetadata(key, metadata);
+
+    return {
+        of: <TValue = TokenDefaultValue<TKey>>() => key as Token<TKey, TValue>,
+    };
+};
+
+export const multiToken = <const TKey extends TokenKeyInput>(key: TKey): MultiTokenBuilder<TKey> => {
     assertTokenKey(key);
 
     return {
-        of: <TValue = unknown>() => `${multiTokenPrefix}${key}` as MultiToken<TKey, TValue>,
+        of: <TValue = TokenDefaultValue<TKey>>() => {
+            if (typeof key === "string") {
+                return `${multiTokenPrefix}${key}` as MultiToken<TKey, TValue>;
+            }
+
+            const metadata = createPlainRuntimeTokenMetadata(key, true);
+            const runtimeToken = {};
+
+            objectTokenMetadata.set(runtimeToken, metadata);
+            return runtimeToken as MultiToken<TKey, TValue>;
+        },
     };
 };
 
@@ -206,14 +451,22 @@ export const qualified = <const TBaseToken extends AnySingleToken, const TQualif
     baseToken: TBaseToken,
     currentQualifier: TQualifier,
 ): QualifiedToken<TBaseToken, TQualifier> => {
-    if (isRuntimeMultiToken(baseToken as string)) {
+    if (isRuntimeMultiToken(baseToken)) {
         throw new Error("qualified(...) only accepts single tokens");
     }
 
     assertQualifierKey(currentQualifier as string);
 
-    return createQualifiedRuntimeToken(baseToken as string, currentQualifier as string) as QualifiedToken<
-        TBaseToken,
-        TQualifier
-    >;
+    if (typeof baseToken === "string") {
+        return createQualifiedRuntimeToken(baseToken, currentQualifier as string) as QualifiedToken<
+            TBaseToken,
+            TQualifier
+        >;
+    }
+
+    const metadata = createQualifiedRuntimeTokenMetadata(baseToken, currentQualifier);
+    const runtimeToken = {};
+
+    objectTokenMetadata.set(runtimeToken, metadata);
+    return runtimeToken as QualifiedToken<TBaseToken, TQualifier>;
 };

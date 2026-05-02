@@ -2,6 +2,7 @@ import type { AnyAllToken } from "./all";
 import { optionalDependencyBrand } from "./brands";
 import type { AnyRefToken } from "./ref";
 import type { AnySingleToken } from "./token";
+import { isRuntimeToken } from "./token";
 
 export type OptionalDependencyReference = AnySingleToken | AnyRefToken | AnyAllToken;
 
@@ -26,9 +27,9 @@ export function optional<TDependency extends OptionalDependencyReference>(
     dependencyOrFactory: TDependency | (() => TDependency),
 ): OptionalToken<TDependency> {
     const resolveDependency =
-        typeof dependencyOrFactory === "function"
+        typeof dependencyOrFactory === "function" && !isRuntimeToken(dependencyOrFactory)
             ? (dependencyOrFactory as () => TDependency)
-            : () => dependencyOrFactory;
+            : () => dependencyOrFactory as TDependency;
 
     return {
         [optionalDependencyBrand]: true,

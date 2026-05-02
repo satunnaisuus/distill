@@ -17,6 +17,31 @@ type RuntimeContainerForTest = {
 };
 
 describe("defineContainer.module", () => {
+    it("supports symbol and class tokens in module imports and exports", () => {
+        class Config {
+            readonly port = 3000;
+        }
+
+        const ConfigToken = token(Config).of();
+        const consumerKey = Symbol("Consumer");
+        const Consumer = token(consumerKey).of<{ readonly config: Config }>();
+        const ConsumerModule = defineModule({
+            imports: [ConfigToken],
+            bindings: [exported(bind(Consumer, { config: ConfigToken }, ({ config }) => ({ config })))],
+        });
+        const ConfigModule = defineModule({
+            bindings: [exported(bind.class(ConfigToken, Config))],
+        });
+        const App = composeModules({
+            modules: [ConsumerModule, ConfigModule],
+            exports: [Consumer],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Consumer).config).toBeInstanceOf(Config);
+    });
+
     it("wires module imports to different qualified providers", () => {
         const Logger = token("Logger").of<{ readonly name: string }>();
         const Json = qualifier("json");

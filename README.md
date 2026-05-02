@@ -475,6 +475,7 @@ Disposing a scope closes only instances owned by that scope. The request scope c
 
 ```ts
 token(key).of<T>()
+multiToken(key).of<T>()
 bind(token, factory, options?)
 bind(token, dependencies, factory, options?)
 bind.value(token, value, options?)
@@ -522,16 +523,24 @@ Creates a token with a runtime key and a TypeScript value type.
 import { token } from "@satunnaisuus/distill";
 
 const Config = token("Config").of<{ readonly port: number }>();
+const ConfigKey = Symbol("Config");
+const SymbolConfig = token(ConfigKey).of<{ readonly port: number }>();
 const UnknownValue = token("UnknownValue").of();
+
+class Logger {}
+
+const LoggerToken = token(Logger).of();
 ```
 
-The token runtime value is its key:
+For single tokens, the token runtime value is its key:
 
 ```ts
 Config === "Config";
+SymbolConfig === ConfigKey;
+LoggerToken === Logger;
 ```
 
-Each token keeps its literal key and declared value type. Token keys must be strings. If `T` is omitted, the token value type is `unknown`.
+Each token keeps its literal key and declared value type. Token keys can be strings, symbols, or classes. If `T` is omitted, class-keyed tokens use the class instance type; other tokens use `unknown`.
 
 ### `bind(token, factory, options?)`
 

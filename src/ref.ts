@@ -2,6 +2,7 @@ import type { AllToken, AnyAllToken } from "./all";
 import { refDependencyBrand } from "./brands";
 import type { AnyOptionalToken, OptionalToken } from "./optional";
 import type { AnyMultiToken, AnySingleToken } from "./token";
+import { isRuntimeToken } from "./token";
 
 export type Ref<TValue> = {
     readonly value: TValue;
@@ -55,7 +56,9 @@ export function ref<TToken extends AnySingleToken>(dependency: TToken): RefToken
 export function ref<TToken extends AnySingleToken>(dependencyFactory: () => TToken): RefToken<TToken>;
 export function ref<TToken extends AnySingleToken>(dependencyOrFactory: TToken | (() => TToken)): RefToken<TToken> {
     const resolveToken =
-        typeof dependencyOrFactory === "function" ? (dependencyOrFactory as () => TToken) : () => dependencyOrFactory;
+        typeof dependencyOrFactory === "function" && !isRuntimeToken(dependencyOrFactory)
+            ? (dependencyOrFactory as () => TToken)
+            : () => dependencyOrFactory as TToken;
 
     return {
         [refDependencyBrand]: true,

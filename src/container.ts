@@ -10,7 +10,7 @@ import {
 } from "./dependency-tracker";
 import { disposeScope } from "./disposal";
 import { assertDisposeOption } from "./dispose-option";
-import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes } from "./graph";
+import type { BindingScopes, BindingTokens, ResolveBindingContextInScopes, SameTokenKey } from "./graph";
 import type {
     AnyComposedModuleDefinition,
     AnyModuleDefinition,
@@ -75,8 +75,8 @@ import type {
     TokensNotIn,
     TokenValue,
 } from "./token";
-import { isRuntimeMultiToken, tokenKey } from "./token";
-import type { IfNever, IsExact, IsUnion } from "./type-utils";
+import { isRuntimeMultiToken, tokenDisplayKey, tokenKey, tokenKeyRuntimeId, tokenRuntimeId } from "./token";
+import type { HasTrue, IfNever, IsExact, IsUnion } from "./type-utils";
 import type {
     MissingDependencyKeysFromAllTokenBindings,
     MissingDependencyKeysFromToken,
@@ -196,6 +196,10 @@ type HasExactToken<TTokens extends AnyToken, TToken extends AnyToken> = IfNever<
     TokensNotIn<TToken, TTokens>,
     true,
     false
+>;
+
+type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
+    TTokens extends AnyToken ? SameTokenKey<TTokens, TToken> : false
 >;
 
 type HasMultipleExactModules<
@@ -323,7 +327,7 @@ type DuplicateOverrideTokenKeys<
             ...infer TRemainingOverrides extends readonly AnyBindingOverride[],
         ]
       ? OverrideOperationToken<TCurrentOverride> extends infer TCurrentToken extends AnyToken
-          ? HasExactToken<TSeenTokens, TCurrentToken> extends true
+          ? HasTokenWithSameKey<TSeenTokens, TCurrentToken> extends true
               ? TokenKey<TCurrentToken> | DuplicateOverrideTokenKeys<TRemainingOverrides, TSeenTokens>
               : DuplicateOverrideTokenKeys<TRemainingOverrides, TSeenTokens | TCurrentToken>
           : never
@@ -941,19 +945,21 @@ const createTokenListContext = <TTokenArray extends AnyTokenArray>(
     tokens: TTokenArray,
     options?: MutableTokenListContextOptions,
 ): TokenListContext => {
-    const tokenListKeys = new Set<string>();
-    const tokenListRuntimeTokens = new Set<string>();
+    const tokenListKeyIds = new Set<string>();
+    const tokenListRuntimeTokenIds = new Set<string>();
 
     const registerInitialToken = <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
-        const currentRuntimeToken = currentToken as string;
+        const currentTokenDisplayKey = tokenDisplayKey(currentToken);
+        const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
+        const currentTokenId = tokenRuntimeId(currentToken);
         const currentTokenKey = tokenKey(currentToken);
 
-        if (tokenListKeys.has(currentTokenKey)) {
-            throw new Error(`Token "${currentTokenKey}" is already included in the token list`);
+        if (tokenListKeyIds.has(currentTokenKeyId)) {
+            throw new Error(`Token "${currentTokenDisplayKey}" is already included in the token list`);
         }
 
-        tokenListKeys.add(currentTokenKey);
-        tokenListRuntimeTokens.add(currentRuntimeToken);
+        tokenListKeyIds.add(currentTokenKeyId);
+        tokenListRuntimeTokenIds.add(currentTokenId);
 
         return currentTokenKey;
     };
@@ -964,29 +970,32 @@ const createTokenListContext = <TTokenArray extends AnyTokenArray>(
 
     return {
         assertTokenIsInTokenList: <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
-            const currentRuntimeToken = currentToken as string;
+            const currentTokenDisplayKey = tokenDisplayKey(currentToken);
+            const currentTokenId = tokenRuntimeId(currentToken);
             const currentTokenKey = tokenKey(currentToken);
 
-            if (!tokenListRuntimeTokens.has(currentRuntimeToken)) {
-                throw new Error(`Token "${currentTokenKey}" is not included in the token list`);
+            if (!tokenListRuntimeTokenIds.has(currentTokenId)) {
+                throw new Error(`Token "${currentTokenDisplayKey}" is not included in the token list`);
             }
 
             return currentTokenKey;
         },
         registerToken: <TToken extends AnyToken>(currentToken: TToken): TokenKey<TToken> => {
-            const currentRuntimeToken = currentToken as string;
+            const currentTokenDisplayKey = tokenDisplayKey(currentToken);
+            const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
+            const currentTokenId = tokenRuntimeId(currentToken);
             const currentTokenKey = tokenKey(currentToken);
 
-            if (tokenListRuntimeTokens.has(currentRuntimeToken)) {
+            if (tokenListRuntimeTokenIds.has(currentTokenId)) {
                 return currentTokenKey;
             }
 
             if (!options?.allowUnknownTokens) {
-                throw new Error(`Token "${currentTokenKey}" is not included in the token list`);
+                throw new Error(`Token "${currentTokenDisplayKey}" is not included in the token list`);
             }
 
-            tokenListKeys.add(currentTokenKey);
-            tokenListRuntimeTokens.add(currentRuntimeToken);
+            tokenListKeyIds.add(currentTokenKeyId);
+            tokenListRuntimeTokenIds.add(currentTokenId);
 
             return currentTokenKey;
         },
@@ -994,7 +1003,7 @@ const createTokenListContext = <TTokenArray extends AnyTokenArray>(
 };
 
 const isMultiToken = (currentToken: AnyToken): boolean => {
-    return isRuntimeMultiToken(currentToken as string);
+    return isRuntimeMultiToken(currentToken);
 };
 
 const assertSingleTokenKey = (tokenKey: string, currentToken: AnyToken): void => {
@@ -1028,11 +1037,11 @@ const createCircularDependencyError = (action: "registering" | "resolving", path
 const collectVisibleTokenReferences = (scope: RuntimeScope): ReadonlyMap<string, RuntimeTokenReference> => {
     const visibleTokenReferences = new Map(scope.parent ? collectVisibleTokenReferences(scope.parent) : undefined);
 
-    for (const [tokenKey, bindings] of scope.bindings) {
+    for (const [tokenKeyId, bindings] of scope.bindings) {
         for (const binding of bindings) {
-            const tokenReference = { tokenKey, tokenId: binding.tokenId };
+            const tokenReference = { tokenKey: binding.tokenKey, tokenKeyId, tokenId: binding.tokenId };
 
-            visibleTokenReferences.set(`${tokenKey}\u0000${binding.tokenId}`, tokenReference);
+            visibleTokenReferences.set(`${tokenKeyId}\u0000${binding.tokenId}`, tokenReference);
         }
     }
 
@@ -1086,7 +1095,7 @@ const assertNoCircularDependencies = (scope: RuntimeScope): void => {
     ): void => {
         const multibindings = findBindings(
             resolutionScope,
-            currentToken.tokenKey,
+            currentToken.tokenKeyId,
             moduleContextId,
             true,
             currentToken.tokenId,
@@ -1102,7 +1111,7 @@ const assertNoCircularDependencies = (scope: RuntimeScope): void => {
 
         const resolvedBinding = findBinding(
             resolutionScope,
-            currentToken.tokenKey,
+            currentToken.tokenKeyId,
             moduleContextId,
             false,
             currentToken.tokenId,
@@ -1141,7 +1150,8 @@ const getEagerDependencyReferences = (
 
         if (isAllDependency(dependency)) {
             const dependencyToken = dependency.resolveToken();
-            const dependencyTokenKey = tokenListContext.registerToken(dependencyToken);
+            tokenListContext.registerToken(dependencyToken);
+            const dependencyTokenKey = tokenDisplayKey(dependencyToken);
 
             if (!isMultiToken(dependencyToken)) {
                 throw new Error(`Token "${dependencyTokenKey}" is not a multibind token`);
@@ -1149,12 +1159,14 @@ const getEagerDependencyReferences = (
 
             eagerDependencies.push({
                 tokenKey: dependencyTokenKey,
+                tokenKeyId: tokenKeyRuntimeId(dependencyToken),
                 tokenId: tokenRuntimeId(dependencyToken),
             });
             continue;
         }
 
-        const dependencyTokenKey = tokenListContext.registerToken(dependency);
+        tokenListContext.registerToken(dependency);
+        const dependencyTokenKey = tokenDisplayKey(dependency);
 
         if (isMultiToken(dependency)) {
             throw new Error(`Multibind token "${dependencyTokenKey}" must be resolved with resolveAll`);
@@ -1162,6 +1174,7 @@ const getEagerDependencyReferences = (
 
         eagerDependencies.push({
             tokenKey: dependencyTokenKey,
+            tokenKeyId: tokenKeyRuntimeId(dependency),
             tokenId: tokenRuntimeId(dependency),
         });
     }
@@ -1178,11 +1191,20 @@ const resolveRefDependency = (
     moduleContextId: number,
 ): unknown => {
     const dependencyToken = dependency.resolveToken();
-    const dependencyTokenKey = tokenListContext.registerToken(dependencyToken);
+    tokenListContext.registerToken(dependencyToken);
+    const dependencyTokenKey = tokenDisplayKey(dependencyToken);
+    const dependencyTokenKeyId = tokenKeyRuntimeId(dependencyToken);
     const dependencyTokenId = tokenRuntimeId(dependencyToken);
     assertSingleTokenKey(dependencyTokenKey, dependencyToken);
     if (dependencyTracker) {
-        addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey, dependencyTokenId, moduleContextId);
+        addRefDependencyFrame(
+            dependencyTracker,
+            scope,
+            dependencyTokenKey,
+            dependencyTokenKeyId,
+            dependencyTokenId,
+            moduleContextId,
+        );
     }
     return getOrCreateRefInstance(scope, dependencyToken, dependencyTracker, moduleContextId);
 };
@@ -1219,7 +1241,8 @@ const resolveDependencyValue = (
 
     if (isAllDependency(dependency)) {
         const dependencyToken = dependency.resolveToken();
-        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        const dependencyTokenKey = tokenDisplayKey(dependencyToken);
         assertMultiTokenKey(dependencyTokenKey, dependencyToken);
         return resolveAllActualWithOwnership(
             scope,
@@ -1259,27 +1282,38 @@ const resolveOptionalDependencyValue = (
 
     if (isRefDependency(dependency)) {
         const dependencyToken = dependency.resolveToken();
-        const dependencyTokenKey = tokenListContext.registerToken(dependencyToken);
+        tokenListContext.registerToken(dependencyToken);
+        const dependencyTokenKey = tokenDisplayKey(dependencyToken);
+        const dependencyTokenKeyId = tokenKeyRuntimeId(dependencyToken);
         const dependencyTokenId = tokenRuntimeId(dependencyToken);
         assertSingleTokenKey(dependencyTokenKey, dependencyToken);
 
-        if (!findBinding(scope, dependencyTokenKey, moduleContextId, false, dependencyTokenId)) {
+        if (!findBinding(scope, dependencyTokenKeyId, moduleContextId, false, dependencyTokenId)) {
             return undefined;
         }
 
         if (dependencyTracker) {
-            addRefDependencyFrame(dependencyTracker, scope, dependencyTokenKey, dependencyTokenId, moduleContextId);
+            addRefDependencyFrame(
+                dependencyTracker,
+                scope,
+                dependencyTokenKey,
+                dependencyTokenKeyId,
+                dependencyTokenId,
+                moduleContextId,
+            );
         }
         return getOrCreateRefInstance(scope, dependencyToken, dependencyTracker, moduleContextId);
     }
 
     if (isAllDependency(dependency)) {
         const dependencyToken = dependency.resolveToken();
-        const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        tokenListContext.assertTokenIsInTokenList(dependencyToken);
+        const dependencyTokenKey = tokenDisplayKey(dependencyToken);
+        const dependencyTokenKeyId = tokenKeyRuntimeId(dependencyToken);
         const dependencyTokenId = tokenRuntimeId(dependencyToken);
         assertMultiTokenKey(dependencyTokenKey, dependencyToken);
 
-        const resolvedBindings = findBindings(scope, dependencyTokenKey, moduleContextId, true, dependencyTokenId);
+        const resolvedBindings = findBindings(scope, dependencyTokenKeyId, moduleContextId, true, dependencyTokenId);
 
         if (resolvedBindings.length === 0) {
             return undefined;
@@ -1296,11 +1330,13 @@ const resolveOptionalDependencyValue = (
         });
     }
 
-    const dependencyTokenKey = tokenListContext.assertTokenIsInTokenList(dependency);
+    tokenListContext.assertTokenIsInTokenList(dependency);
+    const dependencyTokenKey = tokenDisplayKey(dependency);
+    const dependencyTokenKeyId = tokenKeyRuntimeId(dependency);
     const dependencyTokenId = tokenRuntimeId(dependency);
     assertSingleTokenKey(dependencyTokenKey, dependency);
 
-    if (!findBinding(scope, dependencyTokenKey, moduleContextId, false, dependencyTokenId)) {
+    if (!findBinding(scope, dependencyTokenKeyId, moduleContextId, false, dependencyTokenId)) {
         return undefined;
     }
 
@@ -1376,6 +1412,8 @@ const createRuntimeBinding = (
 
     return {
         id: createRuntimeBindingId(),
+        tokenKey: tokenDisplayKey(binding.token),
+        tokenKeyId: tokenKeyRuntimeId(binding.token),
         tokenId: tokenRuntimeId(binding.token),
         factory,
         lifetime: getBindingLifetime(binding),
@@ -1394,10 +1432,12 @@ const hasCachedInstance = <TToken extends AnyToken>(
     options?: ResolveOptions,
     moduleContextId = defaultModuleContextId,
 ): boolean => {
-    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    scope.context.assertTokenIsInTokenList(currentToken);
+    const currentTokenKey = tokenDisplayKey(currentToken);
+    const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
     const currentTokenId = tokenRuntimeId(currentToken);
     assertSingleTokenKey(currentTokenKey, currentToken);
-    const resolvedBinding = findBinding(scope, currentTokenKey, moduleContextId, false, currentTokenId);
+    const resolvedBinding = findBinding(scope, currentTokenKeyId, moduleContextId, false, currentTokenId);
 
     if (!resolvedBinding) {
         return false;
@@ -1534,10 +1574,12 @@ const resolveActualWithOwnership = <TToken extends AnyToken>(
     options?: ResolveOptions,
     moduleContextId = defaultModuleContextId,
 ): RuntimeResolutionResult<TokenValue<TToken>> => {
-    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    scope.context.assertTokenIsInTokenList(currentToken);
+    const currentTokenKey = tokenDisplayKey(currentToken);
+    const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
     const currentTokenId = tokenRuntimeId(currentToken);
     assertSingleTokenKey(currentTokenKey, currentToken);
-    const resolvedBinding = findBinding(scope, currentTokenKey, moduleContextId, false, currentTokenId);
+    const resolvedBinding = findBinding(scope, currentTokenKeyId, moduleContextId, false, currentTokenId);
 
     if (!resolvedBinding) {
         throw new Error(`Service "${currentTokenKey}" is not registered in the container`);
@@ -1562,12 +1604,14 @@ const resolveAllActualWithOwnership = <TToken extends AnyToken>(
     options?: ResolveOptions,
     moduleContextId = defaultModuleContextId,
 ): Array<RuntimeResolutionResult<TokenValue<TToken>>> => {
-    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    scope.context.assertTokenIsInTokenList(currentToken);
+    const currentTokenKey = tokenDisplayKey(currentToken);
+    const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
     const currentTokenId = tokenRuntimeId(currentToken);
     assertMultiTokenKey(currentTokenKey, currentToken);
     assertScopeIsActive(scope);
 
-    return findBindings(scope, currentTokenKey, moduleContextId, true, currentTokenId).map((resolvedBinding) => {
+    return findBindings(scope, currentTokenKeyId, moduleContextId, true, currentTokenId).map((resolvedBinding) => {
         return resolveBindingWithOwnership<TToken>(scope, currentTokenKey, resolvedBinding, options, moduleContextId);
     });
 };
@@ -1587,7 +1631,9 @@ const getOrCreateRefInstance = <TToken extends AnyToken>(
     dependencyTracker: RuntimeDependencyTracker | undefined,
     moduleContextId = defaultModuleContextId,
 ): Ref<TokenValue<TToken>> => {
-    const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+    scope.context.assertTokenIsInTokenList(currentToken);
+    const currentTokenKey = tokenDisplayKey(currentToken);
+    const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
     const currentTokenId = tokenRuntimeId(currentToken);
     assertSingleTokenKey(currentTokenKey, currentToken);
     const refCacheKey = getRuntimeRefCacheKey(moduleContextId, currentTokenId);
@@ -1602,7 +1648,7 @@ const getOrCreateRefInstance = <TToken extends AnyToken>(
 
     const refInstance: Ref<TokenValue<TToken>> = {
         get value() {
-            const resolvedBinding = findBinding(scope, currentTokenKey, moduleContextId, false, currentTokenId);
+            const resolvedBinding = findBinding(scope, currentTokenKeyId, moduleContextId, false, currentTokenId);
             const isInitializing =
                 resolvedBinding &&
                 findResolutionFrameIndex(
@@ -1646,6 +1692,7 @@ type RegisterBindingsOptions = {
 const assertNoVisibleTokenKindCollision = (
     scope: RuntimeScope,
     tokenKeyToRegister: string,
+    tokenKeyIdToRegister: string,
     bindingIsMultiToken: boolean,
     moduleContextId: number,
     visibleInAllModuleContexts: boolean,
@@ -1662,7 +1709,7 @@ const assertNoVisibleTokenKindCollision = (
         : [moduleContextId, ...(visibleModuleContextIds ?? [])];
 
     for (const currentModuleContextId of new Set(moduleContextIds)) {
-        const visibleBindings = findBindings(scope, tokenKeyToRegister, currentModuleContextId);
+        const visibleBindings = findBindings(scope, tokenKeyIdToRegister, currentModuleContextId);
 
         if (visibleBindings.some(({ binding }) => binding.isMultiToken !== bindingIsMultiToken)) {
             throw new Error(`Token "${tokenKeyToRegister}" is already included in the token list`);
@@ -1688,20 +1735,28 @@ const registerBindings = (
             throw new Error("Bindings must be created with bind");
         }
 
-        const bindingTokenKey = scope.context.registerToken(binding.token);
+        scope.context.registerToken(binding.token);
+        const bindingTokenKey = tokenDisplayKey(binding.token);
+        const bindingTokenKeyId = tokenKeyRuntimeId(binding.token);
+        const bindingTokenId = tokenRuntimeId(binding.token);
         const bindingIsMultiToken = isMultiToken(binding.token);
-        const existingBindings = scope.bindings.get(bindingTokenKey);
+        const existingBindings = scope.bindings.get(bindingTokenKeyId);
 
         assertNoVisibleTokenKindCollision(
             scope,
             bindingTokenKey,
+            bindingTokenKeyId,
             bindingIsMultiToken,
             moduleContextId,
             visibleInAllModuleContexts,
             visibleModuleContextIds,
         );
 
-        if (!bindingIsMultiToken && existingBindings && !options?.allowDuplicateSingleBindings) {
+        if (
+            !bindingIsMultiToken &&
+            existingBindings?.some((existingBinding) => existingBinding.tokenId === bindingTokenId) &&
+            !options?.allowDuplicateSingleBindings
+        ) {
             throw new Error(`Service "${bindingTokenKey}" is already registered in the container`);
         }
 
@@ -1718,7 +1773,7 @@ const registerBindings = (
         if (existingBindings) {
             existingBindings.push(runtimeBinding);
         } else {
-            scope.bindings.set(bindingTokenKey, [runtimeBinding]);
+            scope.bindings.set(bindingTokenKeyId, [runtimeBinding]);
         }
     }
 
@@ -1855,13 +1910,15 @@ const createRuntimeContainerForScope = (scope: RuntimeScope, publicAccess?: Runt
             return scope.disposed;
         },
         resolve(currentToken) {
-            const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+            scope.context.assertTokenIsInTokenList(currentToken);
+            const currentTokenKey = tokenDisplayKey(currentToken);
             assertSingleTokenKey(currentTokenKey, currentToken);
             assertPublicSingleTokenId(publicAccess, tokenRuntimeId(currentToken), currentTokenKey);
             return resolveActual(scope, currentToken, undefined, moduleContextId);
         },
         resolveAll(currentToken) {
-            const currentTokenKey = scope.context.assertTokenIsInTokenList(currentToken);
+            scope.context.assertTokenIsInTokenList(currentToken);
+            const currentTokenKey = tokenDisplayKey(currentToken);
             assertMultiTokenKey(currentTokenKey, currentToken);
             assertPublicMultiTokenId(publicAccess, tokenRuntimeId(currentToken), currentTokenKey);
             return resolveAllActual(scope, currentToken, moduleContextId);
@@ -1888,21 +1945,21 @@ const createRootScope = (tokenListContext: TokenListContext, moduleGraph?: Runti
 };
 
 const collectSingleBindingKeys = (tokenListContext: TokenListContext, bindings: readonly AnyBinding[]): Set<string> => {
-    const bindingKeys = new Set<string>();
+    const bindingTokenIds = new Set<string>();
 
     for (const binding of bindings) {
         if (!isBinding(binding)) {
             throw new Error("Bindings must be created with bind");
         }
 
-        const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+        tokenListContext.assertTokenIsInTokenList(binding.token);
 
         if (!isMultiToken(binding.token)) {
-            bindingKeys.add(bindingTokenKey);
+            bindingTokenIds.add(tokenRuntimeId(binding.token));
         }
     }
 
-    return bindingKeys;
+    return bindingTokenIds;
 };
 
 const applyBindingOverrides = (
@@ -1923,51 +1980,57 @@ const applyBindingOverrides = (
                 throw new Error("Override bindings must be created with bind");
             }
 
-            const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+            tokenListContext.assertTokenIsInTokenList(binding.token);
+            const bindingTokenKey = tokenDisplayKey(binding.token);
+            const bindingTokenId = tokenRuntimeId(binding.token);
 
             if (isMultiToken(binding.token)) {
                 throw new Error(`Multibind token "${bindingTokenKey}" must be overridden with overrideAll`);
             }
 
-            if (!singleBindingKeys.has(bindingTokenKey)) {
+            if (!singleBindingKeys.has(bindingTokenId)) {
                 throw new Error(`Service "${bindingTokenKey}" is not registered in the container definition`);
             }
 
-            if (singleOverrides.has(bindingTokenKey) || singleUnbinds.has(bindingTokenKey)) {
+            if (singleOverrides.has(bindingTokenId) || singleUnbinds.has(bindingTokenId)) {
                 throw new Error(`Service "${bindingTokenKey}" is already overridden`);
             }
 
-            singleOverrides.set(bindingTokenKey, binding);
+            singleOverrides.set(bindingTokenId, binding);
             continue;
         }
 
         if (isBindingUnbind(currentOverride)) {
-            const unbindTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            const unbindTokenKey = tokenDisplayKey(currentOverride.token);
+            const unbindTokenId = tokenRuntimeId(currentOverride.token);
 
             if (isMultiToken(currentOverride.token)) {
                 throw new Error(`Multibind token "${unbindTokenKey}" must be removed with overrideAll`);
             }
 
-            if (!singleBindingKeys.has(unbindTokenKey)) {
+            if (!singleBindingKeys.has(unbindTokenId)) {
                 throw new Error(`Service "${unbindTokenKey}" is not registered in the container definition`);
             }
 
-            if (singleOverrides.has(unbindTokenKey) || singleUnbinds.has(unbindTokenKey)) {
+            if (singleOverrides.has(unbindTokenId) || singleUnbinds.has(unbindTokenId)) {
                 throw new Error(`Service "${unbindTokenKey}" is already overridden`);
             }
 
-            singleUnbinds.add(unbindTokenKey);
+            singleUnbinds.add(unbindTokenId);
             continue;
         }
 
         if (isBindingOverrideAll(currentOverride)) {
-            const overrideTokenKey = tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            tokenListContext.assertTokenIsInTokenList(currentOverride.token);
+            const overrideTokenKey = tokenDisplayKey(currentOverride.token);
+            const overrideTokenId = tokenRuntimeId(currentOverride.token);
 
             if (!isMultiToken(currentOverride.token)) {
                 throw new Error(`Token "${overrideTokenKey}" is not a multibind token`);
             }
 
-            if (multiOverrides.has(overrideTokenKey)) {
+            if (multiOverrides.has(overrideTokenId)) {
                 throw new Error(`Multibind token "${overrideTokenKey}" is already overridden`);
             }
 
@@ -1980,16 +2043,17 @@ const applyBindingOverrides = (
                     throw new Error("overrideAll bindings must be created with bind");
                 }
 
-                const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+                tokenListContext.assertTokenIsInTokenList(binding.token);
+                const bindingTokenId = tokenRuntimeId(binding.token);
 
-                if (bindingTokenKey !== overrideTokenKey || !isMultiToken(binding.token)) {
+                if (bindingTokenId !== overrideTokenId || !isMultiToken(binding.token)) {
                     throw new Error(
                         `overrideAll for "${overrideTokenKey}" only accepts bindings for the same multibind token`,
                     );
                 }
             }
 
-            multiOverrides.set(overrideTokenKey, currentOverride.bindings);
+            multiOverrides.set(overrideTokenId, currentOverride.bindings);
             continue;
         }
 
@@ -1999,16 +2063,17 @@ const applyBindingOverrides = (
     const resolvedBindings: AnyBinding[] = [];
 
     for (const binding of bindings) {
-        const bindingTokenKey = tokenListContext.assertTokenIsInTokenList(binding.token);
+        tokenListContext.assertTokenIsInTokenList(binding.token);
+        const bindingTokenId = tokenRuntimeId(binding.token);
 
         if (isMultiToken(binding.token)) {
-            if (!multiOverrides.has(bindingTokenKey)) {
+            if (!multiOverrides.has(bindingTokenId)) {
                 resolvedBindings.push(binding);
             }
             continue;
         }
 
-        if (!singleOverrides.has(bindingTokenKey) && !singleUnbinds.has(bindingTokenKey)) {
+        if (!singleOverrides.has(bindingTokenId) && !singleUnbinds.has(bindingTokenId)) {
             resolvedBindings.push(binding);
         }
     }
@@ -2084,7 +2149,7 @@ const createRuntimeModuleWireAliasEntries = (
 
         if (excludedTokenIds.has(providerTokenId) && !overrideBindingTokenIds.has(providerTokenId)) {
             throw new Error(
-                `Service "${tokenKey(currentWire.providerToken)}" is wired to import "${tokenKey(currentWire.importToken)}", but no exported provider exists`,
+                `Service "${tokenDisplayKey(currentWire.providerToken)}" is wired to import "${tokenDisplayKey(currentWire.importToken)}", but no exported provider exists`,
             );
         }
 
@@ -2095,10 +2160,6 @@ const createRuntimeModuleWireAliasEntries = (
     }
 
     return entries;
-};
-
-const tokenRuntimeId = (currentToken: AnyToken): string => {
-    return currentToken as string;
 };
 
 const createRuntimeModuleGraph = (
@@ -2263,7 +2324,8 @@ const applyModuleBindingOverrides = (
                 throw new Error("Override bindings must be created with bind");
             }
 
-            const bindingTokenKey = tokenListContext.registerToken(binding.token);
+            tokenListContext.registerToken(binding.token);
+            const bindingTokenKey = tokenDisplayKey(binding.token);
             const bindingTokenId = tokenRuntimeId(binding.token);
 
             if (isMultiToken(binding.token)) {
@@ -2288,7 +2350,8 @@ const applyModuleBindingOverrides = (
         }
 
         if (isBindingUnbind(currentOverride)) {
-            const unbindTokenKey = tokenListContext.registerToken(currentOverride.token);
+            tokenListContext.registerToken(currentOverride.token);
+            const unbindTokenKey = tokenDisplayKey(currentOverride.token);
             const unbindTokenId = tokenRuntimeId(currentOverride.token);
 
             if (isMultiToken(currentOverride.token)) {
@@ -2311,7 +2374,8 @@ const applyModuleBindingOverrides = (
         }
 
         if (isBindingOverrideAll(currentOverride)) {
-            const overrideTokenKey = tokenListContext.registerToken(currentOverride.token);
+            tokenListContext.registerToken(currentOverride.token);
+            const overrideTokenKey = tokenDisplayKey(currentOverride.token);
             const overrideTokenId = tokenRuntimeId(currentOverride.token);
 
             if (!isMultiToken(currentOverride.token)) {

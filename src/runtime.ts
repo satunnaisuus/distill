@@ -16,11 +16,14 @@ export type RuntimeModuleGraph = {
 
 export type RuntimeTokenReference = {
     readonly tokenKey: string;
+    readonly tokenKeyId: string;
     readonly tokenId: string;
 };
 
 export type RuntimeBinding = {
     readonly id: number;
+    readonly tokenKey: string;
+    readonly tokenKeyId: string;
     readonly tokenId: string;
     readonly factory: RuntimeFactory;
     readonly lifetime: BindingLifetime;
@@ -204,12 +207,12 @@ export const getRuntimeRefCacheKey = (moduleContextId: number, tokenId: string):
 
 export const findBinding = (
     scope: RuntimeScope,
-    tokenKey: string,
+    tokenKeyId: string,
     moduleContextId = defaultModuleContextId,
     isMultiToken?: boolean,
     tokenId?: string,
 ): ResolvedRuntimeBinding | undefined => {
-    const bindings = scope.bindings.get(tokenKey);
+    const bindings = scope.bindings.get(tokenKeyId);
     const visibleBindings = bindings?.filter(
         (binding) =>
             isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
@@ -224,20 +227,20 @@ export const findBinding = (
         };
     }
 
-    return scope.parent ? findBinding(scope.parent, tokenKey, moduleContextId, isMultiToken, tokenId) : undefined;
+    return scope.parent ? findBinding(scope.parent, tokenKeyId, moduleContextId, isMultiToken, tokenId) : undefined;
 };
 
 export const findBindings = (
     scope: RuntimeScope,
-    tokenKey: string,
+    tokenKeyId: string,
     moduleContextId = defaultModuleContextId,
     isMultiToken?: boolean,
     tokenId?: string,
 ): ResolvedRuntimeBinding[] => {
     const parentBindings = scope.parent
-        ? findBindings(scope.parent, tokenKey, moduleContextId, isMultiToken, tokenId)
+        ? findBindings(scope.parent, tokenKeyId, moduleContextId, isMultiToken, tokenId)
         : [];
-    const bindings = (scope.bindings.get(tokenKey) ?? []).filter(
+    const bindings = (scope.bindings.get(tokenKeyId) ?? []).filter(
         (binding) =>
             isBindingVisibleInModuleContext(scope.context, binding, moduleContextId) &&
             (isMultiToken === undefined || binding.isMultiToken === isMultiToken) &&

@@ -21,13 +21,14 @@ import type {
     AnyMultiToken,
     AnySingleToken,
     AnyToken,
+    HasClassTokenKey,
     IsMultiToken,
     TokenIdentity,
     TokenKey,
     TokensNotIn,
     TokenValue,
 } from "./token";
-import { isRuntimeMultiToken, tokenKey } from "./token";
+import { isRuntimeMultiToken, isRuntimeToken, tokenDisplayKey, tokenKeyRuntimeId, tokenRuntimeId } from "./token";
 import type { HasTrue, IfNever, IsExact } from "./type-utils";
 import type { ValidateGraphBindings } from "./validation";
 
@@ -170,12 +171,25 @@ type TokenByDependencyKey<TTokens extends AnyToken, TKey extends string> = TToke
 
 type DependencyReferenceFromToken<TToken extends AnyToken> = TToken extends AnyMultiToken ? AllToken<TToken> : TToken;
 
+type StringTokenKeys<TTokens extends AnyToken> = Extract<TokenKey<TTokens>, string>;
+type NonStringKeyTokens<TTokens extends AnyToken> = TTokens extends AnyToken
+    ? TokenKey<TTokens> extends string
+        ? never
+        : TTokens
+    : never;
+
 type DependencyMapFromTokens<TTokens extends AnyToken> = IfNever<
     TTokens,
     undefined,
     {
-        readonly [TKey in TokenKey<TTokens>]: DependencyReferenceFromToken<TokenByDependencyKey<TTokens, TKey>>;
-    }
+        readonly [TKey in StringTokenKeys<TTokens>]: DependencyReferenceFromToken<TokenByDependencyKey<TTokens, TKey>>;
+    } & IfNever<
+        NonStringKeyTokens<TTokens>,
+        unknown,
+        {
+            readonly [key: string]: DependencyReferenceFromToken<TTokens>;
+        }
+    >
 >;
 
 type HasExactToken<TTokens extends AnyToken, TToken extends AnyToken> = IfNever<
@@ -562,7 +576,13 @@ type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = Ha
 >;
 
 type HasTokenWithSameIdentity<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
-    TTokens extends AnyToken ? IsExact<TokenIdentity<TTokens>, TokenIdentity<TToken>> : false
+    TTokens extends AnyToken
+        ? HasClassTokenKey<TTokens> extends true
+            ? false
+            : HasClassTokenKey<TToken> extends true
+              ? false
+              : IsExact<TokenIdentity<TTokens>, TokenIdentity<TToken>>
+        : false
 >;
 
 type DuplicateVisibleSingleTokenKeys<
@@ -866,7 +886,7 @@ type IncompatibleWireProviderTokens<TWire extends readonly AnyModuleImportWire[]
 
 type SameWireTarget<TLeftWire extends AnyModuleImportWire, TRightWire extends AnyModuleImportWire> =
     IsExact<TLeftWire["module"], TRightWire["module"]> extends true
-        ? HasExactToken<TLeftWire["importToken"], TRightWire["importToken"]>
+        ? SameTokenKey<TLeftWire["importToken"], TRightWire["importToken"]>
         : false;
 
 type HasWireTarget<TWireTargets extends AnyModuleImportWire, TWire extends AnyModuleImportWire> = HasTrue<
@@ -1092,15 +1112,11 @@ export const provideImport = <
 };
 
 const isMultiToken = (currentToken: AnyToken): boolean => {
-    return isRuntimeMultiToken(currentToken as string);
-};
-
-const tokenRuntimeId = (currentToken: AnyToken): string => {
-    return currentToken as string;
+    return isRuntimeMultiToken(currentToken);
 };
 
 function assertTokenInput(value: unknown, message: string): asserts value is AnyToken {
-    if (typeof value !== "string") {
+    if (!isRuntimeToken(value)) {
         throw new Error(message);
     }
 }
@@ -1109,13 +1125,14 @@ const assertNoDuplicateTokenKeys = (tokens: readonly AnyToken[], duplicateMessag
     const seen = new Set<string>();
 
     for (const currentToken of tokens) {
-        const currentTokenKey = tokenKey(currentToken);
+        const currentTokenKey = tokenDisplayKey(currentToken);
+        const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
 
-        if (seen.has(currentTokenKey)) {
+        if (seen.has(currentTokenKeyId)) {
             throw new Error(duplicateMessage(currentTokenKey));
         }
 
-        seen.add(currentTokenKey);
+        seen.add(currentTokenKeyId);
     }
 };
 
@@ -1123,36 +1140,38 @@ const assertNoImportedLocalSingleBindings = (
     imports: readonly AnyToken[],
     bindings: readonly ModuleBindingInput[],
 ): void => {
-    const importedSingleTokenKeys = new Set<string>();
+    const importedSingleTokenKeyIds = new Set<string>();
     const importedTokenKinds = new Map<string, boolean>();
 
     for (const currentImport of imports) {
-        const currentImportKey = tokenKey(currentImport);
+        const currentImportKey = tokenDisplayKey(currentImport);
+        const currentImportKeyId = tokenKeyRuntimeId(currentImport);
         const currentImportIsMulti = isMultiToken(currentImport);
-        const previousKind = importedTokenKinds.get(currentImportKey);
+        const previousKind = importedTokenKinds.get(currentImportKeyId);
 
         if (previousKind !== undefined && previousKind !== currentImportIsMulti) {
             throw new Error(`Token "${currentImportKey}" is already included in module imports`);
         }
 
-        importedTokenKinds.set(currentImportKey, currentImportIsMulti);
+        importedTokenKinds.set(currentImportKeyId, currentImportIsMulti);
 
         if (!currentImportIsMulti) {
-            importedSingleTokenKeys.add(currentImportKey);
+            importedSingleTokenKeyIds.add(currentImportKeyId);
         }
     }
 
     for (const binding of bindings) {
         const unwrappedBinding = unwrapModuleBinding(binding);
-        const bindingTokenKey = tokenKey(unwrappedBinding.token);
+        const bindingTokenKey = tokenDisplayKey(unwrappedBinding.token);
+        const bindingTokenKeyId = tokenKeyRuntimeId(unwrappedBinding.token);
         const bindingIsMulti = isMultiToken(unwrappedBinding.token);
-        const importedKind = importedTokenKinds.get(bindingTokenKey);
+        const importedKind = importedTokenKinds.get(bindingTokenKeyId);
 
         if (importedKind !== undefined && importedKind !== bindingIsMulti) {
             throw new Error(`Token "${bindingTokenKey}" is already included in module imports`);
         }
 
-        if (!bindingIsMulti && importedSingleTokenKeys.has(bindingTokenKey)) {
+        if (!bindingIsMulti && importedSingleTokenKeyIds.has(bindingTokenKeyId)) {
             throw new Error(
                 `Service "${bindingTokenKey}" cannot be both imported and locally bound in the same module`,
             );
@@ -1161,30 +1180,32 @@ const assertNoImportedLocalSingleBindings = (
 };
 
 const assertNoDuplicateLocalSingleBindings = (bindings: readonly ModuleBindingInput[]): void => {
-    const seenSingleTokenKeys = new Set<string>();
+    const seenSingleTokenIds = new Set<string>();
     const seenTokenKinds = new Map<string, boolean>();
 
     for (const binding of bindings) {
         const unwrappedBinding = unwrapModuleBinding(binding);
-        const bindingTokenKey = tokenKey(unwrappedBinding.token);
+        const bindingTokenKey = tokenDisplayKey(unwrappedBinding.token);
+        const bindingTokenKeyId = tokenKeyRuntimeId(unwrappedBinding.token);
+        const bindingTokenId = tokenRuntimeId(unwrappedBinding.token);
         const bindingIsMulti = isMultiToken(unwrappedBinding.token);
-        const previousKind = seenTokenKinds.get(bindingTokenKey);
+        const previousKind = seenTokenKinds.get(bindingTokenKeyId);
 
         if (previousKind !== undefined && previousKind !== bindingIsMulti) {
             throw new Error(`Token "${bindingTokenKey}" is already included in module bindings`);
         }
 
-        seenTokenKinds.set(bindingTokenKey, bindingIsMulti);
+        seenTokenKinds.set(bindingTokenKeyId, bindingIsMulti);
 
         if (bindingIsMulti) {
             continue;
         }
 
-        if (seenSingleTokenKeys.has(bindingTokenKey)) {
+        if (seenSingleTokenIds.has(bindingTokenId)) {
             throw new Error(`Service "${bindingTokenKey}" is already registered in the module context`);
         }
 
-        seenSingleTokenKeys.add(bindingTokenKey);
+        seenSingleTokenIds.add(bindingTokenId);
     }
 };
 
@@ -1320,13 +1341,13 @@ const validateComposedModuleRuntime = (
         assertTokenInput(currentWire.importToken, "Wire import token must be a token");
         assertTokenInput(currentWire.providerToken, "Wire provider token must be a token");
 
-        const importTokenKey = tokenKey(currentWire.importToken);
+        const importTokenKey = tokenDisplayKey(currentWire.importToken);
 
         if (isMultiToken(currentWire.importToken)) {
             throw new Error(`Multibind token "${importTokenKey}" cannot be wired with provideImport`);
         }
 
-        const providerTokenKey = tokenKey(currentWire.providerToken);
+        const providerTokenKey = tokenDisplayKey(currentWire.providerToken);
 
         if (isMultiToken(currentWire.providerToken)) {
             throw new Error(`Multibind token "${providerTokenKey}" cannot be used as a wired provider`);
@@ -1355,15 +1376,16 @@ const validateComposedModuleRuntime = (
 
     for (const entry of exportedEntries) {
         const entryToken = entry.binding.token;
-        const entryTokenKey = tokenKey(entryToken);
+        const entryTokenKey = tokenDisplayKey(entryToken);
+        const entryTokenKeyId = tokenKeyRuntimeId(entryToken);
         const entryIsMultiToken = isMultiToken(entryToken);
-        const previousKind = exportedProviderKinds.get(entryTokenKey);
+        const previousKind = exportedProviderKinds.get(entryTokenKeyId);
 
         if (previousKind !== undefined && previousKind !== entryIsMultiToken) {
             throw new Error(`Token "${entryTokenKey}" has incompatible exported providers`);
         }
 
-        exportedProviderKinds.set(entryTokenKey, entryIsMultiToken);
+        exportedProviderKinds.set(entryTokenKeyId, entryIsMultiToken);
 
         if (entryIsMultiToken) {
             continue;
@@ -1379,7 +1401,7 @@ const validateComposedModuleRuntime = (
     }
 
     const assertProviders = (currentToken: AnyToken, providers: readonly RuntimeExportedEntry[], action: string) => {
-        const currentTokenKey = tokenKey(currentToken);
+        const currentTokenKey = tokenDisplayKey(currentToken);
 
         if (isMultiToken(currentToken)) {
             if (providers.length === 0) {
@@ -1406,7 +1428,7 @@ const validateComposedModuleRuntime = (
                 assertProviders(
                     wiredProvider,
                     findExportedProviders(exportedEntries, wiredProvider),
-                    `is wired to import "${tokenKey(currentImport)}"`,
+                    `is wired to import "${tokenDisplayKey(currentImport)}"`,
                 );
                 continue;
             }
