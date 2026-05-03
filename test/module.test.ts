@@ -1,12 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { all } from "../src/all";
-import { bind } from "../src/bind";
-import { defineContainer } from "../src/container";
-import { composeModules, defineModule, exported, provideImport } from "../src/module";
-import { optional } from "../src/optional";
-import { override, overrideAll, unbind } from "../src/override";
-import { ref } from "../src/ref";
-import { multiToken, qualified, qualifier, token } from "../src/token";
+import {
+    all,
+    bind,
+    composeModules,
+    defineContainer,
+    defineModule,
+    exported,
+    multiToken,
+    optional,
+    override,
+    overrideAll,
+    provideImport,
+    qualified,
+    qualifier,
+    ref,
+    token,
+    unbind,
+} from "../src/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;

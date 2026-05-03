@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { all } from "../src/all";
-import { bind } from "../src/bind";
-import { optionalDependencyBrand } from "../src/brands";
-import { defineContainer } from "../src/container";
-import { isOptionalDependency, optional } from "../src/optional";
-import { ref } from "../src/ref";
-import { multiToken, type Token, token } from "../src/token";
+import { isOptionalDependency } from "../src/dependency/optional";
+import { optionalDependencyBrand } from "../src/dependency/reference-brands";
+import { all, bind, defineContainer, multiToken, optional, ref, type Token, token } from "../src/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;

@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { bind, getBindingDependencies, getBindingLifetime, isBinding } from "../src/bind";
-import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/brands";
-import { defineContainer } from "../src/container";
-import { token } from "../src/token";
+import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "../src/binding/brands";
+import { getBindingDependencies, getBindingLifetime, isBinding } from "../src/binding/types";
+import { bind, defineContainer, token } from "../src/index";
 
 describe("bind", () => {
     it("creates a binding without dependencies", () => {

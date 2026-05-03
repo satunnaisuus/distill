@@ -1,27 +1,47 @@
-export type { AllToken } from "./all";
-export { all } from "./all";
-export type { Binding, BindingLifetime, BindingOptions, Disposer } from "./bind";
-export { bind } from "./bind";
-export type { Container, ContainerDefinition } from "./container";
-export { defineContainer } from "./container";
-export type { DependencyMap, ResolvedDependencies } from "./dependencies";
-export { composeModules, defineModule, exported, provideImport } from "./module";
-export type { ComposedModuleDefinition, ExportedBinding, ModuleDefinition, ModuleImportWire } from "./module-types";
-export type { OptionalToken } from "./optional";
-export { optional } from "./optional";
-export type { AnyBindingOverride, BindingOverride, BindingOverrideAll, BindingUnbind } from "./override";
-export { override, overrideAll, unbind } from "./override";
-export type { Ref, RefToken } from "./ref";
-export { ref } from "./ref";
-export type {
-    MultiToken,
-    MultiTokenBuilder,
-    QualifiedToken,
-    Qualifier,
-    Token,
-    TokenBuilder,
-    TokenKey,
-    TokenKeyInput,
-    TokenValue,
-} from "./token";
-export { multiToken, qualified, qualifier, token } from "./token";
+export { type Binding, type BindingLifetime, type BindingOptions, bind, type Disposer } from "./binding/index";
+export { type Container, type ContainerDefinition, defineContainer } from "./container/index";
+export {
+    type AllToken,
+    all,
+    type DependencyMap,
+    type OptionalToken,
+    optional,
+    type Ref,
+    type RefToken,
+    type ResolvedDependencies,
+    ref,
+} from "./dependency/index";
+export {
+    type ComposedModuleDefinition,
+    composeModules,
+    defineModule,
+    type ExportedBinding,
+    exported,
+    type ModuleDefinition,
+    type ModuleImportWire,
+    provideImport,
+} from "./module/index";
+export {
+    type AnyBindingOverride,
+    type BindingOverride,
+    type BindingOverrideAll,
+    type BindingUnbind,
+    override,
+    overrideAll,
+    unbind,
+} from "./override/index";
+export {
+    type MultiToken,
+    type MultiTokenBuilder,
+    multiToken,
+    type QualifiedToken,
+    type Qualifier,
+    qualified,
+    qualifier,
+    type Token,
+    type TokenBuilder,
+    type TokenKey,
+    type TokenKeyInput,
+    type TokenValue,
+    token,
+} from "./token/index";

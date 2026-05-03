@@ -1,8 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { all } from "../src/all";
-import { bind } from "../src/bind";
-import { defineContainer } from "../src/container";
-import { multiToken, token, tokenKey } from "../src/token";
+import { all, bind, defineContainer, multiToken, token } from "../src/index";
+import { tokenKey } from "../src/token/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;

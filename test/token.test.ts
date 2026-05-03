@@ -1,8 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { bind } from "../src/bind";
-import { defineContainer } from "../src/container";
-import { ref } from "../src/ref";
-import { isRuntimeMultiToken, multiToken, qualified, qualifier, type Token, token, tokenKey } from "../src/token";
+import { bind, defineContainer, multiToken, qualified, qualifier, ref, type Token, token } from "../src/index";
+import { isRuntimeMultiToken, tokenKey } from "../src/token/index";
 
 describe("tokenKey", () => {
     it("returns the key for a token created by token().of()", () => {

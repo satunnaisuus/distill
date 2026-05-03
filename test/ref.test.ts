@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { refDependencyBrand } from "../src/brands";
-import { type DependencyReference, isRefDependency, ref } from "../src/ref";
-import { type Token, token } from "../src/token";
+import { type DependencyReference, isRefDependency } from "../src/dependency/ref";
+import { refDependencyBrand } from "../src/dependency/reference-brands";
+import { ref, type Token, token } from "../src/index";
 
 describe("ref", () => {
     it("creates a ref dependency for a direct token", () => {
