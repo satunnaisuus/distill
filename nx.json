@@ -61,5 +61,6 @@
       "inputs": ["default", "^production"],
       "outputs": ["{projectRoot}/coverage"]
     }
-  }
+  },
+  "analytics": false
 }

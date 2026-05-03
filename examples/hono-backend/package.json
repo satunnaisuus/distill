@@ -1,0 +1,52 @@
+{
+  "name": "@satunnaisuus/distill-example-hono-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "nx": {
+    "projectType": "application",
+    "sourceRoot": "examples/hono-backend/src",
+    "targets": {
+      "build": {
+        "dependsOn": [
+          "^build"
+        ],
+        "outputs": []
+      },
+      "typecheck": {
+        "dependsOn": [
+          "^build"
+        ],
+        "outputs": []
+      },
+      "dev": {
+        "continuous": true,
+        "dependsOn": [
+          "^build"
+        ]
+      },
+      "start": {
+        "continuous": true,
+        "dependsOn": [
+          "^build"
+        ]
+      }
+    }
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.1",
+    "@satunnaisuus/distill": "workspace:*",
+    "hono": "^4.12.16"
+  },
+  "devDependencies": {
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3"
+  }
+}
