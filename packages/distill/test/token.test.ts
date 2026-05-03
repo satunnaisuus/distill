@@ -82,7 +82,7 @@ describe("symbol and class token keys", () => {
         const Config = token(configKey).of<{ readonly port: number }>();
         const container = defineContainer(
             [Config],
-            bind(Config, () => ({ port: 3000 })),
+            bind(Config).factory(() => ({ port: 3000 })),
         ).create();
 
         expect(container.resolve(Config)).toEqual({ port: 3000 });
@@ -94,7 +94,7 @@ describe("symbol and class token keys", () => {
         }
 
         const ServiceToken = token(Service).of();
-        const container = defineContainer([ServiceToken], bind.class(ServiceToken, Service)).create();
+        const container = defineContainer([ServiceToken], bind(ServiceToken).class(Service)).create();
 
         expect(container.resolve(ServiceToken)).toBeInstanceOf(Service);
         expect(container.resolve(ServiceToken).status).toBe("ready");
@@ -109,8 +109,8 @@ describe("symbol and class token keys", () => {
         const Consumer = token("Consumer").of<{ readonly name: string }>();
         const container = defineContainer(
             [ServiceToken, Consumer],
-            bind.class(ServiceToken, Service),
-            bind(Consumer, { service: ref(ServiceToken) }, ({ service }) => ({ name: service.value.name })),
+            bind(ServiceToken).class(Service),
+            bind(Consumer).factory({ service: ref(ServiceToken) }, ({ service }) => ({ name: service.value.name })),
         ).create();
 
         expect(container.resolve(Consumer)).toEqual({ name: "service" });
@@ -128,8 +128,8 @@ describe("symbol and class token keys", () => {
         const Second = token(SecondService).of();
         const container = defineContainer(
             [First, Second],
-            bind.class(First, FirstService),
-            bind.class(Second, SecondService),
+            bind(First).class(FirstService),
+            bind(Second).class(SecondService),
         ).create();
 
         expect(container.resolve(First).id).toBe("first");
@@ -144,8 +144,8 @@ describe("symbol and class token keys", () => {
         const Second = token(SecondService).of();
         const container = defineContainer(
             [First, Second],
-            bind.class(First, FirstService),
-            bind.class(Second, SecondService),
+            bind(First).class(FirstService),
+            bind(Second).class(SecondService),
         ).create();
 
         expect(container.resolve(First)).toBeInstanceOf(FirstService);
@@ -162,9 +162,9 @@ describe("symbol and class token keys", () => {
         const JsonLogger = qualified(LoggerToken, Json);
         const container = defineContainer(
             [Hooks, JsonLogger],
-            bind(Hooks, () => ({ name: "first" })),
-            bind(Hooks, () => ({ name: "second" })),
-            bind.qualified(LoggerToken, Json, () => ({ name: "json" })),
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(qualified(LoggerToken, Json)).factory(() => ({ name: "json" })),
         ).create();
 
         expect(tokenKey(Hooks)).toBe(hookKey);
@@ -186,8 +186,8 @@ describe("symbol and class token keys", () => {
         const SecondJsonLogger = qualified(token(SecondLogger).of(), Json);
         const container = defineContainer(
             [FirstJsonLogger, SecondJsonLogger],
-            bind(FirstJsonLogger, () => new FirstLogger()),
-            bind(SecondJsonLogger, () => new SecondLogger()),
+            bind(FirstJsonLogger).factory(() => new FirstLogger()),
+            bind(SecondJsonLogger).factory(() => new SecondLogger()),
         ).create();
 
         expect(tokenKey(FirstJsonLogger)).toBe("Logger:json");
@@ -201,8 +201,8 @@ describe("symbol and class token keys", () => {
         const Second = qualified(token("A").of<string>(), qualifier("B:C"));
         const container = defineContainer(
             [First, Second],
-            bind(First, () => "first"),
-            bind(Second, () => "second"),
+            bind(First).factory(() => "first"),
+            bind(Second).factory(() => "second"),
         ).create();
 
         expect(tokenKey(First)).toBe("A:B:C");

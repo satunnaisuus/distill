@@ -37,10 +37,10 @@ describe("defineContainer.module", () => {
         const Consumer = token(consumerKey).of<{ readonly config: Config }>();
         const ConsumerModule = defineModule({
             imports: [ConfigToken],
-            bindings: [exported(bind(Consumer, { config: ConfigToken }, ({ config }) => ({ config })))],
+            bindings: [exported(bind(Consumer).factory({ config: ConfigToken }, ({ config }) => ({ config })))],
         });
         const ConfigModule = defineModule({
-            bindings: [exported(bind.class(ConfigToken, Config))],
+            bindings: [exported(bind(ConfigToken).class(Config))],
         });
         const App = composeModules({
             modules: [ConsumerModule, ConfigModule],
@@ -65,7 +65,7 @@ describe("defineContainer.module", () => {
             imports: [Logger],
             bindings: [
                 exported(
-                    bind(FirstConsumer, { logger: Logger }, ({ logger }) => ({
+                    bind(FirstConsumer).factory({ logger: Logger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
@@ -75,7 +75,7 @@ describe("defineContainer.module", () => {
             imports: [Logger],
             bindings: [
                 exported(
-                    bind(SecondConsumer, { logger: Logger }, ({ logger }) => ({
+                    bind(SecondConsumer).factory({ logger: Logger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
@@ -83,8 +83,8 @@ describe("defineContainer.module", () => {
         });
         const LoggerModule = defineModule({
             bindings: [
-                exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
-                exported(bind.qualified(Logger, Human, () => ({ name: "human" }))),
+                exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))),
+                exported(bind(qualified(Logger, Human)).factory(() => ({ name: "human" }))),
             ],
         });
         const App = composeModules({
@@ -112,10 +112,10 @@ describe("defineContainer.module", () => {
         const PlainJsonLogger = token("Logger:json").of<{ readonly name: string }>();
 
         const PlainLoggerModule = defineModule({
-            bindings: [exported(bind(PlainJsonLogger, () => ({ name: "plain" })))],
+            bindings: [exported(bind(PlainJsonLogger).factory(() => ({ name: "plain" })))],
         });
         const QualifiedLoggerModule = defineModule({
-            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "qualified" })))],
+            bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "qualified" })))],
         });
         const App = composeModules({
             modules: [PlainLoggerModule, QualifiedLoggerModule],
@@ -128,7 +128,7 @@ describe("defineContainer.module", () => {
         expect(() => (app as RuntimeContainerForTest).resolve(JsonLogger)).toThrowError(
             'Service "Logger:json" is not exported by the module',
         );
-        expect(() => definition.create(override(bind(JsonLogger, () => ({ name: "override" }))))).toThrowError(
+        expect(() => definition.create(override(bind(JsonLogger).factory(() => ({ name: "override" }))))).toThrowError(
             'Service "Logger:json" is not exported by the module',
         );
     });
@@ -144,14 +144,14 @@ describe("defineContainer.module", () => {
             imports: [PlainJsonLogger],
             bindings: [
                 exported(
-                    bind(Consumer, { logger: PlainJsonLogger }, ({ logger }) => ({
+                    bind(Consumer).factory({ logger: PlainJsonLogger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
             ],
         });
         const LoggerModule = defineModule({
-            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "qualified" })))],
+            bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "qualified" })))],
         });
         const App = composeModules({
             modules: [ConsumerModule, LoggerModule],
@@ -172,7 +172,7 @@ describe("defineContainer.module", () => {
             imports: [Logger],
             bindings: [
                 exported(
-                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                    bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
@@ -180,8 +180,8 @@ describe("defineContainer.module", () => {
         });
         const LoggerModule = defineModule({
             bindings: [
-                exported(bind(Logger, () => ({ name: "plain" }))),
-                exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
+                exported(bind(Logger).factory(() => ({ name: "plain" }))),
+                exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))),
             ],
         });
         const App = composeModules({
@@ -190,7 +190,7 @@ describe("defineContainer.module", () => {
             exports: [Consumer, Logger],
         });
 
-        const app = defineContainer.module(App).create(override(bind(Logger, () => ({ name: "override" }))));
+        const app = defineContainer.module(App).create(override(bind(Logger).factory(() => ({ name: "override" }))));
 
         expect(app.resolve(Consumer)).toEqual({ loggerName: "override" });
         expect(app.resolve(Logger)).toEqual({ name: "override" });
@@ -206,14 +206,14 @@ describe("defineContainer.module", () => {
             imports: [Logger],
             bindings: [
                 exported(
-                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                    bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
             ],
         });
         const LoggerModule = defineModule({
-            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+            bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
         });
         const App = composeModules({
             modules: [ConsumerModule, LoggerModule],
@@ -238,14 +238,14 @@ describe("defineContainer.module", () => {
             imports: [Logger],
             bindings: [
                 exported(
-                    bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                    bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
             ],
         });
         const LoggerModule = defineModule({
-            bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+            bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
         });
         const OutsideModule = defineModule({
             imports: [Logger],
@@ -294,13 +294,13 @@ describe("defineContainer.module", () => {
         const Db = token("Db").of<{ readonly url: string }>();
 
         const ConfigModule = defineModule({
-            bindings: [exported(bind(Config, () => ({ url: "postgres://localhost" })))],
+            bindings: [exported(bind(Config).factory(() => ({ url: "postgres://localhost" })))],
         });
         const DbModule = defineModule({
             imports: [Config],
             bindings: [
-                bind(Pool, { config: Config }, ({ config }) => ({ url: config.url })),
-                exported(bind(Db, { pool: Pool }, ({ pool }) => ({ url: pool.url }))),
+                bind(Pool).factory({ config: Config }, ({ config }) => ({ url: config.url })),
+                exported(bind(Db).factory({ pool: Pool }, ({ pool }) => ({ url: pool.url }))),
             ],
         });
         const App = composeModules({
@@ -323,13 +323,13 @@ describe("defineContainer.module", () => {
 
         const ConfigModule = defineModule({
             bindings: [
-                bind(Secret, () => ({ value: "secret" })),
-                exported(bind(Config, { secret: Secret }, ({ secret }) => ({ value: secret.value }))),
+                bind(Secret).factory(() => ({ value: "secret" })),
+                exported(bind(Config).factory({ secret: Secret }, ({ secret }) => ({ value: secret.value }))),
             ],
         });
         const ServerModule = defineModule({
             imports: [Config],
-            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ value: config.value })))],
+            bindings: [exported(bind(Server).factory({ config: Config }, ({ config }) => ({ value: config.value })))],
         });
         const App = composeModules({
             modules: [ConfigModule, ServerModule],
@@ -349,11 +349,11 @@ describe("defineContainer.module", () => {
         const Server = token("Server").of<{ readonly port: number }>();
 
         const ConfigModule = defineModule({
-            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
         });
         const ServerModule = defineModule({
             imports: [Config],
-            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
+            bindings: [exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })))],
         });
         const App = composeModules({
             modules: [ConfigModule, ServerModule],
@@ -364,11 +364,11 @@ describe("defineContainer.module", () => {
         expect(() => (definition.create() as RuntimeContainerForTest).resolve(Config)).toThrowError(
             'Service "Config" is not exported by the module',
         );
-        expect(() => definition.create(override(bind(Config, () => ({ port: 4000 }))))).toThrowError(
+        expect(() => definition.create(override(bind(Config).factory(() => ({ port: 4000 }))))).toThrowError(
             'Service "Config" is not exported by the module',
         );
 
-        const app = definition.create(override(bind(Server, () => ({ port: 5000 }))));
+        const app = definition.create(override(bind(Server).factory(() => ({ port: 5000 }))));
 
         expect(app.resolve(Server)).toEqual({ port: 5000 });
     });
@@ -379,8 +379,8 @@ describe("defineContainer.module", () => {
 
         const AppModule = defineModule({
             bindings: [
-                exported(bind(Config, () => ({ port: 3000 }))),
-                exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port }))),
+                exported(bind(Config).factory(() => ({ port: 3000 }))),
+                exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port }))),
             ],
         });
         const App = composeModules({
@@ -388,7 +388,7 @@ describe("defineContainer.module", () => {
             exports: [Config, Server],
         });
 
-        const app = defineContainer.module(App).create(override(bind(Config, () => ({ port: 4000 }))));
+        const app = defineContainer.module(App).create(override(bind(Config).factory(() => ({ port: 4000 }))));
 
         expect(app.resolve(Config)).toEqual({ port: 4000 });
         expect(app.resolve(Server)).toEqual({ port: 4000 });
@@ -397,7 +397,7 @@ describe("defineContainer.module", () => {
     it("rejects direct module containers and old module-to-module imports", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const ConfigModule = defineModule({
-            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
         });
 
         expect(() => defineContainer.module(ConfigModule as never)).toThrowError(
@@ -416,7 +416,7 @@ describe("defineContainer.module", () => {
 
         expect(() =>
             defineModule({
-                bindings: [bind(Config, () => ({ port: 3000 })), bind(Config, () => ({ port: 4000 }))],
+                bindings: [bind(Config).factory(() => ({ port: 3000 })), bind(Config).factory(() => ({ port: 4000 }))],
             } as never),
         ).toThrowError('Service "Config" is already registered in the module context');
     });
@@ -427,7 +427,7 @@ describe("defineContainer.module", () => {
 
         const ServerModule = defineModule({
             imports: [Config],
-            bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
+            bindings: [exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })))],
         });
 
         expect(() =>
@@ -438,10 +438,10 @@ describe("defineContainer.module", () => {
         ).toThrowError('Service "Config" is imported by a module, but no exported provider exists');
 
         const FirstConfigModule = defineModule({
-            bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
         });
         const SecondConfigModule = defineModule({
-            bindings: [exported(bind(Config, () => ({ port: 4000 })))],
+            bindings: [exported(bind(Config).factory(() => ({ port: 4000 })))],
         });
 
         expect(() =>
@@ -458,13 +458,13 @@ describe("defineContainer.module", () => {
         const Public = token("Public").of<{ readonly ok: true }>();
 
         const SingleHooksModule = defineModule({
-            bindings: [exported(bind(SingleHooks, () => ({ name: "single" })))],
+            bindings: [exported(bind(SingleHooks).factory(() => ({ name: "single" })))],
         });
         const ManyHooksModule = defineModule({
-            bindings: [exported(bind(ManyHooks, () => ({ name: "many" })))],
+            bindings: [exported(bind(ManyHooks).factory(() => ({ name: "many" })))],
         });
         const PublicModule = defineModule({
-            bindings: [exported(bind(Public, () => ({ ok: true as const })))],
+            bindings: [exported(bind(Public).factory(() => ({ ok: true as const })))],
         });
 
         expect(() =>
@@ -479,7 +479,7 @@ describe("defineContainer.module", () => {
         const Public = token("Public").of<{ readonly ok: true }>();
         const Internal = token("Internal").of<{ readonly ok: true }>();
         const AppModule = defineModule({
-            bindings: [bind(Internal, () => ({ ok: true as const }))],
+            bindings: [bind(Internal).factory(() => ({ ok: true as const }))],
         });
 
         expect(() =>
@@ -495,19 +495,19 @@ describe("defineContainer.module", () => {
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
         const FirstPluginModule = defineModule({
-            bindings: [exported(bind(Hooks, () => ({ name: "first" })))],
+            bindings: [exported(bind(Hooks).factory(() => ({ name: "first" })))],
         });
         const SecondPluginModule = defineModule({
             bindings: [
-                bind(Hooks, () => ({ name: "private-plugin" })),
-                exported(bind(Hooks, () => ({ name: "second" }))),
+                bind(Hooks).factory(() => ({ name: "private-plugin" })),
+                exported(bind(Hooks).factory(() => ({ name: "second" }))),
             ],
         });
         const RegistryModule = defineModule({
             imports: [Hooks],
             bindings: [
                 exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
                     })),
                 ),
@@ -529,14 +529,14 @@ describe("defineContainer.module", () => {
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
         const PluginModule = defineModule({
-            bindings: [exported(bind(Hooks, () => ({ name: "public" })))],
+            bindings: [exported(bind(Hooks).factory(() => ({ name: "public" })))],
         });
         const RegistryModule = defineModule({
             imports: [Hooks],
             bindings: [
-                bind(Hooks, () => ({ name: "local-private" })),
+                bind(Hooks).factory(() => ({ name: "local-private" })),
                 exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
                     })),
                 ),
@@ -560,9 +560,9 @@ describe("defineContainer.module", () => {
         const RegistryModule = defineModule({
             imports: [Hooks],
             bindings: [
-                exported(bind(Hooks, () => ({ name: "self" }))),
+                exported(bind(Hooks).factory(() => ({ name: "self" }))),
                 exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
                     })),
                 ),
@@ -587,7 +587,7 @@ describe("defineContainer.module", () => {
             imports: [Hooks],
             bindings: [
                 exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
                     })),
                 ),
@@ -616,13 +616,13 @@ describe("defineContainer.module", () => {
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
         const PluginModule = defineModule({
-            bindings: [exported(bind(Hooks, () => ({ name: "public" })))],
+            bindings: [exported(bind(Hooks).factory(() => ({ name: "public" })))],
         });
         const RegistryModule = defineModule({
             imports: [Hooks],
             bindings: [
                 exported(
-                    bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                         names: hooks.map((hook) => hook.name),
                     })),
                 ),
@@ -633,7 +633,9 @@ describe("defineContainer.module", () => {
             exports: [Registry, Hooks],
         });
 
-        const app = defineContainer.module(App).create(overrideAll(Hooks, [bind(Hooks, () => ({ name: "override" }))]));
+        const app = defineContainer
+            .module(App)
+            .create(overrideAll(Hooks, [bind(Hooks).factory(() => ({ name: "override" }))]));
 
         expect(app.resolveAll(Hooks)).toEqual([{ name: "override" }]);
         expect(app.resolve(Registry)).toEqual({ names: ["override"] });
@@ -647,21 +649,17 @@ describe("defineContainer.module", () => {
 
         const AppModule = defineModule({
             bindings: [
-                bind(Config, () => ({ name: "app" }), {
-                    dispose: () => events.push("config"),
-                }),
+                bind(Config)
+                    .factory(() => ({ name: "app" }))
+                    .disposable(() => events.push("config")),
                 exported(
-                    bind.scoped(
-                        Service,
-                        { config: ref(Config), request: optional(Request) },
-                        ({ config, request }) => ({
+                    bind(Service)
+                        .scoped()
+                        .factory({ config: ref(Config), request: optional(Request) }, ({ config, request }) => ({
                             getName: () => config.value.name,
                             requestId: request?.id ?? "none",
-                        }),
-                        {
-                            dispose: () => events.push("service"),
-                        },
-                    ),
+                        }))
+                        .disposable(() => events.push("service")),
                 ),
             ],
         });
@@ -672,7 +670,11 @@ describe("defineContainer.module", () => {
 
         const app = defineContainer.module(App).create();
         const rootService = app.resolve(Service);
-        const request = app.createScope(bind.scoped(Request, () => ({ id: "request-1" })));
+        const request = app.createScope(
+            bind(Request)
+                .scoped()
+                .factory(() => ({ id: "request-1" })),
+        );
         const requestService = request.resolve(Service);
 
         expect(rootService.requestId).toBe("none");

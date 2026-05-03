@@ -14,36 +14,70 @@ import { InjectableService } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
 
 test("provider bind methods preserve lifetimes", () => {
-    const singletonFactory = bind.factory(tokens.port, () => 3000);
-    const scopedFactory = bind.scoped.factory(tokens.port, () => 3000);
-    const transientFactory = bind.transient.factory(tokens.port, () => 3000);
-    const value = bind.value(tokens.port, 3000);
-    const scopedValue = bind.scoped.value(tokens.port, 3000);
+    const singletonFactory = bind(tokens.port).factory(() => 3000);
+    const scopedFactory = bind(tokens.port)
+        .scoped()
+        .factory(() => 3000);
+    const transientFactory = bind(tokens.port)
+        .transient()
+        .factory(() => 3000);
+    const value = bind(tokens.port).value(3000);
+    const scopedValue = bind(tokens.port).scoped().value(3000);
 
     const ExistingLogger = token("ExistingLogger").of<Logger>();
     const AliasLogger = token("AliasLogger").of<Logger>();
-    const alias = bind.alias(AliasLogger, ExistingLogger);
-    const useExisting = bind.useExisting(AliasLogger, ExistingLogger);
-    const singletonAlias = bind.singleton.alias(AliasLogger, ExistingLogger);
+    const alias = bind(AliasLogger).alias(ExistingLogger);
+    const useExisting = bind(AliasLogger).useExisting(ExistingLogger);
+    const singletonAlias = bind(AliasLogger).singleton().alias(ExistingLogger);
 
-    expect(singletonFactory).type.toBe<Binding<typeof tokens.port, undefined, "singleton">>();
-    expect(scopedFactory).type.toBe<Binding<typeof tokens.port, undefined, "scoped">>();
-    expect(transientFactory).type.toBe<Binding<typeof tokens.port, undefined, "transient">>();
-    expect(value).type.toBe<Binding<typeof tokens.port, undefined, "singleton">>();
-    expect(scopedValue).type.toBe<Binding<typeof tokens.port, undefined, "scoped">>();
-    expect(alias).type.toBe<Binding<typeof AliasLogger, { readonly existing: typeof ExistingLogger }, "transient">>();
-    expect(useExisting).type.toBe<
+    expect(singletonFactory).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "singleton">>();
+    expect(scopedFactory).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "scoped">>();
+    expect(transientFactory).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "transient">>();
+    expect(value).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "singleton">>();
+    expect(scopedValue).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "scoped">>();
+    expect(alias).type.toBeAssignableTo<
         Binding<typeof AliasLogger, { readonly existing: typeof ExistingLogger }, "transient">
     >();
-    expect(singletonAlias).type.toBe<
+    expect(useExisting).type.toBeAssignableTo<
+        Binding<typeof AliasLogger, { readonly existing: typeof ExistingLogger }, "transient">
+    >();
+    expect(singletonAlias).type.toBeAssignableTo<
         Binding<typeof AliasLogger, { readonly existing: typeof ExistingLogger }, "singleton">
     >();
 });
 
+test("fluent bind methods preserve types in any order", () => {
+    const beforeProvider = bind(tokens.port)
+        .disposable((port) => {
+            expect(port).type.toBe<number>();
+        })
+        .scoped()
+        .factory(() => 3000);
+    const afterProvider = bind(tokens.port)
+        .factory(() => 3000)
+        .disposable((port) => {
+            expect(port).type.toBe<number>();
+        })
+        .transient();
+    const dependencyBinding = bind(tokens.server)
+        .transient()
+        .disposable((server) => {
+            expect(server).type.toBe<Server>();
+        })
+        .factory({ config: tokens.config }, ({ config }) => ({ port: config.port }));
+
+    expect(beforeProvider).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "scoped">>();
+    expect(afterProvider).type.toBeAssignableTo<Binding<typeof tokens.port, undefined, "transient">>();
+    expect(dependencyBinding).type.toBeAssignableTo<
+        Binding<typeof tokens.server, { readonly config: typeof tokens.config }, "transient">
+    >();
+    expect<Parameters<typeof dependencyBinding.factory>[0]["config"]>().type.toBe<Config>();
+});
+
 test("value providers support direct function and constructor values", () => {
     const handler = (message: string) => message.length;
-    const handlerBinding = bind.value(tokens.handler, handler);
-    const constructorBinding = bind.value(tokens.serviceConstructor, InjectableService);
+    const handlerBinding = bind(tokens.handler).value(handler);
+    const constructorBinding = bind(tokens.serviceConstructor).value(InjectableService);
     const container = defineContainer(tokenList, handlerBinding, constructorBinding).create();
     const ServiceConstructor = container.resolve(tokens.serviceConstructor);
 
@@ -53,16 +87,15 @@ test("value providers support direct function and constructor values", () => {
     expect(new ServiceConstructor().status).type.toBe<"ready">();
 
     expect(() => {
-        bind.value(tokens.port, "3000");
+        bind(tokens.port).value("3000");
     }).type.toRaiseError();
     expect(() => {
-        bind.value("port", 3000);
+        bind("port").value(3000);
     }).type.toRaiseError();
 });
 
 test("factory providers preserve dependency inference and validation", () => {
-    const binding = bind.factory(
-        tokens.server,
+    const binding = bind(tokens.server).factory(
         { config: tokens.config, logger: ref(tokens.logger), port: tokens.port },
         ({ config }) => ({
             port: config.port,
@@ -75,10 +108,10 @@ test("factory providers preserve dependency inference and validation", () => {
     expect<ReturnType<typeof binding.factory>>().type.toBe<Server>();
 
     expect(() => {
-        bind.factory(tokens.port, { invalid: "config" }, () => 3000);
+        bind(tokens.port).factory({ invalid: "config" }, () => 3000);
     }).type.toRaiseError();
     expect(() => {
-        bind.factory(tokens.port, { config: undefined as typeof tokens.config | undefined }, () => 3000);
+        bind(tokens.port).factory({ config: undefined as typeof tokens.config | undefined }, () => 3000);
     }).type.toRaiseError();
 });
 
@@ -93,12 +126,12 @@ test("class providers support object dependency injection", () => {
         }
     }
 
-    const serviceBinding = bind.class(ReadyService, InjectableService);
-    const serverBinding = bind.class(tokens.server, { config: tokens.config }, ServerImpl);
+    const serviceBinding = bind(ReadyService).class(InjectableService);
+    const serverBinding = bind(tokens.server).class({ config: tokens.config }, ServerImpl);
     const container = defineContainer(
         [ReadyService, ...tokenList],
         serviceBinding,
-        bind.value(tokens.config, { port: 3000 }),
+        bind(tokens.config).value({ port: 3000 }),
         serverBinding,
     ).create();
 
@@ -120,14 +153,13 @@ test("class providers reject incompatible constructors and dependency maps", () 
     }
 
     expect(() => {
-        bind.class(tokens.port, InjectableService);
+        bind(tokens.port).class(InjectableService);
     }).type.toRaiseError();
     expect(() => {
-        bind.class(tokens.server, { config: tokens.config }, NeedsLogger);
+        bind(tokens.server).class({ config: tokens.config }, NeedsLogger);
     }).type.toRaiseError();
     expect(() => {
-        bind.class(
-            tokens.server,
+        bind(tokens.server).class(
             { invalid: "config" },
             class {
                 readonly port = 3000;
@@ -143,16 +175,16 @@ test("provider helpers validate dispose options and extra arguments", () => {
         close() {}
     }
 
-    const valueBinding = bind.value(tokens.port, 3000, {
-        dispose: (port) => {
+    const valueBinding = bind(tokens.port)
+        .value(3000)
+        .disposable((port) => {
             expect(port).type.toBe<number>();
-        },
-    });
-    const classBinding = bind.class(DisposableService, DisposableServiceImpl, {
-        dispose: (service) => {
+        });
+    const classBinding = bind(DisposableService)
+        .class(DisposableServiceImpl)
+        .disposable((service) => {
             expect(service).type.toBeAssignableTo<{ readonly close: () => void }>();
-        },
-    });
+        });
     const ExistingLogger = token("ExistingLoggerWithDispose").of<Logger>();
     const AliasLogger = token("AliasLoggerWithDispose").of<Logger>();
 
@@ -160,13 +192,17 @@ test("provider helpers validate dispose options and extra arguments", () => {
     expect(classBinding.dispose).type.toBe<Disposer<{ readonly close: () => void }> | undefined>();
 
     expect(() => {
-        bind.value(tokens.port, 3000, { dispose: (_port: string) => {} });
+        bind(tokens.port)
+            .value(3000)
+            .disposable((_port: string) => {});
     }).type.toRaiseError();
     expect(() => {
-        bind.class(DisposableService, DisposableServiceImpl, { dispose: (_port: number) => {} });
+        bind(DisposableService)
+            .class(DisposableServiceImpl)
+            .disposable((_port: number) => {});
     }).type.toRaiseError();
     expect(() => {
-        bind.alias(AliasLogger, ExistingLogger, {});
+        bind(AliasLogger).alias(ExistingLogger, {});
     }).type.toRaiseError();
 });
 
@@ -179,14 +215,14 @@ test("alias providers resolve existing tokens and preserve target values", () =>
     };
     const container = defineContainer(
         [ExistingLogger, AliasLogger],
-        bind.value(ExistingLogger, logger),
-        bind.alias(AliasLogger, ExistingLogger),
+        bind(ExistingLogger).value(logger),
+        bind(AliasLogger).alias(ExistingLogger),
     ).create();
 
     expect(container.resolve(AliasLogger)).type.toBe<Logger>();
 
     expect(() => {
-        bind.alias(tokens.port, tokens.config);
+        bind(tokens.port).alias(tokens.config);
     }).type.toRaiseError();
 });
 
@@ -195,14 +231,14 @@ test("alias providers can contribute existing single tokens to multibind tokens"
     const Handlers = multiToken("ProviderHandlers").of<Handler>();
     const container = defineContainer(
         [ExistingHandler, Handlers],
-        bind.value(ExistingHandler, (message) => message.length),
-        bind.alias(Handlers, ExistingHandler),
+        bind(ExistingHandler).value((message) => message.length),
+        bind(Handlers).alias(ExistingHandler),
     ).create();
 
     expect(container.resolveAll(Handlers)).type.toBe<Handler[]>();
 
     expect(() => {
-        bind.alias(tokens.handler, Handlers);
+        bind(tokens.handler).alias(Handlers);
     }).type.toRaiseError();
 });
 
@@ -213,31 +249,35 @@ test("alias providers participate in graph validation", () => {
     const External = token("ProviderExternal").of<Service>();
     const providerTokenList = [First, Second] as const;
 
-    const missingDependencyContainer = defineContainer(providerTokenList, bind.alias(First, Second)).create();
+    const missingDependencyContainer = defineContainer(providerTokenList, bind(First).alias(Second)).create();
     expect(() => {
         missingDependencyContainer.resolve(First);
     }).type.toRaiseError();
 
     expect(() => {
-        defineContainer(providerTokenList, bind.alias(First, External)).create();
+        defineContainer(providerTokenList, bind(First).alias(External)).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 
     expect(() => {
-        defineContainer(providerTokenList, bind.alias(First, Second), bind.alias(Second, First)).create();
+        defineContainer(providerTokenList, bind(First).alias(Second), bind(Second).alias(First)).create();
     }).type.toRaiseError("__circular_dependency__");
 
     expect(() => {
         defineContainer(
             providerTokenList,
-            bind.singleton.alias(First, Second),
-            bind.scoped(Second, () => ({ id: "second" })),
+            bind(First).singleton().alias(Second),
+            bind(Second)
+                .scoped()
+                .factory(() => ({ id: "second" })),
         ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 
     const scopedAliasContainer = defineContainer(
         providerTokenList,
-        bind.alias(First, Second),
-        bind.scoped(Second, () => ({ id: "second" })),
+        bind(First).alias(Second),
+        bind(Second)
+            .scoped()
+            .factory(() => ({ id: "second" })),
     ).create();
 
     expect(scopedAliasContainer.resolve(First)).type.toBe<Service>();

@@ -28,7 +28,7 @@ test("qualified tokens preserve base token value type", () => {
     expect<TokenValue<typeof JsonLogger>>().type.toBe<{ readonly name: string }>();
 });
 
-test("bind.qualified requires the qualified token in flat container token lists", () => {
+test("bind(qualified(...)) requires the qualified token in flat container token lists", () => {
     const Logger = token("Logger").of<{ readonly name: string }>();
     const Json = qualifier("json");
     const JsonLogger = qualified(Logger, Json);
@@ -36,7 +36,7 @@ test("bind.qualified requires the qualified token in flat container token lists"
 
     const container = defineContainer(
         [JsonLogger],
-        bind.qualified(Logger, Json, () => ({ name: "json" })),
+        bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
     ).create();
 
     expect(container.resolve(JsonLogger)).type.toBe<{ readonly name: string }>();
@@ -44,21 +44,21 @@ test("bind.qualified requires the qualified token in flat container token lists"
     expect(() => {
         defineContainer(
             [Logger],
-            bind.qualified(Logger, Json, () => ({ name: "json" })),
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
         ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
 
     expect(() => {
         defineContainer(
             [PlainJsonLogger],
-            bind.qualified(Logger, Json, () => ({ name: "json" })),
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
         ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
 
     expect(() => {
         defineContainer(
             [JsonLogger],
-            bind(PlainJsonLogger, () => ({ name: "plain" })),
+            bind(PlainJsonLogger).factory(() => ({ name: "plain" })),
         ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
 });
@@ -69,10 +69,10 @@ test("same-key plain and qualified module providers are not ambiguous", () => {
     const JsonLogger = qualified(Logger, Json);
     const PlainJsonLogger = token("Logger:json").of<{ readonly name: string }>();
     const PlainLoggerModule = defineModule({
-        bindings: [exported(bind(PlainJsonLogger, () => ({ name: "plain" })))],
+        bindings: [exported(bind(PlainJsonLogger).factory(() => ({ name: "plain" })))],
     });
     const QualifiedLoggerModule = defineModule({
-        bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "qualified" })))],
+        bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "qualified" })))],
     });
     const PlainApp = composeModules({
         modules: [PlainLoggerModule, QualifiedLoggerModule],
@@ -103,7 +103,7 @@ test("module imports do not satisfy same-key qualified dependencies", () => {
             imports: [PlainJsonLogger],
             bindings: [
                 exported(
-                    bind(Consumer, { logger: JsonLogger }, ({ logger }) => ({
+                    bind(Consumer).factory({ logger: JsonLogger }, ({ logger }) => ({
                         loggerName: logger.name,
                     })),
                 ),
@@ -121,14 +121,14 @@ test("provideImport wires single imports to assignable provider tokens", () => {
         imports: [Logger],
         bindings: [
             exported(
-                bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
                     loggerName: logger.name,
                 })),
             ),
         ],
     });
     const LoggerModule = defineModule({
-        bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+        bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
     });
     const wire = provideImport(ConsumerModule, Logger).with(JsonLogger);
 
@@ -157,8 +157,8 @@ test("wired imports reject structurally ambiguous module targets", () => {
     });
     const LoggerModule = defineModule({
         bindings: [
-            exported(bind(Logger, () => ({ name: "plain" }))),
-            exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
+            exported(bind(Logger).factory(() => ({ name: "plain" }))),
+            exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))),
         ],
     });
 
@@ -181,7 +181,7 @@ test("wired imports do not require an unwired provider when mixed with other imp
         imports: [Logger, Config],
         bindings: [
             exported(
-                bind(Consumer, { logger: Logger, config: Config }, ({ logger, config }) => ({
+                bind(Consumer).factory({ logger: Logger, config: Config }, ({ logger, config }) => ({
                     loggerName: logger.name,
                     port: config.port,
                 })),
@@ -190,8 +190,8 @@ test("wired imports do not require an unwired provider when mixed with other imp
     });
     const ProviderModule = defineModule({
         bindings: [
-            exported(bind.qualified(Logger, Json, () => ({ name: "json" }))),
-            exported(bind(Config, () => ({ port: 3000 }))),
+            exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))),
+            exported(bind(Config).factory(() => ({ port: 3000 }))),
         ],
     });
     const App = composeModules({
@@ -214,7 +214,7 @@ test("provideImport rejects incompatible provider value types", () => {
         imports: [Logger],
         bindings: [
             exported(
-                bind(Consumer, { logger: Logger }, ({ logger }) => ({
+                bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
                     loggerName: logger.name,
                 })),
             ),
@@ -235,14 +235,22 @@ test("wired scoped providers still fail singleton consumers", () => {
         imports: [Logger],
         bindings: [
             exported(
-                bind.singleton(Consumer, { logger: Logger }, ({ logger }) => ({
-                    loggerName: logger.name,
-                })),
+                bind(Consumer)
+                    .singleton()
+                    .factory({ logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
             ),
         ],
     });
     const LoggerModule = defineModule({
-        bindings: [exported(bind.scoped.qualified(Logger, Json, () => ({ name: "json" })))],
+        bindings: [
+            exported(
+                bind(qualified(Logger, Json))
+                    .scoped()
+                    .factory(() => ({ name: "json" })),
+            ),
+        ],
     });
 
     expect(() => {
@@ -263,14 +271,16 @@ test("wired provider overrides participate in module override validation", () =>
         imports: [Logger],
         bindings: [
             exported(
-                bind.singleton(Consumer, { logger: Logger }, ({ logger }) => ({
-                    loggerName: logger.name,
-                })),
+                bind(Consumer)
+                    .singleton()
+                    .factory({ logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
             ),
         ],
     });
     const LoggerModule = defineModule({
-        bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+        bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
     });
     const App = composeModules({
         modules: [ConsumerModule, LoggerModule],
@@ -280,7 +290,13 @@ test("wired provider overrides participate in module override validation", () =>
     const definition = defineContainer.module(App);
 
     expect(() => {
-        definition.create(override(bind.scoped(JsonLogger, () => ({ name: "scoped" }))));
+        definition.create(
+            override(
+                bind(JsonLogger)
+                    .scoped()
+                    .factory(() => ({ name: "scoped" })),
+            ),
+        );
     }).type.toRaiseError("__invalid_overrides__");
 
     expect(() => {
@@ -298,21 +314,21 @@ test("wired provider overrides match exact token identity when keys collide", ()
         imports: [PlainJsonLogger],
         bindings: [
             exported(
-                bind(Consumer, { logger: PlainJsonLogger }, ({ logger }) => ({
+                bind(Consumer).factory({ logger: PlainJsonLogger }, ({ logger }) => ({
                     loggerName: logger.name,
                 })),
             ),
         ],
     });
     const LoggerModule = defineModule({
-        bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+        bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
     });
     const App = composeModules({
         modules: [ConsumerModule, LoggerModule],
         wire: [provideImport(ConsumerModule, PlainJsonLogger).with(JsonLogger)],
         exports: [Consumer, JsonLogger],
     });
-    const app = defineContainer.module(App).create(override(bind(JsonLogger, () => ({ name: "override" }))));
+    const app = defineContainer.module(App).create(override(bind(JsonLogger).factory(() => ({ name: "override" }))));
 
     expect(app.resolve(Consumer)).type.toBe<{ readonly loggerName: string }>();
 });

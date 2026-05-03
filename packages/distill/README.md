@@ -37,7 +37,7 @@ const Config = token("Config").of<Config>();
 
 const container = defineContainer(
     [Config],
-    bind(Config, () => ({ port: 3000 })),
+    bind(Config).factory(() => ({ port: 3000 })),
 ).create();
 
 const config = container.resolve(Config);
@@ -57,8 +57,8 @@ const Handlers = multiToken("Handlers").of<Handler>();
 
 const container = defineContainer(
     [Handlers],
-    bind(Handlers, () => ({ handle: (message) => console.log("audit", message) })),
-    bind(Handlers, () => ({ handle: (message) => console.log("metrics", message) })),
+    bind(Handlers).factory(() => ({ handle: (message) => console.log("audit", message) })),
+    bind(Handlers).factory(() => ({ handle: (message) => console.log("metrics", message) })),
 ).create();
 
 const handlers = container.resolveAll(Handlers);
@@ -90,9 +90,9 @@ const Server = token("Server").of<Server>();
 
 const container = defineContainer(
     [Config, Logger, Server],
-    bind(Config, () => ({ port: 3000 })),
-    bind(Logger, () => console),
-    bind(Server, { config: Config, logger: Logger }, ({ config, logger }) => ({
+    bind(Config).factory(() => ({ port: 3000 })),
+    bind(Logger).factory(() => console),
+    bind(Server).factory({ config: Config, logger: Logger }, ({ config, logger }) => ({
         start: () => logger.log(`Listening on ${config.port}`),
     })),
 ).create();
@@ -124,14 +124,14 @@ const Pool = token("Pool").of<Pool>();
 const Db = token("Db").of<Db>();
 
 const ConfigModule = defineModule({
-    bindings: [exported(bind(Config, () => ({ url: "postgres://localhost" })))],
+    bindings: [exported(bind(Config).factory(() => ({ url: "postgres://localhost" })))],
 } as const);
 
 const DbModule = defineModule({
     imports: [Config],
     bindings: [
-        bind(Pool, { config: Config }, ({ config }) => ({ url: config.url })),
-        exported(bind(Db, { pool: Pool }, ({ pool }) => createDb(pool))),
+        bind(Pool).factory({ config: Config }, ({ config }) => ({ url: config.url })),
+        exported(bind(Db).factory({ pool: Pool }, ({ pool }) => createDb(pool))),
     ],
 } as const);
 
@@ -169,10 +169,10 @@ const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
 const AppModule = defineModule({
     bindings: [
-        bind(Hooks, () => ({ name: "internal" })),
-        exported(bind(Hooks, () => ({ name: "public" }))),
+        bind(Hooks).factory(() => ({ name: "internal" })),
+        exported(bind(Hooks).factory(() => ({ name: "public" }))),
         exported(
-            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ),
@@ -227,16 +227,16 @@ const Server = token("Server").of<Server>();
 
 const container = defineContainer(
     [Config, Logger, ConsoleLogger, Server],
-    bind.value(Config, { port: 3000 }),
-    bind.value(ConsoleLogger, console),
-    bind.alias(Logger, ConsoleLogger),
-    bind.class(Server, { config: Config, logger: Logger }, ServerImpl),
+    bind(Config).value({ port: 3000 }),
+    bind(ConsoleLogger).value(console),
+    bind(Logger).alias(ConsoleLogger),
+    bind(Server).class({ config: Config, logger: Logger }, ServerImpl),
 ).create();
 
 container.resolve(Server).start();
 ```
 
-Provider helpers are shorthand for regular bindings. They keep the same explicit dependency maps and compile-time graph validation.
+Provider methods are shorthand for regular factory bindings. They keep the same explicit dependency maps and compile-time graph validation.
 
 ### Mark a dependency as optional
 
@@ -256,7 +256,7 @@ const Server = token("Server").of<Server>();
 
 const container = defineContainer(
     [Config, Server],
-    bind(Server, { config: optional(Config) }, ({ config }) => ({
+    bind(Server).factory({ config: optional(Config) }, ({ config }) => ({
         port: config?.port ?? 3000,
     })),
 ).create();
@@ -284,12 +284,12 @@ const JobRunner = token("JobRunner").of<JobRunner>();
 
 const container = defineContainer(
     [Logger, JobRunner],
-    bind(JobRunner, { logger: ref(Logger) }, ({ logger }) => ({
+    bind(JobRunner).factory({ logger: ref(Logger) }, ({ logger }) => ({
         run: () => {
             logger.value.log("Running job");
         },
     })),
-    bind(Logger, () => console),
+    bind(Logger).factory(() => console),
 ).create();
 
 const runner = container.resolve(JobRunner);
@@ -317,10 +317,10 @@ const Audit = token("Audit").of<Audit>();
 
 const container = defineContainer(
     [Users, Audit],
-    bind(Users, { audit: ref(Audit) }, ({ audit }) => ({
+    bind(Users).factory({ audit: ref(Audit) }, ({ audit }) => ({
         getAudit: () => audit.value,
     })),
-    bind(Audit, { users: ref(Users) }, ({ users }) => ({
+    bind(Audit).factory({ users: ref(Users) }, ({ users }) => ({
         getUsers: () => users.value,
     })),
 ).create();
@@ -352,18 +352,18 @@ const ReportHooks = multiToken("ReportHooks").of<() => void>();
 
 const app = defineContainer(
     [Clock, Reports, ReportHooks],
-    bind(Clock, () => ({ now: () => new Date() })),
-    bind(Reports, { clock: Clock }, ({ clock }) => ({
+    bind(Clock).factory(() => ({ now: () => new Date() })),
+    bind(Reports).factory({ clock: Clock }, ({ clock }) => ({
         createdAt: () => clock.now(),
     })),
-    bind(ReportHooks, () => () => console.log("audit")),
-    bind(ReportHooks, () => () => console.log("metrics")),
+    bind(ReportHooks).factory(() => () => console.log("audit")),
+    bind(ReportHooks).factory(() => () => console.log("metrics")),
 );
 
 const production = app.create();
 
 const test = app.create(
-    override(bind(Clock, () => ({ now: () => new Date("2026-01-01T00:00:00.000Z") }))),
+    override(bind(Clock).factory(() => ({ now: () => new Date("2026-01-01T00:00:00.000Z") }))),
     overrideAll(ReportHooks, []),
 );
 
@@ -391,13 +391,13 @@ const AuditLog = token("AuditLog").of<AuditLog>();
 
 const app = defineContainer(
     [CurrentUser, AuditLog],
-    bind.scoped(AuditLog, { currentUser: CurrentUser }, ({ currentUser }) => ({
+    bind(AuditLog).scoped().factory({ currentUser: CurrentUser }, ({ currentUser }) => ({
         userId: currentUser.id,
     })),
 ).create();
 
 const request = app.createScope(
-    bind.scoped(CurrentUser, () => ({ id: "user-1" })),
+    bind(CurrentUser).scoped().factory(() => ({ id: "user-1" })),
 );
 
 request.resolve(AuditLog).userId;
@@ -410,7 +410,7 @@ Use `runScoped` when a request or job scope should be disposed automatically:
 
 ```ts
 const requestBindings = [
-    bind.scoped(CurrentUser, () => ({ id: "user-1" })),
+    bind(CurrentUser).scoped().factory(() => ({ id: "user-1" })),
 ] as const;
 
 const userId = await app.runScoped(requestBindings, async (request) => {
@@ -444,10 +444,8 @@ const Service = token("Service").of<Service>();
 
 const app = defineContainer(
     [Db, UnitOfWork, Service],
-    bind.singleton(Db, () => createDb(), {
-        dispose: (db) => db.close(),
-    }),
-    bind.scoped(Service, { unitOfWork: UnitOfWork }, ({ unitOfWork }) => ({
+    bind(Db).singleton().factory(() => createDb()).disposable((db) => db.close()),
+    bind(Service).scoped().factory({ unitOfWork: UnitOfWork }, ({ unitOfWork }) => ({
         run: async () => {
             // use unitOfWork
         },
@@ -455,9 +453,7 @@ const app = defineContainer(
 ).create();
 
 const request = app.createScope(
-    bind.scoped(UnitOfWork, { db: Db }, ({ db }) => db.createUnitOfWork(), {
-        dispose: (unitOfWork) => unitOfWork.rollback(),
-    }),
+    bind(UnitOfWork).scoped().factory({ db: Db }, ({ db }) => db.createUnitOfWork()).disposable((unitOfWork) => unitOfWork.rollback()),
 );
 
 try {
@@ -478,29 +474,20 @@ token(key).of<T>()
 multiToken(key).of<T>()
 qualifier(key)
 qualified(token, qualifier)
-bind(token, factory, options?)
-bind(token, dependencies, factory, options?)
-bind.value(token, value, options?)
-bind.factory(token, factory, options?)
-bind.factory(token, dependencies, factory, options?)
-bind.class(token, Class, options?)
-bind.class(token, dependencies, Class, options?)
-bind.alias(token, existingToken)
-bind.useExisting(token, existingToken)
-bind.qualified(token, qualifier, factory, options?)
-bind.qualified(token, qualifier, dependencies, factory, options?)
-bind.singleton(token, factory, options?)
-bind.singleton(token, dependencies, factory, options?)
-bind.scoped(token, factory, options?)
-bind.scoped(token, dependencies, factory, options?)
-bind.transient(token, factory, options?)
-bind.transient(token, dependencies, factory, options?)
-bind.singleton|scoped|transient.value(...)
-bind.singleton|scoped|transient.factory(...)
-bind.singleton|scoped|transient.class(...)
-bind.singleton|scoped|transient.alias(...)
-bind.singleton|scoped|transient.useExisting(...)
-bind.singleton|scoped|transient.qualified(...)
+bind(token)
+bind(token).value(value)
+bind(token).factory(factory)
+bind(token).factory(dependencies, factory)
+bind(token).class(Class)
+bind(token).class(dependencies, Class)
+bind(token).alias(existingToken)
+bind(token).useExisting(existingToken)
+bind(qualified(token, qualifier)).factory(factory)
+bind(qualified(token, qualifier)).factory(dependencies, factory)
+bind(token).singleton()
+bind(token).scoped()
+bind(token).transient()
+bind(token).disposable(disposer)
 all(multibindToken)
 all(() => multibindToken)
 optional(dependency)
@@ -565,7 +552,7 @@ const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
 Multibind tokens use the same key rules and default value inference as regular tokens. Single tokens are bound once in a visible scope; multibind tokens may have multiple contributions.
 
-### `qualifier(key)`, `qualified(token, qualifier)`, and `bind.qualified(...)`
+### `qualifier(key)` and `qualified(token, qualifier)`
 
 Creates a qualified variant of a regular token.
 
@@ -582,7 +569,7 @@ const JsonLogger = qualified(Logger, Json);
 
 const container = defineContainer(
     [JsonLogger],
-    bind.qualified(Logger, Json, () => ({ name: "json" })),
+    bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
 ).create();
 
 container.resolve(JsonLogger);
@@ -591,14 +578,14 @@ container.resolve(JsonLogger);
 
 `qualified(...)` accepts regular tokens, not multibind tokens. The qualified token keeps the base token's value type but has its own token identity, so it does not collide with a plain token whose key has the same displayed text.
 
-`bind.qualified(baseToken, qualifier, ...)` is shorthand for binding `qualified(baseToken, qualifier)`. It accepts the same dependency-free and dependency-map overloads as `bind(...)`, and is also available on `bind.singleton`, `bind.scoped`, and `bind.transient`.
+Bind a qualified token by passing the result of `qualified(...)` to `bind(...)`.
 
-### `bind(token, factory, options?)`
+### `bind(token).factory(factory)`
 
 Creates a binding for a service without declared dependencies.
 
 ```ts
-const configBinding = bind(Config, () => ({ port: 3000 }));
+const configBinding = bind(Config).factory(() => ({ port: 3000 }));
 ```
 
 The factory is lazy: it is not called when the binding or container is created. It runs when the service is resolved according to the binding lifetime.
@@ -608,31 +595,25 @@ The default `bind(...)` lifetime is singleton. Singleton values are cached in th
 The factory return type must be assignable to the token value type. If the service value itself is a function, return that function from the factory:
 
 ```ts
-const handlerBinding = bind(Handler, () => (message: string) => message.length);
+const handlerBinding = bind(Handler).factory(() => (message: string) => message.length);
 ```
 
-Pass `options.dispose` to close values created by the binding:
+Use `.disposable(...)` to close values created by the binding:
 
 ```ts
-const dbBinding = bind.singleton(Db, () => createDb(), {
-    dispose: (db) => db.close(),
-});
+const dbBinding = bind(Db).singleton().factory(() => createDb()).disposable((db) => db.close());
 ```
 
 The disposer receives the resolved service value and may return `void` or `Promise<void>`.
 
-### `bind(token, dependencies, factory, options?)`
+### `bind(token).factory(dependencies, factory)`
 
 Creates a binding for a service with an explicit dependency map.
 
 ```ts
-const serverBinding = bind(
-    Server,
-    { config: Config, logger: Logger },
-    ({ config, logger }) => ({
-        start: () => logger.log(`Listening on ${config.port}`),
-    }),
-);
+const serverBinding = bind(Server).factory({ config: Config, logger: Logger }, ({ config, logger }) => ({
+    start: () => logger.log(`Listening on ${config.port}`),
+}));
 ```
 
 Dependency map keys become properties on the factory parameter. Dependency values can be:
@@ -645,7 +626,7 @@ Dependency map keys become properties on the factory parameter. Dependency value
 The factory parameter is inferred from the dependency map:
 
 ```ts
-bind(Server, { config: Config }, ({ config }) => {
+bind(Server).factory({ config: Config }, ({ config }) => {
     // config is inferred from Config
     return { port: config.port };
 });
@@ -658,19 +639,17 @@ Binding order does not matter:
 ```ts
 const container = defineContainer(
     [Config, Server],
-    bind(Server, { config: Config }, ({ config }) => ({ port: config.port })),
-    bind(Config, () => ({ port: 3000 })),
+    bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })),
+    bind(Config).factory(() => ({ port: 3000 })),
 ).create();
 ```
-
-The optional fourth argument is the same binding options object accepted by dependency-free bindings.
 
 ### `all(multibindToken)` and `all(() => multibindToken)`
 
 Creates a dependency reference for every visible binding of a multibind token.
 
 ```ts
-const registryBinding = bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+const registryBinding = bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
     names: hooks.map((hook) => hook.name),
 }));
 ```
@@ -682,31 +661,31 @@ The factory parameter is inferred as `Array<TokenValue<typeof Hooks>>`. `all(() 
 Marks a dependency as optional.
 
 ```ts
-const serverBinding = bind(Server, { config: optional(Config) }, ({ config }) => ({
+const serverBinding = bind(Server).factory({ config: optional(Config) }, ({ config }) => ({
     port: config?.port ?? 3000,
 }));
 ```
 
 The wrapped dependency can be a regular token, `ref(...)`, or `all(...)`. The factory receives `undefined` when the dependency is not visible in the current container or scope. If the dependency is visible, its own graph is still validated and resolved normally.
 
-### Provider helpers
+### Provider methods
 
-Provider helpers create the same `Binding` objects as `bind(...)`.
+Provider methods create the same `Binding` objects as factory bindings.
 
 ```ts
 const Json = qualifier("json");
-const configBinding = bind.value(Config, { port: 3000 });
-const serverBinding = bind.factory(Server, { config: Config }, ({ config }) => ({ port: config.port }));
-const classBinding = bind.class(Server, { config: Config }, ServerImpl);
-const aliasBinding = bind.alias(Logger, ConsoleLogger);
-const qualifiedBinding = bind.qualified(Logger, Json, () => console);
+const configBinding = bind(Config).value({ port: 3000 });
+const serverBinding = bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port }));
+const classBinding = bind(Server).class({ config: Config }, ServerImpl);
+const aliasBinding = bind(Logger).alias(ConsoleLogger);
+const qualifiedBinding = bind(qualified(Logger, Json)).factory(() => console);
 ```
 
-`bind.value(token, value, options?)` binds an already-created value. Use it for configuration objects, test doubles, and function-valued services that should be registered directly instead of returned from a factory.
+`bind(token).value(value)` binds an already-created value. Use it for configuration objects, test doubles, and function-valued services that should be registered directly instead of returned from a factory.
 
-`bind.factory(...)` is an explicit provider-name alias for `bind(...)`; it accepts the same overloads and options.
+`bind(token).factory(...)` accepts the dependency-free and dependency-map overloads shown above.
 
-`bind.class(token, Class, options?)` creates the class with `new Class()`. `bind.class(token, dependencies, Class, options?)` resolves the dependency map and passes it as the single constructor argument:
+`bind(token).class(Class)` creates the class with `new Class()`. `bind(token).class(dependencies, Class)` resolves the dependency map and passes it as the single constructor argument:
 
 ```ts
 class ServerImpl {
@@ -714,20 +693,27 @@ class ServerImpl {
 }
 ```
 
-`bind.alias(token, existingToken)` and `bind.useExisting(token, existingToken)` resolve `existingToken` and return that value for `token`. The existing token must be a regular token; the bound token may be regular or multibind. The top-level alias helpers are transient so the alias follows the existing token's lifetime instead of caching the existing value on its own.
+`bind(token).alias(existingToken)` and `bind(token).useExisting(existingToken)` resolve `existingToken` and return that value for `token`. The existing token must be a regular token; the bound token may be regular or multibind. Alias bindings are transient by default so the alias follows the existing token's lifetime instead of caching the existing value on its own.
 
-`bind.qualified(baseToken, qualifier, ...)` binds the qualified token created from that base token and qualifier.
+`bind(qualified(baseToken, qualifier)).factory(...)` binds the qualified token created from that base token and qualifier.
 
-All provider helpers are also available on `bind.singleton`, `bind.scoped`, and `bind.transient`. Use explicit lifetime alias helpers only when the alias itself should have that lifetime.
+Lifetime and disposal methods may be called before or after the provider method:
 
-### `bind.singleton`, `bind.scoped`, and `bind.transient`
+```ts
+const dbBinding = bind(Db).factory(() => createDb()).singleton().disposable((db) => db.close());
+const requestUserBinding = bind(CurrentUser).scoped().factory(() => currentUser);
+```
+
+Use an explicit lifetime on aliases only when the alias binding itself should have that lifetime.
+
+### `singleton()`, `scoped()`, and `transient()`
 
 Creates a binding with an explicit lifetime.
 
 ```ts
-const dbBinding = bind.singleton(Db, () => createDb());
-const requestUserBinding = bind.scoped(CurrentUser, () => currentUser);
-const idBinding = bind.transient(Id, () => crypto.randomUUID());
+const dbBinding = bind(Db).factory(() => createDb()).singleton();
+const requestUserBinding = bind(CurrentUser).factory(() => currentUser).scoped();
+const idBinding = bind(Id).transient().factory(() => crypto.randomUUID());
 ```
 
 Lifetimes behave as follows:
@@ -736,7 +722,7 @@ Lifetimes behave as follows:
 - `scoped`: cached in the scope that resolves the service;
 - `transient`: not cached; the factory runs for every resolution.
 
-`bind(...)` is equivalent to `bind.singleton(...)`.
+Factory, value, and class bindings are singleton by default. Alias bindings are transient by default.
 
 Singleton bindings cannot depend on scoped bindings. TypeScript reports this at the container or scope definition, including through transitive dependencies.
 
@@ -747,7 +733,7 @@ Disposable transient values are tracked by the scope that resolved them and are 
 Creates a lazy dependency reference.
 
 ```ts
-const binding = bind(JobRunner, { logger: ref(Logger) }, ({ logger }) => ({
+const binding = bind(JobRunner).factory({ logger: ref(Logger) }, ({ logger }) => ({
     run: () => logger.value.log("Running job"),
 }));
 ```
@@ -757,7 +743,7 @@ A `ref` dependency gives the factory a `Ref<T>` object with a readonly `.value` 
 Use `ref` when a dependency is expensive, optional within a code path, or part of a circular relationship where access can be delayed until after initialization.
 
 ```ts
-const usersBinding = bind(Users, { audit: ref(Audit) }, ({ audit }) => ({
+const usersBinding = bind(Users).factory({ audit: ref(Audit) }, ({ audit }) => ({
     getAudit: () => audit.value,
 }));
 ```
@@ -777,8 +763,8 @@ Creates a reusable container definition from an array of tokens and bindings.
 ```ts
 const app = defineContainer(
     [Config, Logger],
-    bind(Config, () => ({ port: 3000 })),
-    bind(Logger, () => console),
+    bind(Config).factory(() => ({ port: 3000 })),
+    bind(Logger).factory(() => console),
 );
 
 const container = app.create();
@@ -805,8 +791,8 @@ When spreading a binding list, preserve tuple information:
 
 ```ts
 const bindings = [
-    bind(Config, () => ({ port: 3000 })),
-    bind(Port, { config: Config }, ({ config }) => config.port),
+    bind(Config).factory(() => ({ port: 3000 })),
+    bind(Port).factory({ config: Config }, ({ config }) => config.port),
 ] as const;
 
 const container = defineContainer([Config, Port], ...bindings).create();
@@ -825,14 +811,14 @@ const JsonLogger = qualified(Logger, Json);
 const ConsumerModule = defineModule({
     imports: [Logger],
     bindings: [
-        exported(bind(Consumer, { logger: Logger }, ({ logger }) => ({
+        exported(bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
             loggerName: logger.name,
         }))),
     ],
 } as const);
 
 const LoggerModule = defineModule({
-    bindings: [exported(bind.qualified(Logger, Json, () => ({ name: "json" })))],
+    bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
 } as const);
 
 const App = composeModules({
@@ -857,7 +843,7 @@ Creates an isolated runtime container from a definition. Each call has its own s
 ```ts
 const production = app.create();
 const test = app.create(
-    override(bind(Config, () => ({ port: 4000 }))),
+    override(bind(Config).factory(() => ({ port: 4000 }))),
 );
 ```
 
@@ -878,7 +864,7 @@ Use `overrideAll(multibindToken, bindings)` for multibind tokens:
 ```ts
 const test = app.create(
     overrideAll(Handlers, [
-        bind(Handlers, () => testHandler),
+        bind(Handlers).factory(() => testHandler),
     ]),
 );
 
@@ -895,7 +881,7 @@ Creates a child scope that inherits parent bindings and can add or override bind
 
 ```ts
 const request = app.createScope(
-    bind.scoped(CurrentUser, () => user),
+    bind(CurrentUser).scoped().factory(() => user),
 );
 
 const service = request.resolve(Service);
@@ -911,7 +897,7 @@ Creates a child scope, passes it to `callback`, then disposes that scope whether
 
 ```ts
 const result = await app.runScoped(
-    [bind.scoped(CurrentUser, () => user)] as const,
+    [bind(CurrentUser).scoped().factory(() => user)] as const,
     async (request) => request.resolve(Service).run(),
 );
 ```
@@ -987,7 +973,6 @@ import type {
     BindingOverrideAll,
     BindingUnbind,
     BindingLifetime,
-    BindingOptions,
     ComposedModuleDefinition,
     Container,
     ContainerDefinition,
@@ -1025,9 +1010,9 @@ import { bind, defineContainer, token, type Container } from "@satunnaisuus/dist
 const Config = token("Config").of<{ readonly name: string }>();
 const Port = token("Port").of<{ readonly value: number }>();
 
-const rootConfig = bind.scoped(Config, () => ({ name: "root" }));
-const childPort = bind.transient(Port, () => ({ value: 3000 }));
-const childConfig = bind.singleton(Config, () => ({ name: "child" }));
+const rootConfig = bind(Config).scoped().factory(() => ({ name: "root" }));
+const childPort = bind(Port).transient().factory(() => ({ value: 3000 }));
+const childConfig = bind(Config).singleton().factory(() => ({ name: "child" }));
 
 const child = defineContainer([Config, Port], rootConfig).create().createScope(childPort, childConfig);
 

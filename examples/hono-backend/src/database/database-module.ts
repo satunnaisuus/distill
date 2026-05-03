@@ -14,9 +14,9 @@ export const DatabaseModule = defineModule({
     imports: [AppConfig],
     bindings: [
         exported(
-            bind(Database, { config: AppConfig }, ({ config }) => createDatabaseClient(config.databaseUrl), {
-                dispose: (database) => database.$disconnect(),
-            }),
+            bind(Database)
+                .factory({ config: AppConfig }, ({ config }) => createDatabaseClient(config.databaseUrl))
+                .disposable((database) => database.$disconnect()),
         ),
     ],
 } as const);

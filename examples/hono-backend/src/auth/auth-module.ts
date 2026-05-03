@@ -10,12 +10,20 @@ export const AuthModule = defineModule({
     imports: [AppConfig, Database],
     bindings: [
         exported(
-            bind(AuthToken, { config: AppConfig, database: Database }, ({ config, database }) =>
+            bind(AuthToken).factory({ config: AppConfig, database: Database }, ({ config, database }) =>
                 createAuth(database, config),
             ),
         ),
-        exported(bind.scoped(CurrentUser, () => null)),
-        exported(bind.scoped(CurrentSession, () => null)),
-        exported(bind(HttpSubRouterToken, { auth: AuthToken }, createAuthSubRouter)),
+        exported(
+            bind(CurrentUser)
+                .scoped()
+                .factory(() => null),
+        ),
+        exported(
+            bind(CurrentSession)
+                .scoped()
+                .factory(() => null),
+        ),
+        exported(bind(HttpSubRouterToken).factory({ auth: AuthToken }, createAuthSubRouter)),
     ],
 } as const);

@@ -56,14 +56,14 @@ const createDeferred = (): Deferred => {
 };
 
 describe("defineContainer", () => {
-    it("resolves qualified tokens through bind.qualified", () => {
+    it("resolves qualified tokens through bind(qualified(...))", () => {
         const Logger = token("Logger").of<{ readonly name: string }>();
         const Json = qualifier("json");
         const JsonLogger = qualified(Logger, Json);
 
         const container = defineContainer(
             [JsonLogger],
-            bind.qualified(Logger, Json, () => ({ name: "json" })),
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
         ).create();
 
         expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
@@ -78,8 +78,8 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             [JsonLogger, HumanLogger],
-            bind.qualified(Logger, Json, () => ({ name: "json" })),
-            bind.qualified(Logger, Human, () => ({ name: "human" })),
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+            bind(qualified(Logger, Human)).factory(() => ({ name: "human" })),
         ).create();
 
         expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
@@ -88,8 +88,8 @@ describe("defineContainer", () => {
         expect(() =>
             defineContainer(
                 [JsonLogger],
-                bind.qualified(Logger, Json, () => ({ name: "first" })),
-                bind.qualified(Logger, Json, () => ({ name: "second" })),
+                bind(qualified(Logger, Json)).factory(() => ({ name: "first" })),
+                bind(qualified(Logger, Json)).factory(() => ({ name: "second" })),
             ),
         ).toThrowError('Service "Logger:json" is already registered in the container');
     });
@@ -101,8 +101,8 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             [Config, Logger],
-            bind(Config, () => ({ port: 3000 })),
-            bind(Logger, () => logger),
+            bind(Config).factory(() => ({ port: 3000 })),
+            bind(Logger).factory(() => logger),
         ).create();
 
         expect(container.resolve(Config)).toEqual({ port: 3000 });
@@ -113,7 +113,7 @@ describe("defineContainer", () => {
         const Counter = token("Counter").of<{ readonly value: number }>();
         let nextValue = 1;
         const factory = vi.fn(() => ({ value: nextValue++ }));
-        const definition = defineContainer(Object.values({ Counter }), bind(Counter, factory));
+        const definition = defineContainer(Object.values({ Counter }), bind(Counter).factory(factory));
 
         const firstContainer = definition.create();
         const secondContainer = definition.create();
@@ -131,12 +131,12 @@ describe("defineContainer", () => {
         };
         const definition = defineContainer(
             Object.values(tokens),
-            bind(tokens.clock, () => ({ now: () => "real" })),
-            bind(tokens.report, { clock: tokens.clock }, ({ clock }) => ({ createdAt: clock.now() })),
+            bind(tokens.clock).factory(() => ({ now: () => "real" })),
+            bind(tokens.report).factory({ clock: tokens.clock }, ({ clock }) => ({ createdAt: clock.now() })),
         );
 
         const production = definition.create();
-        const testContainer = definition.create(override(bind(tokens.clock, () => ({ now: () => "fake" }))));
+        const testContainer = definition.create(override(bind(tokens.clock).factory(() => ({ now: () => "fake" }))));
 
         expect(production.resolve(tokens.report)).toEqual({ createdAt: "real" });
         expect(testContainer.resolve(tokens.report)).toEqual({ createdAt: "fake" });
@@ -146,13 +146,16 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
-            bind(Hooks, () => ({ name: "metrics" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "metrics" })),
         );
 
         const production = definition.create();
         const testContainer = definition.create(
-            overrideAll(Hooks, [bind(Hooks, () => ({ name: "first" })), bind(Hooks, () => ({ name: "second" }))]),
+            overrideAll(Hooks, [
+                bind(Hooks).factory(() => ({ name: "first" })),
+                bind(Hooks).factory(() => ({ name: "second" })),
+            ]),
         );
         const emptyContainer = definition.create(overrideAll(Hooks, []));
 
@@ -166,8 +169,8 @@ describe("defineContainer", () => {
         const Service = token("Service").of<{ readonly feature: { readonly enabled: boolean } | undefined }>();
         const definition = defineContainer(
             [Feature, Service],
-            bind(Feature, () => ({ enabled: true })),
-            bind(Service, { feature: optional(Feature) }, ({ feature }) => ({ feature })),
+            bind(Feature).factory(() => ({ enabled: true })),
+            bind(Service).factory({ feature: optional(Feature) }, ({ feature }) => ({ feature })),
         );
 
         const production = definition.create();
@@ -185,8 +188,8 @@ describe("defineContainer", () => {
         const Server = token("Server").of<{ readonly port: number }>();
         const definition = defineContainer(
             [Config, Server],
-            bind(Config, () => ({ port: 3000 })),
-            bind(Server, { config: Config }, ({ config }) => ({ port: config.port })),
+            bind(Config).factory(() => ({ port: 3000 })),
+            bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })),
         );
         const create = definition.create as (...overrides: readonly unknown[]) => RuntimeContainerForTest;
         const testContainer = create(unbind(Config));
@@ -198,11 +201,11 @@ describe("defineContainer", () => {
         const Port = token("Port").of<number>();
         const definition = defineContainer(
             [Port],
-            bind(Port, () => 3000),
+            bind(Port).factory(() => 3000),
         );
         const create = definition.create as (...overrides: readonly unknown[]) => unknown;
 
-        expect(() => create(bind(Port, () => 4000))).toThrowError(
+        expect(() => create(bind(Port).factory(() => 4000))).toThrowError(
             "Overrides must be created with override, overrideAll, or unbind",
         );
     });
@@ -211,7 +214,7 @@ describe("defineContainer", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const definition = defineContainer([Config]);
 
-        expect(() => definition.create(override(bind(Config, () => ({ port: 3000 }))))).toThrowError(
+        expect(() => definition.create(override(bind(Config).factory(() => ({ port: 3000 }))))).toThrowError(
             'Service "Config" is not registered in the container definition',
         );
     });
@@ -220,11 +223,11 @@ describe("defineContainer", () => {
         const Port = token("Port").of<number>();
         const definition = defineContainer(
             [Port],
-            bind(Port, () => 3000),
+            bind(Port).factory(() => 3000),
         );
 
         expect(() =>
-            definition.create(override(bind(Port, () => 4000)), override(bind(Port, () => 5000))),
+            definition.create(override(bind(Port).factory(() => 4000)), override(bind(Port).factory(() => 5000))),
         ).toThrowError('Service "Port" is already overridden');
     });
 
@@ -232,11 +235,11 @@ describe("defineContainer", () => {
         const Port = token("Port").of<number>();
         const definition = defineContainer(
             [Port],
-            bind(Port, () => 3000),
+            bind(Port).factory(() => 3000),
         );
         const create = definition.create as (...overrides: readonly unknown[]) => unknown;
 
-        expect(() => create(unbind(Port), override(bind(Port, () => 4000)))).toThrowError(
+        expect(() => create(unbind(Port), override(bind(Port).factory(() => 4000)))).toThrowError(
             'Service "Port" is already overridden',
         );
     });
@@ -256,7 +259,7 @@ describe("defineContainer", () => {
         const External = token("External").of<number>();
         const definition = defineContainer(
             [Port],
-            bind(Port, () => 3000),
+            bind(Port).factory(() => 3000),
         );
         const create = definition.create as (...overrides: readonly unknown[]) => unknown;
 
@@ -267,7 +270,7 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
         const create = definition.create as (...overrides: readonly unknown[]) => unknown;
 
@@ -280,10 +283,10 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
 
-        expect(() => definition.create(override(bind(Hooks, () => ({ name: "test" })) as never))).toThrowError(
+        expect(() => definition.create(override(bind(Hooks).factory(() => ({ name: "test" })) as never))).toThrowError(
             'Multibind token "Hooks" must be overridden with overrideAll',
         );
     });
@@ -292,7 +295,7 @@ describe("defineContainer", () => {
         const Port = token("Port").of<number>();
         const definition = defineContainer(
             [Port],
-            bind(Port, () => 3000),
+            bind(Port).factory(() => 3000),
         );
 
         expect(() => definition.create(overrideAll(Port as never, []))).toThrowError(
@@ -305,11 +308,11 @@ describe("defineContainer", () => {
         const OtherHooks = multiToken("OtherHooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks, OtherHooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
 
         expect(() =>
-            definition.create(overrideAll(Hooks, [bind(OtherHooks, () => ({ name: "other" }))] as never)),
+            definition.create(overrideAll(Hooks, [bind(OtherHooks).factory(() => ({ name: "other" }))] as never)),
         ).toThrowError('overrideAll for "Hooks" only accepts bindings for the same multibind token');
     });
 
@@ -317,7 +320,7 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
         const hooksOverride = overrideAll(Hooks, []);
 
@@ -330,7 +333,7 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
 
         expect(() =>
@@ -349,7 +352,7 @@ describe("defineContainer", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const definition = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "audit" })),
+            bind(Hooks).factory(() => ({ name: "audit" })),
         );
 
         expect(() => definition.create(overrideAll(Hooks, []), overrideAll(Hooks, []))).toThrowError(
@@ -364,14 +367,14 @@ describe("defineContainer", () => {
         };
         const definition = defineContainer(
             Object.values(tokens),
-            bind(tokens.serviceA, () => ({ name: "a" })),
-            bind(tokens.serviceB, () => ({ name: "b" })),
+            bind(tokens.serviceA).factory(() => ({ name: "a" })),
+            bind(tokens.serviceB).factory(() => ({ name: "b" })),
         );
 
         expect(() =>
             definition.create(
-                override(bind(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" }))),
-                override(bind(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+                override(bind(tokens.serviceA).factory({ serviceB: tokens.serviceB }, () => ({ name: "a" }))),
+                override(bind(tokens.serviceB).factory({ serviceA: tokens.serviceA }, () => ({ name: "b" }))),
             ),
         ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
@@ -392,7 +395,7 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.port, () => 3000),
+            bind(tokens.port).factory(() => 3000),
         ).create();
 
         expect(container.resolve(tokens.port)).toBe(3000);
@@ -405,7 +408,7 @@ describe("defineContainer", () => {
         const config = { port: 3000 };
         const factory = vi.fn(() => config);
 
-        const container = defineContainer(Object.values(tokens), bind(tokens.config, factory)).create();
+        const container = defineContainer(Object.values(tokens), bind(tokens.config).factory(factory)).create();
 
         expect(factory).not.toHaveBeenCalled();
         expect(container.resolve(tokens.config)).toBe(config);
@@ -422,11 +425,11 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.config, () => {
+            bind(tokens.config).factory(() => {
                 calls.push("config");
                 return { port: 3000 };
             }),
-            bind(tokens.server, { config: tokens.config }, ({ config }) => {
+            bind(tokens.server).factory({ config: tokens.config }, ({ config }) => {
                 calls.push("server");
                 return { port: config.port };
             }),
@@ -444,8 +447,8 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
-            bind(tokens.config, () => ({ port: 3000 })),
+            bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({ port: config.port })),
+            bind(tokens.config).factory(() => ({ port: 3000 })),
         ).create();
 
         expect(container.resolve(tokens.server)).toEqual({ port: 3000 });
@@ -465,12 +468,15 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.config, () => ({ port: 3000 })),
-            bind(tokens.service, { config: tokens.config, logger: ref(tokens.logger) }, ({ config, logger }) => ({
-                port: config.port,
-                getLogger: () => logger.value,
-            })),
-            bind(tokens.logger, loggerFactory),
+            bind(tokens.config).factory(() => ({ port: 3000 })),
+            bind(tokens.service).factory(
+                { config: tokens.config, logger: ref(tokens.logger) },
+                ({ config, logger }) => ({
+                    port: config.port,
+                    getLogger: () => logger.value,
+                }),
+            ),
+            bind(tokens.logger).factory(loggerFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -491,10 +497,12 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind.transient(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
-                getLogger: () => logger.value,
-            })),
-            bind(tokens.logger, loggerFactory),
+            bind(tokens.service)
+                .transient()
+                .factory({ logger: ref(tokens.logger) }, ({ logger }) => ({
+                    getLogger: () => logger.value,
+                })),
+            bind(tokens.logger).factory(loggerFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -515,9 +523,9 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.config, configFactory),
-            bind(tokens.firstServer, { config: tokens.config }, ({ config }) => ({ config })),
-            bind(tokens.secondServer, { config: tokens.config }, ({ config }) => ({ config })),
+            bind(tokens.config).factory(configFactory),
+            bind(tokens.firstServer).factory({ config: tokens.config }, ({ config }) => ({ config })),
+            bind(tokens.secondServer).factory({ config: tokens.config }, ({ config }) => ({ config })),
         ).create();
 
         expect(container.resolve(tokens.firstServer).config).toBe(config);
@@ -539,10 +547,10 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.disabled, disabledFactory),
-            bind(tokens.empty, emptyFactory),
-            bind(tokens.none, noneFactory),
-            bind(tokens.zero, zeroFactory),
+            bind(tokens.disabled).factory(disabledFactory),
+            bind(tokens.empty).factory(emptyFactory),
+            bind(tokens.none).factory(noneFactory),
+            bind(tokens.zero).factory(zeroFactory),
         ).create();
 
         expect(container.resolve(tokens.disabled)).toBe(false);
@@ -575,7 +583,7 @@ describe("defineContainer", () => {
             return service;
         });
 
-        const container = defineContainer(Object.values(tokens), bind(tokens.service, factory)).create();
+        const container = defineContainer(Object.values(tokens), bind(tokens.service).factory(factory)).create();
 
         expect(() => container.resolve(tokens.service)).toThrowError("transient failure");
         expect(container.resolve(tokens.service)).toBe(service);
@@ -590,7 +598,10 @@ describe("defineContainer", () => {
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = defineContainer(Object.values(tokens), bind.transient(tokens.counter, factory)).create();
+        const container = defineContainer(
+            Object.values(tokens),
+            bind(tokens.counter).transient().factory(factory),
+        ).create();
 
         expect(container.resolve(tokens.counter)).toEqual({ id: 1 });
         expect(container.resolve(tokens.counter)).toEqual({ id: 2 });
@@ -604,7 +615,10 @@ describe("defineContainer", () => {
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = defineContainer(Object.values(tokens), bind.scoped(tokens.counter, factory)).create();
+        const container = defineContainer(
+            Object.values(tokens),
+            bind(tokens.counter).scoped().factory(factory),
+        ).create();
         const firstScope = container.createScope();
         const secondScope = container.createScope();
 
@@ -628,7 +642,10 @@ describe("defineContainer", () => {
         };
         const service = { id: 1 };
         const factory = vi.fn(() => service);
-        const container = defineContainer(Object.values(tokens), bind.singleton(tokens.service, factory)).create();
+        const container = defineContainer(
+            Object.values(tokens),
+            bind(tokens.service).singleton().factory(factory),
+        ).create();
         const firstScope = container.createScope();
         const secondScope = container.createScope();
 
@@ -645,10 +662,18 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.config, () => ({ name: "root" })),
-            bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ config: tokens.config }, ({ config }) => ({ name: config.name })),
         ).create();
-        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+        const childScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "child" })),
+        );
 
         expect(container.resolve(tokens.service)).toEqual({ name: "root" });
         expect(childScope.resolve(tokens.service)).toEqual({ name: "child" });
@@ -661,12 +686,20 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.config, () => ({ name: "root" })),
-            bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
-                getName: () => config.value.name,
-            })),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ config: ref(tokens.config) }, ({ config }) => ({
+                    getName: () => config.value.name,
+                })),
         ).create();
-        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+        const childScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "child" })),
+        );
 
         expect(container.resolve(tokens.service).getName()).toBe("root");
         expect(childScope.resolve(tokens.service).getName()).toBe("child");
@@ -684,24 +717,40 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
-            bind.scoped(tokens.serviceWithRef, { request: ref(tokens.request) }, ({ request }) => ({
-                requestId: request.value.id,
-            })),
-            bind.scoped(tokens.serviceWithTransitiveRef, { holder: ref(tokens.requestHolder) }, ({ holder }) => ({
-                requestId: holder.value.requestId,
-            })),
-            bind.transient(tokens.requestHolder, { request: tokens.request }, ({ request }) => ({
-                requestId: request.id,
-            })),
-            bind.transient(tokens.transientService, { request: tokens.request }, ({ request }) => ({
-                requestId: request.id,
-            })),
-            bind.transient(tokens.transientServiceWithRef, { request: ref(tokens.request) }, ({ request }) => ({
-                requestId: request.value.id,
-            })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ request: tokens.request }, ({ request }) => ({ requestId: request.id })),
+            bind(tokens.serviceWithRef)
+                .scoped()
+                .factory({ request: ref(tokens.request) }, ({ request }) => ({
+                    requestId: request.value.id,
+                })),
+            bind(tokens.serviceWithTransitiveRef)
+                .scoped()
+                .factory({ holder: ref(tokens.requestHolder) }, ({ holder }) => ({
+                    requestId: holder.value.requestId,
+                })),
+            bind(tokens.requestHolder)
+                .transient()
+                .factory({ request: tokens.request }, ({ request }) => ({
+                    requestId: request.id,
+                })),
+            bind(tokens.transientService)
+                .transient()
+                .factory({ request: tokens.request }, ({ request }) => ({
+                    requestId: request.id,
+                })),
+            bind(tokens.transientServiceWithRef)
+                .transient()
+                .factory({ request: ref(tokens.request) }, ({ request }) => ({
+                    requestId: request.value.id,
+                })),
         ).create();
-        const childScope = container.createScope(bind.scoped(tokens.request, () => ({ id: "request-1" })));
+        const childScope = container.createScope(
+            bind(tokens.request)
+                .scoped()
+                .factory(() => ({ id: "request-1" })),
+        );
 
         expect(() => (container as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
             'Service "request" is not registered in the container',
@@ -720,10 +769,16 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.service, { request: tokens.request }, ({ request }) => ({ requestId: request.id })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ request: tokens.request }, ({ request }) => ({ requestId: request.id })),
         ).create();
         const childScope = container.createScope();
-        const grandchildScope = childScope.createScope(bind.scoped(tokens.request, () => ({ id: "request-1" })));
+        const grandchildScope = childScope.createScope(
+            bind(tokens.request)
+                .scoped()
+                .factory(() => ({ id: "request-1" })),
+        );
 
         expect(() => (container as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
             'Service "request" is not registered in the container',
@@ -742,13 +797,23 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.port, () => 3000),
-            bind.scoped(tokens.service, { port: tokens.port }, ({ port }) => ({ port })),
+            bind(tokens.port)
+                .scoped()
+                .factory(() => 3000),
+            bind(tokens.service)
+                .scoped()
+                .factory({ port: tokens.port }, ({ port }) => ({ port })),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+            bind(tokens.port)
+                .scoped()
+                .factory({ config: tokens.config }, ({ config }) => config.port),
         );
-        const grandchildScope = childScope.createScope(bind.scoped(tokens.config, () => ({ port: 4000 })));
+        const grandchildScope = childScope.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ port: 4000 })),
+        );
 
         expect(container.resolve(tokens.service)).toEqual({ port: 3000 });
         expect(() => (childScope as RuntimeContainerForTest).resolve(tokens.service)).toThrowError(
@@ -764,10 +829,18 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.singleton(tokens.config, () => ({ name: "root" })),
-            bind.singleton(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+            bind(tokens.config)
+                .singleton()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service)
+                .singleton()
+                .factory({ config: tokens.config }, ({ config }) => ({ name: config.name })),
         ).create();
-        const childScope = container.createScope(bind.singleton(tokens.config, () => ({ name: "child" })));
+        const childScope = container.createScope(
+            bind(tokens.config)
+                .singleton()
+                .factory(() => ({ name: "child" })),
+        );
 
         expect(childScope.resolve(tokens.service)).toEqual({ name: "root" });
         expect(container.resolve(tokens.service)).toEqual({ name: "root" });
@@ -790,17 +863,23 @@ describe("defineContainer", () => {
         const rootServiceA = { name: "root-a" };
         const container = defineContainer(
             Object.values(tokens),
-            bind.singleton(tokens.serviceA, () => rootServiceA),
-            bind.singleton(tokens.serviceB, { serviceA: tokens.serviceA }, ({ serviceA }) => ({
-                name: "root-b",
-                serviceA,
-            })),
+            bind(tokens.serviceA)
+                .singleton()
+                .factory(() => rootServiceA),
+            bind(tokens.serviceB)
+                .singleton()
+                .factory({ serviceA: tokens.serviceA }, ({ serviceA }) => ({
+                    name: "root-b",
+                    serviceA,
+                })),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
-                name: "child-a",
-                serviceB,
-            })),
+            bind(tokens.serviceA)
+                .scoped()
+                .factory({ serviceB: tokens.serviceB }, ({ serviceB }) => ({
+                    name: "child-a",
+                    serviceB,
+                })),
         );
 
         expect(childScope.resolve(tokens.serviceA)).toEqual({
@@ -821,13 +900,21 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "root-a" })),
-            bind.scoped(tokens.serviceB, () => ({ name: "root-b" })),
+            bind(tokens.serviceA)
+                .scoped()
+                .factory({ serviceB: tokens.serviceB }, () => ({ name: "root-a" })),
+            bind(tokens.serviceB)
+                .scoped()
+                .factory(() => ({ name: "root-b" })),
         ).create();
 
         const childScope = container.createScope(
-            bind.scoped(tokens.serviceA, () => ({ name: "child-a" })),
-            bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "child-b" })),
+            bind(tokens.serviceA)
+                .scoped()
+                .factory(() => ({ name: "child-a" })),
+            bind(tokens.serviceB)
+                .scoped()
+                .factory({ serviceA: tokens.serviceA }, () => ({ name: "child-b" })),
         );
 
         expect(childScope.resolve(tokens.serviceB)).toEqual({ name: "child-b" });
@@ -840,13 +927,23 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.config, () => ({ name: "root" })),
-            bind.scoped(tokens.service, { config: tokens.config }, ({ config }) => ({ name: config.name })),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ config: tokens.config }, ({ config }) => ({ name: config.name })),
         ).create();
-        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+        const childScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "child" })),
+        );
         const inheritedGrandchildScope = childScope.createScope();
         const overriddenGrandchildScope = childScope.createScope(
-            bind.scoped(tokens.config, () => ({ name: "grandchild" })),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "grandchild" })),
         );
 
         expect(container.resolve(tokens.service)).toEqual({ name: "root" });
@@ -864,7 +961,10 @@ describe("defineContainer", () => {
         let nextId = 1;
         const factory = vi.fn(() => ({ id: nextId++ }));
 
-        const container = defineContainer(Object.values(tokens), bind.scoped(tokens.counter, factory)).create();
+        const container = defineContainer(
+            Object.values(tokens),
+            bind(tokens.counter).scoped().factory(factory),
+        ).create();
         const childScope = container.createScope();
         const grandchildScope = childScope.createScope();
 
@@ -888,7 +988,7 @@ describe("defineContainer", () => {
         const factory = vi.fn(() => service);
         const container = createRuntimeContainer(Object.values(tokens));
         const siblingScope = container.createScope();
-        const childScope = container.createScope(bind.singleton(tokens.service, factory));
+        const childScope = container.createScope(bind(tokens.service).singleton().factory(factory));
         const grandchildScope = childScope.createScope();
 
         expect(childScope.resolve(tokens.service)).toBe(service);
@@ -915,8 +1015,8 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind.transient(tokens.config, configFactory),
-            bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
+            bind(tokens.config).transient().factory(configFactory),
+            bind(tokens.service).transient().factory({ config: tokens.config }, serviceFactory),
         ).create();
 
         expect(container.resolve(tokens.service)).toEqual({ configId: 1 });
@@ -937,10 +1037,16 @@ describe("defineContainer", () => {
         }));
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.config, () => ({ name: "root" })),
-            bind.transient(tokens.service, { config: tokens.config }, serviceFactory),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service).transient().factory({ config: tokens.config }, serviceFactory),
         ).create();
-        const childScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "child" })));
+        const childScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "child" })),
+        );
 
         expect(container.resolve(tokens.service)).toEqual({ id: 1, name: "root" });
         expect(childScope.resolve(tokens.service)).toEqual({ id: 2, name: "child" });
@@ -956,9 +1062,7 @@ describe("defineContainer", () => {
         const disposer = vi.fn();
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, factory, {
-                dispose: disposer,
-            }),
+            bind(tokens.service).factory(factory).disposable(disposer),
         ).create();
 
         expect(container.disposed).toBe(false);
@@ -980,22 +1084,17 @@ describe("defineContainer", () => {
         let disposeContainer = () => Promise.resolve();
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { resource: tokens.resource },
-                ({ resource }) => {
+            bind(tokens.service)
+                .factory({ resource: tokens.resource }, ({ resource }) => {
                     factoryDisposePromise = disposeContainer();
                     events.push("factory");
 
                     return { resource };
-                },
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
-            bind(tokens.resource, () => ({ id: "resource" }), {
-                dispose: () => events.push("resource"),
-            }),
+                })
+                .disposable(() => events.push("service")),
+            bind(tokens.resource)
+                .factory(() => ({ id: "resource" }))
+                .disposable(() => events.push("resource")),
         ).create();
         disposeContainer = () => container.dispose();
 
@@ -1018,13 +1117,18 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.singleton(tokens.db, () => ({ id: "db" }), { dispose: () => events.push("db") }),
-            bind.scoped(tokens.rootService, { db: tokens.db }, () => ({ id: "root" }), {
-                dispose: () => events.push("root"),
-            }),
-            bind.scoped(tokens.requestService, { db: tokens.db }, () => ({ id: "request" }), {
-                dispose: () => events.push("request"),
-            }),
+            bind(tokens.db)
+                .singleton()
+                .factory(() => ({ id: "db" }))
+                .disposable(() => events.push("db")),
+            bind(tokens.rootService)
+                .scoped()
+                .factory({ db: tokens.db }, () => ({ id: "root" }))
+                .disposable(() => events.push("root")),
+            bind(tokens.requestService)
+                .scoped()
+                .factory({ db: tokens.db }, () => ({ id: "request" }))
+                .disposable(() => events.push("request")),
         ).create();
         const childScope = container.createScope();
 
@@ -1052,9 +1156,10 @@ describe("defineContainer", () => {
         const factory = vi.fn(() => ({ id: "service" as const }));
         const container = defineContainer(Object.values(tokens)).create();
         const childScope = container.createScope(
-            bind.singleton(tokens.service, factory, {
-                dispose: () => events.push("service"),
-            }),
+            bind(tokens.service)
+                .singleton()
+                .factory(factory)
+                .disposable(() => events.push("service")),
         );
         const grandchildScope = childScope.createScope();
 
@@ -1084,15 +1189,22 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => events.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.service, () => ({ name: "child" }), { dispose: () => events.push("child") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "child" }))
+                .disposable(() => events.push("child")),
         );
         const grandchildScope = childScope.createScope(
-            bind.scoped(tokens.service, () => ({ name: "grandchild" }), {
-                dispose: () => events.push("grandchild"),
-            }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "grandchild" }))
+                .disposable(() => events.push("grandchild")),
         );
 
         container.resolve(tokens.service);
@@ -1116,13 +1228,21 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.service, () => ({ name: "root" })),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "root" })),
         ).create();
         const firstScope = container.createScope(
-            bind.scoped(tokens.service, () => ({ name: "first" }), { dispose: () => events.push("first") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "first" }))
+                .disposable(() => events.push("first")),
         );
         const secondScope = container.createScope(
-            bind.scoped(tokens.service, () => ({ name: "second" }), { dispose: () => events.push("second") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "second" }))
+                .disposable(() => events.push("second")),
         );
 
         secondScope.resolve(tokens.service);
@@ -1144,9 +1264,10 @@ describe("defineContainer", () => {
 
         const result = await container.runScoped(
             [
-                bind.scoped(tokens.service, () => ({ name: "request" }), {
-                    dispose: () => events.push("service"),
-                }),
+                bind(tokens.service)
+                    .scoped()
+                    .factory(() => ({ name: "request" }))
+                    .disposable(() => events.push("service")),
             ],
             (scope) => {
                 expect(scope.disposed).toBe(false);
@@ -1166,7 +1287,11 @@ describe("defineContainer", () => {
         const container = defineContainer(Object.values(tokens)).create();
 
         const result = await container.runScoped(
-            [bind.scoped(tokens.service, () => ({ id: 1 }))],
+            [
+                bind(tokens.service)
+                    .scoped()
+                    .factory(() => ({ id: 1 })),
+            ],
             async (scope) => scope.resolve(tokens.service).id,
         );
 
@@ -1184,9 +1309,10 @@ describe("defineContainer", () => {
         await expect(
             container.runScoped(
                 [
-                    bind.scoped(tokens.service, () => ({ name: "request" }), {
-                        dispose: () => events.push("service"),
-                    }),
+                    bind(tokens.service)
+                        .scoped()
+                        .factory(() => ({ name: "request" }))
+                        .disposable(() => events.push("service")),
                 ],
                 (scope) => {
                     scope.resolve(tokens.service);
@@ -1210,11 +1336,12 @@ describe("defineContainer", () => {
         try {
             await container.runScoped(
                 [
-                    bind.scoped(tokens.service, () => ({ name: "request" }), {
-                        dispose: () => {
+                    bind(tokens.service)
+                        .scoped()
+                        .factory(() => ({ name: "request" }))
+                        .disposable(() => {
                             throw disposeError;
-                        },
-                    }),
+                        }),
                 ],
                 (scope) => scope.resolve(tokens.service).name,
             );
@@ -1239,11 +1366,12 @@ describe("defineContainer", () => {
         try {
             await container.runScoped(
                 [
-                    bind.scoped(tokens.service, () => ({ name: "request" }), {
-                        dispose: () => {
+                    bind(tokens.service)
+                        .scoped()
+                        .factory(() => ({ name: "request" }))
+                        .disposable(() => {
                             throw disposeError;
-                        },
-                    }),
+                        }),
                 ],
                 (scope) => {
                     scope.resolve(tokens.service);
@@ -1278,15 +1406,22 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.service, () => ({ name: "root" }), { dispose: () => events.push("root") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => events.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.service, () => ({ name: "child" }), { dispose: () => events.push("child") }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "child" }))
+                .disposable(() => events.push("child")),
         );
         const grandchildScope = childScope.createScope(
-            bind.scoped(tokens.service, () => ({ name: "grandchild" }), {
-                dispose: () => events.push("grandchild"),
-            }),
+            bind(tokens.service)
+                .scoped()
+                .factory(() => ({ name: "grandchild" }))
+                .disposable(() => events.push("grandchild")),
         );
 
         const rootService = container.resolve(tokens.service);
@@ -1315,9 +1450,10 @@ describe("defineContainer", () => {
         let nextId = 1;
         const container = defineContainer(
             Object.values(tokens),
-            bind.transient(tokens.resource, () => ({ id: nextId++ }), {
-                dispose: (resource) => disposedIds.push(resource.id),
-            }),
+            bind(tokens.resource)
+                .transient()
+                .factory(() => ({ id: nextId++ }))
+                .disposable((resource) => disposedIds.push(resource.id)),
         ).create();
         const childScope = container.createScope();
 
@@ -1339,12 +1475,13 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, { resource: tokens.resource }, ({ resource }) => ({ resource }), {
-                dispose: () => events.push("service"),
-            }),
-            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
-                dispose: (resource) => events.push(`resource:${resource.id}`),
-            }),
+            bind(tokens.service)
+                .factory({ resource: tokens.resource }, ({ resource }) => ({ resource }))
+                .disposable(() => events.push("service")),
+            bind(tokens.resource)
+                .transient()
+                .factory(() => ({ id: nextResourceId++ }))
+                .disposable((resource) => events.push(`resource:${resource.id}`)),
         ).create();
 
         expect(container.resolve(tokens.service).resource).toEqual({ id: 1 });
@@ -1363,19 +1500,14 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { dependency: ref(tokens.dependency) },
-                ({ dependency }) => ({
+            bind(tokens.service)
+                .factory({ dependency: ref(tokens.dependency) }, ({ dependency }) => ({
                     getDependency: () => dependency.value,
-                }),
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
-            bind(tokens.dependency, () => ({ name: "dependency" }), {
-                dispose: () => events.push("dependency"),
-            }),
+                }))
+                .disposable(() => events.push("service")),
+            bind(tokens.dependency)
+                .factory(() => ({ name: "dependency" }))
+                .disposable(() => events.push("dependency")),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1396,19 +1528,13 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { dependency: ref(tokens.dependency) },
-                ({ dependency }) => ({
+            bind(tokens.service)
+                .factory({ dependency: ref(tokens.dependency) }, ({ dependency }) => ({
                     readDependency: () => dependency.value.read(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readDependency()}`),
-                },
-            ),
-            bind(
-                tokens.dependency,
-                () => ({
+                }))
+                .disposable((service) => events.push(`service:${service.readDependency()}`)),
+            bind(tokens.dependency)
+                .factory(() => ({
                     read: () => {
                         if (dependencyDisposed) {
                             throw new Error("Dependency was disposed");
@@ -1416,14 +1542,11 @@ describe("defineContainer", () => {
 
                         return "open";
                     },
+                }))
+                .disposable(() => {
+                    dependencyDisposed = true;
+                    events.push("dependency");
                 }),
-                {
-                    dispose: () => {
-                        dependencyDisposed = true;
-                        events.push("dependency");
-                    },
-                },
-            ),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1442,19 +1565,14 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { target: ref(tokens.target) },
-                ({ target }) => ({
+            bind(tokens.service)
+                .factory({ target: ref(tokens.target) }, ({ target }) => ({
                     readTarget: () => target.value.name,
+                }))
+                .disposable((service) => {
+                    service.readTarget();
                 }),
-                {
-                    dispose: (service) => {
-                        service.readTarget();
-                    },
-                },
-            ),
-            bind(tokens.target, targetFactory),
+            bind(tokens.target).factory(targetFactory),
         ).create();
 
         container.resolve(tokens.service);
@@ -1483,22 +1601,16 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { wrapper: tokens.wrapper },
-                ({ wrapper }) => ({
+            bind(tokens.service)
+                .factory({ wrapper: tokens.wrapper }, ({ wrapper }) => ({
                     readWrappedResource: () => wrapper.readResource(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
-                },
-            ),
-            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => ({
+                }))
+                .disposable((service) => events.push(`service:${service.readWrappedResource()}`)),
+            bind(tokens.wrapper).factory({ resource: ref(tokens.resource) }, ({ resource }) => ({
                 readResource: () => resource.value.read(),
             })),
-            bind(
-                tokens.resource,
-                () => ({
+            bind(tokens.resource)
+                .factory(() => ({
                     read: () => {
                         if (resourceDisposed) {
                             throw new Error("Resource was disposed");
@@ -1506,14 +1618,11 @@ describe("defineContainer", () => {
 
                         return "open";
                     },
+                }))
+                .disposable(() => {
+                    resourceDisposed = true;
+                    events.push("resource");
                 }),
-                {
-                    dispose: () => {
-                        resourceDisposed = true;
-                        events.push("resource");
-                    },
-                },
-            ),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1534,22 +1643,16 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => ({
+            bind(tokens.wrapper).factory({ resource: ref(tokens.resource) }, ({ resource }) => ({
                 readResource: () => resource.value.read(),
             })),
-            bind(
-                tokens.service,
-                { wrapper: ref(tokens.wrapper) },
-                ({ wrapper }) => ({
+            bind(tokens.service)
+                .factory({ wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
                     readWrappedResource: () => wrapper.value.readResource(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
-                },
-            ),
-            bind(
-                tokens.resource,
-                () => ({
+                }))
+                .disposable((service) => events.push(`service:${service.readWrappedResource()}`)),
+            bind(tokens.resource)
+                .factory(() => ({
                     read: () => {
                         if (resourceDisposed) {
                             throw new Error("Resource was disposed");
@@ -1557,14 +1660,11 @@ describe("defineContainer", () => {
 
                         return "open";
                     },
+                }))
+                .disposable(() => {
+                    resourceDisposed = true;
+                    events.push("resource");
                 }),
-                {
-                    dispose: () => {
-                        resourceDisposed = true;
-                        events.push("resource");
-                    },
-                },
-            ),
         ).create();
 
         expect(container.resolve(tokens.wrapper).readResource).toBeTypeOf("function");
@@ -1586,29 +1686,22 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.wrapperA,
+            bind(tokens.wrapperA).factory(
                 { wrapperB: ref(tokens.wrapperB), resource: ref(tokens.resource) },
                 ({ resource }) => ({
                     readResource: () => resource.value.read(),
                 }),
             ),
-            bind(tokens.wrapperB, { wrapperA: ref(tokens.wrapperA) }, ({ wrapperA }) => ({
+            bind(tokens.wrapperB).factory({ wrapperA: ref(tokens.wrapperA) }, ({ wrapperA }) => ({
                 getWrapperA: () => wrapperA.value,
             })),
-            bind(
-                tokens.service,
-                { wrapperA: ref(tokens.wrapperA) },
-                ({ wrapperA }) => ({
+            bind(tokens.service)
+                .factory({ wrapperA: ref(tokens.wrapperA) }, ({ wrapperA }) => ({
                     readWrappedResource: () => wrapperA.value.readResource(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readWrappedResource()}`),
-                },
-            ),
-            bind(
-                tokens.resource,
-                () => ({
+                }))
+                .disposable((service) => events.push(`service:${service.readWrappedResource()}`)),
+            bind(tokens.resource)
+                .factory(() => ({
                     read: () => {
                         if (resourceDisposed) {
                             throw new Error("Resource was disposed");
@@ -1616,14 +1709,11 @@ describe("defineContainer", () => {
 
                         return "open";
                     },
+                }))
+                .disposable(() => {
+                    resourceDisposed = true;
+                    events.push("resource");
                 }),
-                {
-                    dispose: () => {
-                        resourceDisposed = true;
-                        events.push("resource");
-                    },
-                },
-            ),
         ).create();
 
         expect(container.resolve(tokens.wrapperA).readResource).toBeTypeOf("function");
@@ -1643,21 +1733,17 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.wrapper, () => ({
+            bind(tokens.wrapper).factory(() => ({
                 read: () => "root",
             })),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(
-                tokens.service,
-                { wrapper: ref(tokens.wrapper) },
-                ({ wrapper }) => ({
+            bind(tokens.service)
+                .scoped()
+                .factory({ wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
                     readWrapper: () => wrapper.value.read(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readWrapper()}`),
-                },
-            ),
+                }))
+                .disposable((service) => events.push(`service:${service.readWrapper()}`)),
         );
 
         expect(container.resolve(tokens.wrapper).read()).toBe("root");
@@ -1678,23 +1764,19 @@ describe("defineContainer", () => {
         const wrapperFactory = vi.fn(() => ({
             read: () => "root",
         }));
-        const container = defineContainer(Object.values(tokens), bind(tokens.wrapper, wrapperFactory)).create();
+        const container = defineContainer(Object.values(tokens), bind(tokens.wrapper).factory(wrapperFactory)).create();
         let childScope: RuntimeContainerForTest;
 
         childScope = container.createScope(
-            bind.scoped(
-                tokens.service,
-                { wrapper: ref(tokens.wrapper) },
-                ({ wrapper }) => ({
+            bind(tokens.service)
+                .scoped()
+                .factory({ wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
                     readWrapper: () => wrapper.value.read(),
+                }))
+                .disposable((service) => {
+                    events.push(`disposed:${container.disposed}:${childScope.disposed}`);
+                    events.push(`service:${service.readWrapper()}`);
                 }),
-                {
-                    dispose: (service) => {
-                        events.push(`disposed:${container.disposed}:${childScope.disposed}`);
-                        events.push(`service:${service.readWrapper()}`);
-                    },
-                },
-            ),
         );
 
         expect(container.resolve(tokens.wrapper).read()).toBe("root");
@@ -1714,16 +1796,11 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { self: ref(tokens.service) },
-                ({ self }) => ({
+            bind(tokens.service)
+                .factory({ self: ref(tokens.service) }, ({ self }) => ({
                     getSelf: () => self.value,
-                }),
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
+                }))
+                .disposable(() => events.push("service")),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1747,35 +1824,32 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { firstConsumer: tokens.firstConsumer, secondConsumer: tokens.secondConsumer },
-                ({ firstConsumer }) => ({
-                    readResource: () => firstConsumer.readResource(),
-                }),
-                {
-                    dispose: (service) => events.push(`service:${service.readResource()}`),
-                },
-            ),
-            bind(tokens.firstConsumer, { shared: tokens.shared }, ({ shared }) => ({
+            bind(tokens.service)
+                .factory(
+                    { firstConsumer: tokens.firstConsumer, secondConsumer: tokens.secondConsumer },
+                    ({ firstConsumer }) => ({
+                        readResource: () => firstConsumer.readResource(),
+                    }),
+                )
+                .disposable((service) => events.push(`service:${service.readResource()}`)),
+            bind(tokens.firstConsumer).factory({ shared: tokens.shared }, ({ shared }) => ({
                 readResource: () => shared.readResource(),
             })),
-            bind(tokens.secondConsumer, { shared: tokens.shared }, ({ shared }) => ({
+            bind(tokens.secondConsumer).factory({ shared: tokens.shared }, ({ shared }) => ({
                 readResource: () => shared.readResource(),
             })),
-            bind(tokens.shared, { wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
+            bind(tokens.shared).factory({ wrapper: ref(tokens.wrapper) }, ({ wrapper }) => ({
                 readResource: () => wrapper.value.readResource(),
             })),
-            bind(tokens.wrapper, { resource: ref(tokens.resource) }, ({ resource }) => {
+            bind(tokens.wrapper).factory({ resource: ref(tokens.resource) }, ({ resource }) => {
                 const resolvedResource = resource.value;
 
                 return {
                     readResource: () => resolvedResource.read(),
                 };
             }),
-            bind(
-                tokens.resource,
-                () => ({
+            bind(tokens.resource)
+                .factory(() => ({
                     read: () => {
                         if (resourceDisposed) {
                             throw new Error("Resource was disposed");
@@ -1783,14 +1857,11 @@ describe("defineContainer", () => {
 
                         return "open";
                     },
+                }))
+                .disposable(() => {
+                    resourceDisposed = true;
+                    events.push("resource");
                 }),
-                {
-                    dispose: () => {
-                        resourceDisposed = true;
-                        events.push("resource");
-                    },
-                },
-            ),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1812,20 +1883,18 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { firstDependency: ref(tokens.dependency), secondDependency: ref(tokens.dependency) },
-                ({ firstDependency, secondDependency }) => ({
-                    hasSharedDependencyRef: firstDependency === secondDependency,
-                    readDependency: () => firstDependency.value,
-                }),
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
-            bind(tokens.dependency, () => ({ name: "dependency" }), {
-                dispose: () => events.push("dependency"),
-            }),
+            bind(tokens.service)
+                .factory(
+                    { firstDependency: ref(tokens.dependency), secondDependency: ref(tokens.dependency) },
+                    ({ firstDependency, secondDependency }) => ({
+                        hasSharedDependencyRef: firstDependency === secondDependency,
+                        readDependency: () => firstDependency.value,
+                    }),
+                )
+                .disposable(() => events.push("service")),
+            bind(tokens.dependency)
+                .factory(() => ({ name: "dependency" }))
+                .disposable(() => events.push("dependency")),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1847,19 +1916,15 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { resource: ref(tokens.resource) },
-                ({ resource }) => ({
+            bind(tokens.service)
+                .factory({ resource: ref(tokens.resource) }, ({ resource }) => ({
                     getResource: () => resource.value,
-                }),
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
-            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
-                dispose: (resource) => events.push(`resource:${resource.id}`),
-            }),
+                }))
+                .disposable(() => events.push("service")),
+            bind(tokens.resource)
+                .transient()
+                .factory(() => ({ id: nextResourceId++ }))
+                .disposable((resource) => events.push(`resource:${resource.id}`)),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1881,19 +1946,15 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { resource: ref(tokens.resource) },
-                ({ resource }) => ({
+            bind(tokens.service)
+                .factory({ resource: ref(tokens.resource) }, ({ resource }) => ({
                     getResource: () => resource.value,
-                }),
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
-            bind.transient(tokens.resource, () => ({ id: nextResourceId++ }), {
-                dispose: (resource) => events.push(`resource:${resource.id}`),
-            }),
+                }))
+                .disposable(() => events.push("service")),
+            bind(tokens.resource)
+                .transient()
+                .factory(() => ({ id: nextResourceId++ }))
+                .disposable((resource) => events.push(`resource:${resource.id}`)),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -1920,22 +1981,16 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.serviceA,
-                { serviceB: ref(tokens.serviceB) },
-                ({ serviceB }) => ({
+            bind(tokens.serviceA)
+                .factory({ serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
                     getB: () => serviceB.value,
-                }),
-                { dispose: () => events.push("serviceA") },
-            ),
-            bind(
-                tokens.serviceB,
-                { serviceA: ref(tokens.serviceA) },
-                ({ serviceA }) => ({
+                }))
+                .disposable(() => events.push("serviceA")),
+            bind(tokens.serviceB)
+                .factory({ serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
                     getA: () => serviceA.value,
-                }),
-                { dispose: () => events.push("serviceB") },
-            ),
+                }))
+                .disposable(() => events.push("serviceB")),
         ).create();
 
         const serviceA = container.resolve(tokens.serviceA);
@@ -1958,18 +2013,18 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.first, () => ({ name: "first" }), {
-                dispose: () => {
+            bind(tokens.first)
+                .factory(() => ({ name: "first" }))
+                .disposable(() => {
                     calls.push("first");
                     throw firstError;
-                },
-            }),
-            bind(tokens.second, () => ({ name: "second" }), {
-                dispose: async () => {
+                }),
+            bind(tokens.second)
+                .factory(() => ({ name: "second" }))
+                .disposable(async () => {
                     calls.push("second");
                     throw secondError;
-                },
-            }),
+                }),
         ).create();
 
         container.resolve(tokens.first);
@@ -2003,19 +2058,14 @@ describe("defineContainer", () => {
         const dependencyFactory = vi.fn(() => dependency);
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { dependency: ref(tokens.dependency) },
-                ({ dependency }) => ({
+            bind(tokens.service)
+                .factory({ dependency: ref(tokens.dependency) }, ({ dependency }) => ({
                     dependencyRef: dependency,
+                }))
+                .disposable(() => {
+                    throw disposeError;
                 }),
-                {
-                    dispose: () => {
-                        throw disposeError;
-                    },
-                },
-            ),
-            bind(tokens.dependency, dependencyFactory),
+            bind(tokens.dependency).factory(dependencyFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -2051,11 +2101,11 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(() => {
                     throw disposeError;
-                },
-            }),
+                }),
         ).create();
 
         container.resolve(tokens.service);
@@ -2083,23 +2133,26 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.root, () => ({ name: "root" }), {
-                dispose: () => calls.push("root"),
-            }),
+            bind(tokens.root)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => calls.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.firstChild, () => ({ name: "first" }), {
-                dispose: () => {
+            bind(tokens.firstChild)
+                .scoped()
+                .factory(() => ({ name: "first" }))
+                .disposable(() => {
                     calls.push("firstChild");
                     throw firstError;
-                },
-            }),
-            bind.scoped(tokens.secondChild, () => ({ name: "second" }), {
-                dispose: () => {
+                }),
+            bind(tokens.secondChild)
+                .scoped()
+                .factory(() => ({ name: "second" }))
+                .disposable(() => {
                     calls.push("secondChild");
                     throw secondError;
-                },
-            }),
+                }),
         );
 
         container.resolve(tokens.root);
@@ -2130,13 +2183,13 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     disposeStarted();
                     await disposeDeferred.promise;
                     disposeFinished();
-                },
-            }),
+                }),
         ).create();
 
         container.resolve(tokens.service);
@@ -2166,19 +2219,15 @@ describe("defineContainer", () => {
         let disposeContainer = () => Promise.resolve();
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                () => {
+            bind(tokens.service)
+                .factory(() => {
                     firstDisposePromise = disposeContainer();
                     secondDisposePromise = disposeContainer();
                     events.push("factory");
 
                     return { name: "service" };
-                },
-                {
-                    dispose: () => events.push("service"),
-                },
-            ),
+                })
+                .disposable(() => events.push("service")),
         ).create();
         disposeContainer = () => container.dispose();
 
@@ -2198,14 +2247,14 @@ describe("defineContainer", () => {
         let disposeContainer = () => Promise.resolve();
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(() => {
                     reentrantDisposePromise = disposeContainer();
                     events.push("service");
 
                     return reentrantDisposePromise;
-                },
-            }),
+                }),
         ).create();
         disposeContainer = () => container.dispose();
 
@@ -2229,13 +2278,13 @@ describe("defineContainer", () => {
         let disposeContainer = () => Promise.resolve();
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     events.push("before");
                     await disposeContainer();
                     events.push("after");
-                },
-            }),
+                }),
         ).create();
         disposeContainer = () => container.dispose();
 
@@ -2254,15 +2303,15 @@ describe("defineContainer", () => {
         let disposeContainer = () => Promise.resolve();
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     events.push("before");
                     await Promise.resolve();
                     reentrantDisposePromise = disposeContainer();
                     await reentrantDisposePromise;
                     events.push("after");
-                },
-            }),
+                }),
         ).create();
         disposeContainer = () => container.dispose();
 
@@ -2289,19 +2338,21 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.root, () => ({ name: "root" }), {
-                dispose: () => events.push("root"),
-            }),
+            bind(tokens.root)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => events.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.child, () => ({ name: "child" }), {
-                dispose: () => {
+            bind(tokens.child)
+                .scoped()
+                .factory(() => ({ name: "child" }))
+                .disposable(() => {
                     events.push("child");
                     reentrantParentDisposePromise = container.dispose();
 
                     return reentrantParentDisposePromise;
-                },
-            }),
+                }),
         );
 
         container.resolve(tokens.root);
@@ -2328,20 +2379,22 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.root, () => ({ name: "root" }), {
-                dispose: () => events.push("root"),
-            }),
+            bind(tokens.root)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => events.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.child, () => ({ name: "child" }), {
-                dispose: async () => {
+            bind(tokens.child)
+                .scoped()
+                .factory(() => ({ name: "child" }))
+                .disposable(async () => {
                     events.push("child:before");
                     await Promise.resolve();
                     reentrantParentDisposePromise = container.dispose();
                     await reentrantParentDisposePromise;
                     events.push("child:after");
-                },
-            }),
+                }),
         );
 
         container.resolve(tokens.root);
@@ -2369,18 +2422,20 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.root, () => ({ name: "root" }), {
-                dispose: () => events.push("root"),
-            }),
+            bind(tokens.root)
+                .scoped()
+                .factory(() => ({ name: "root" }))
+                .disposable(() => events.push("root")),
         ).create();
         const childScope = container.createScope(
-            bind.scoped(tokens.child, () => ({ name: "child" }), {
-                dispose: () => {
+            bind(tokens.child)
+                .scoped()
+                .factory(() => ({ name: "child" }))
+                .disposable(() => {
                     events.push("child");
 
                     return container.dispose();
-                },
-            }),
+                }),
         );
 
         container.resolve(tokens.root);
@@ -2401,25 +2456,25 @@ describe("defineContainer", () => {
         };
         const otherContainer = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     events.push("other:start");
                     await otherDisposeDeferred.promise;
                     events.push("other:end");
-                },
-            }),
+                }),
         ).create();
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     events.push("current:start");
                     nestedOtherDisposePromise = otherContainer.dispose();
                     otherDisposeDeferred.resolve();
                     await nestedOtherDisposePromise;
                     events.push("current:end");
-                },
-            }),
+                }),
         ).create();
 
         otherContainer.resolve(tokens.service);
@@ -2442,13 +2497,13 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, () => ({ name: "service" }), {
-                dispose: async () => {
+            bind(tokens.service)
+                .factory(() => ({ name: "service" }))
+                .disposable(async () => {
                     disposeStarted();
                     await disposeDeferred.promise;
                     disposeFinished();
-                },
-            }),
+                }),
         ).create();
 
         container.resolve(tokens.service);
@@ -2478,14 +2533,26 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.config, () => ({ name: "root" })),
-            bind.scoped(tokens.service, { config: ref(tokens.config) }, ({ config }) => ({
-                configRef: config,
-                getConfig: () => config.value,
-            })),
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "root" })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ config: ref(tokens.config) }, ({ config }) => ({
+                    configRef: config,
+                    getConfig: () => config.value,
+                })),
         ).create();
-        const firstScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "first" })));
-        const secondScope = container.createScope(bind.scoped(tokens.config, () => ({ name: "second" })));
+        const firstScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "first" })),
+        );
+        const secondScope = container.createScope(
+            bind(tokens.config)
+                .scoped()
+                .factory(() => ({ name: "second" })),
+        );
 
         const firstService = firstScope.resolve(tokens.service);
         const secondService = secondScope.resolve(tokens.service);
@@ -2507,11 +2574,17 @@ describe("defineContainer", () => {
         const resolveToken = vi.fn(() => selectedToken);
         const container = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.firstLogger, () => ({ name: "first" })),
-            bind.scoped(tokens.secondLogger, () => ({ name: "second" })),
-            bind.scoped(tokens.service, { logger: ref(resolveToken) }, ({ logger }) => ({
-                getLogger: () => logger.value,
-            })),
+            bind(tokens.firstLogger)
+                .scoped()
+                .factory(() => ({ name: "first" })),
+            bind(tokens.secondLogger)
+                .scoped()
+                .factory(() => ({ name: "second" })),
+            bind(tokens.service)
+                .scoped()
+                .factory({ logger: ref(resolveToken) }, ({ logger }) => ({
+                    getLogger: () => logger.value,
+                })),
         ).create();
 
         const firstScope = container.createScope();
@@ -2535,7 +2608,7 @@ describe("defineContainer", () => {
         expect(() =>
             createRuntimeContainer(
                 Object.values(tokens),
-                bind(externalToken, () => 3000),
+                bind(externalToken).factory(() => 3000),
             ),
         ).toThrowError('Token "external" is not included in the token list');
     });
@@ -2549,7 +2622,7 @@ describe("defineContainer", () => {
         expect(() =>
             createRuntimeContainer(
                 Object.values(tokens),
-                bind(tokens.port, { external: externalToken }, ({ external }) => external),
+                bind(tokens.port).factory({ external: externalToken }, ({ external }) => external),
             ),
         ).toThrowError('Token "external" is not included in the token list');
     });
@@ -2561,7 +2634,7 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
+            bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({ port: config.port })),
         );
 
         expect(() => container.resolve(tokens.server)).toThrowError(
@@ -2576,7 +2649,7 @@ describe("defineContainer", () => {
         const externalToken = "external" as Token<"external", number>;
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.port, { external: ref(() => externalToken) }, ({ external }) => external.value),
+            bind(tokens.port).factory({ external: ref(() => externalToken) }, ({ external }) => external.value),
         );
 
         expect(() => container.resolve(tokens.port)).toThrowError('Token "external" is not included in the token list');
@@ -2589,7 +2662,7 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
+            bind(tokens.service).factory({ logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
         );
@@ -2608,16 +2681,11 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
-                { logger: ref(tokens.logger) },
-                ({ logger }) => ({
+            bind(tokens.service)
+                .factory({ logger: ref(tokens.logger) }, ({ logger }) => ({
                     getLogger: () => logger.value,
-                }),
-                {
-                    dispose: vi.fn(),
-                },
-            ),
+                }))
+                .disposable(vi.fn()),
         );
 
         const service = container.resolve(tokens.service) as {
@@ -2634,7 +2702,7 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.config, () => ({ port: 3000 })),
+            bind(tokens.config).factory(() => ({ port: 3000 })),
         ).create();
 
         expect(() => (container as RuntimeContainerForTest).resolve(tokens.logger)).toThrowError(
@@ -2649,7 +2717,7 @@ describe("defineContainer", () => {
         const externalToken = "external" as Token<"external", number>;
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.port, () => 3000),
+            bind(tokens.port).factory(() => 3000),
         ).create();
 
         expect(() => (container as RuntimeContainerForTest).resolve(externalToken)).toThrowError(
@@ -2665,8 +2733,8 @@ describe("defineContainer", () => {
         expect(() =>
             defineContainer(
                 Object.values(tokens),
-                bind(tokens.port, () => 3000),
-                bind(tokens.port, () => 4000),
+                bind(tokens.port).factory(() => 3000),
+                bind(tokens.port).factory(() => 4000),
             ).create(),
         ).toThrowError('Service "port" is already registered in the container');
     });
@@ -2679,8 +2747,8 @@ describe("defineContainer", () => {
 
         expect(() =>
             container.createScope(
-                bind(tokens.port, () => 3000),
-                bind(tokens.port, () => 4000),
+                bind(tokens.port).factory(() => 3000),
+                bind(tokens.port).factory(() => 4000),
             ),
         ).toThrowError('Service "port" is already registered in the container');
     });
@@ -2706,7 +2774,7 @@ describe("defineContainer", () => {
         const externalToken = "external" as Token<"external", number>;
         const container = createRuntimeContainer(Object.values(tokens));
 
-        expect(() => container.createScope(bind(externalToken, () => 3000))).toThrowError(
+        expect(() => container.createScope(bind(externalToken).factory(() => 3000))).toThrowError(
             'Token "external" is not included in the token list',
         );
     });
@@ -2719,7 +2787,7 @@ describe("defineContainer", () => {
         const container = createRuntimeContainer(Object.values(tokens));
 
         expect(() =>
-            container.createScope(bind(tokens.port, { external: externalToken }, ({ external }) => external)),
+            container.createScope(bind(tokens.port).factory({ external: externalToken }, ({ external }) => external)),
         ).toThrowError('Token "external" is not included in the token list');
     });
 
@@ -2730,7 +2798,7 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(Object.values(tokens));
         const childScope = container.createScope(
-            bind(tokens.server, { config: tokens.config }, ({ config }) => ({ port: config.port })),
+            bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({ port: config.port })),
         );
 
         expect(() => childScope.resolve(tokens.server)).toThrowError(
@@ -2745,12 +2813,20 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
-            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+            bind(tokens.serviceA)
+                .scoped()
+                .factory({ serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind(tokens.serviceB)
+                .scoped()
+                .factory(() => ({ name: "b" })),
         );
 
         expect(() =>
-            container.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+            container.createScope(
+                bind(tokens.serviceB)
+                    .scoped()
+                    .factory({ serviceA: tokens.serviceA }, () => ({ name: "b" })),
+            ),
         ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
 
@@ -2761,12 +2837,20 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind.transient(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
-            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+            bind(tokens.serviceA)
+                .transient()
+                .factory({ serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind(tokens.serviceB)
+                .scoped()
+                .factory(() => ({ name: "b" })),
         );
 
         expect(() =>
-            container.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+            container.createScope(
+                bind(tokens.serviceB)
+                    .scoped()
+                    .factory({ serviceA: tokens.serviceA }, () => ({ name: "b" })),
+            ),
         ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
 
@@ -2777,13 +2861,21 @@ describe("defineContainer", () => {
         };
         const container = createRuntimeContainer(
             Object.values(tokens),
-            bind.scoped(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
-            bind.scoped(tokens.serviceB, () => ({ name: "b" })),
+            bind(tokens.serviceA)
+                .scoped()
+                .factory({ serviceB: tokens.serviceB }, () => ({ name: "a" })),
+            bind(tokens.serviceB)
+                .scoped()
+                .factory(() => ({ name: "b" })),
         );
         const childScope = container.createScope();
 
         expect(() =>
-            childScope.createScope(bind.scoped(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" }))),
+            childScope.createScope(
+                bind(tokens.serviceB)
+                    .scoped()
+                    .factory({ serviceA: tokens.serviceA }, () => ({ name: "b" })),
+            ),
         ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
 
@@ -2795,7 +2887,7 @@ describe("defineContainer", () => {
         expect(() =>
             createRuntimeContainer(
                 Object.values(tokens),
-                bind(tokens.service, { service: tokens.service }, () => ({ name: "service" })),
+                bind(tokens.service).factory({ service: tokens.service }, () => ({ name: "service" })),
             ),
         ).toThrowError("Circular dependency detected while registering services: service -> service");
     });
@@ -2809,8 +2901,8 @@ describe("defineContainer", () => {
         expect(() =>
             createRuntimeContainer(
                 Object.values(tokens),
-                bind(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
-                bind(tokens.serviceB, { serviceA: tokens.serviceA }, () => ({ name: "b" })),
+                bind(tokens.serviceA).factory({ serviceB: tokens.serviceB }, () => ({ name: "a" })),
+                bind(tokens.serviceB).factory({ serviceA: tokens.serviceA }, () => ({ name: "b" })),
             ),
         ).toThrowError("Circular dependency detected while registering services: serviceA -> serviceB -> serviceA");
     });
@@ -2825,9 +2917,9 @@ describe("defineContainer", () => {
         expect(() =>
             createRuntimeContainer(
                 Object.values(tokens),
-                bind(tokens.serviceA, { serviceB: tokens.serviceB }, () => ({ name: "a" })),
-                bind(tokens.serviceB, { serviceC: tokens.serviceC }, () => ({ name: "b" })),
-                bind(tokens.serviceC, { serviceA: tokens.serviceA }, () => ({ name: "c" })),
+                bind(tokens.serviceA).factory({ serviceB: tokens.serviceB }, () => ({ name: "a" })),
+                bind(tokens.serviceB).factory({ serviceC: tokens.serviceC }, () => ({ name: "b" })),
+                bind(tokens.serviceC).factory({ serviceA: tokens.serviceA }, () => ({ name: "c" })),
             ),
         ).toThrowError(
             "Circular dependency detected while registering services: serviceA -> serviceB -> serviceC -> serviceA",
@@ -2847,24 +2939,28 @@ describe("defineContainer", () => {
         ).toThrowError("Bindings must be created with bind");
     });
 
-    it("throws when bind receives a non-function dispose option at runtime", () => {
+    it("throws when fluent bind receives a non-function disposable callback at runtime", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
 
-        expect(() => bind(tokens.port, () => 3000, { dispose: "not a function" } as never)).toThrowError(
-            "Dispose option must be a function",
-        );
-        expect(() => bind(tokens.port, {}, () => 3000, { dispose: "not a function" } as never)).toThrowError(
-            "Dispose option must be a function",
-        );
+        expect(() =>
+            bind(tokens.port)
+                .factory(() => 3000)
+                .disposable("not a function" as never),
+        ).toThrowError("Dispose option must be a function");
+        expect(() =>
+            bind(tokens.port)
+                .factory({}, () => 3000)
+                .disposable("not a function" as never),
+        ).toThrowError("Dispose option must be a function");
     });
 
     it("throws when a registered binding has a non-function dispose value", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
-        const binding = bind(tokens.port, () => 3000);
+        const binding = bind(tokens.port).factory(() => 3000);
 
         (binding as { dispose?: unknown }).dispose = "not a function";
 
@@ -2881,7 +2977,7 @@ describe("defineContainer", () => {
 
         container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.service, () => container.resolve(tokens.service)),
+            bind(tokens.service).factory(() => container.resolve(tokens.service)),
         );
 
         expect(() => container.resolve(tokens.service)).toThrowError(
@@ -2898,8 +2994,8 @@ describe("defineContainer", () => {
 
         container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
-            bind(tokens.serviceB, () => container.resolve(tokens.serviceA)),
+            bind(tokens.serviceA).factory(() => container.resolve(tokens.serviceB)),
+            bind(tokens.serviceB).factory(() => container.resolve(tokens.serviceA)),
         );
 
         expect(() => container.resolve(tokens.serviceA)).toThrowError(
@@ -2917,9 +3013,9 @@ describe("defineContainer", () => {
 
         container = createRuntimeContainer(
             Object.values(tokens),
-            bind(tokens.serviceA, () => container.resolve(tokens.serviceB)),
-            bind(tokens.serviceB, () => container.resolve(tokens.serviceC)),
-            bind(tokens.serviceC, () => container.resolve(tokens.serviceA)),
+            bind(tokens.serviceA).factory(() => container.resolve(tokens.serviceB)),
+            bind(tokens.serviceB).factory(() => container.resolve(tokens.serviceC)),
+            bind(tokens.serviceC).factory(() => container.resolve(tokens.serviceA)),
         );
 
         expect(() => container.resolve(tokens.serviceA)).toThrowError(
@@ -2944,11 +3040,11 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, { logger: ref(resolveToken) }, ({ logger }) => ({
+            bind(tokens.service).factory({ logger: ref(resolveToken) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
-            bind(tokens.firstLogger, firstLoggerFactory),
-            bind(tokens.secondLogger, secondLoggerFactory),
+            bind(tokens.firstLogger).factory(firstLoggerFactory),
+            bind(tokens.secondLogger).factory(secondLoggerFactory),
         ).create();
 
         expect(resolveToken).not.toHaveBeenCalled();
@@ -2978,10 +3074,10 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
+            bind(tokens.service).factory({ logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
-            bind(tokens.logger, loggerFactory),
+            bind(tokens.logger).factory(loggerFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -3002,10 +3098,10 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.service, { logger: ref(tokens.logger) }, ({ logger }) => ({
+            bind(tokens.service).factory({ logger: ref(tokens.logger) }, ({ logger }) => ({
                 getLogger: () => logger.value,
             })),
-            bind.transient(tokens.logger, loggerFactory),
+            bind(tokens.logger).transient().factory(loggerFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -3029,15 +3125,14 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(
-                tokens.service,
+            bind(tokens.service).factory(
                 { firstLogger: ref(tokens.logger), secondLogger: ref(tokens.logger) },
                 ({ firstLogger, secondLogger }) => ({
                     getLogger: () => firstLogger.value,
                     hasSharedLoggerRef: firstLogger === secondLogger,
                 }),
             ),
-            bind(tokens.logger, loggerFactory),
+            bind(tokens.logger).factory(loggerFactory),
         ).create();
 
         const service = container.resolve(tokens.service);
@@ -3062,10 +3157,10 @@ describe("defineContainer", () => {
 
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
+            bind(tokens.serviceA).factory({ serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
                 getB: () => serviceB.value,
             })),
-            bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
+            bind(tokens.serviceB).factory({ serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
                 getA: () => serviceA.value,
             })),
         ).create();
@@ -3090,14 +3185,14 @@ describe("defineContainer", () => {
         };
         const container = defineContainer(
             Object.values(tokens),
-            bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => {
+            bind(tokens.serviceA).factory({ serviceB: ref(tokens.serviceB) }, ({ serviceB }) => {
                 const resolvedServiceB = serviceB.value;
 
                 return {
                     getB: () => resolvedServiceB,
                 };
             }),
-            bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => {
+            bind(tokens.serviceB).factory({ serviceA: ref(tokens.serviceA) }, ({ serviceA }) => {
                 const resolvedServiceA = serviceA.value;
 
                 return {

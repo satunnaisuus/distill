@@ -6,10 +6,6 @@ export type { BindingLifetime };
 
 export type Disposer<TValue> = (value: TValue) => void | Promise<void>;
 
-export type BindingOptions<TValue> = {
-    readonly dispose?: Disposer<TValue>;
-};
-
 export type CoreBinding<
     TToken extends AnyToken = AnyToken,
     TDependencies = any,

@@ -7,14 +7,14 @@ import { tokenList, tokens } from "./fixtures/tokens.js";
 test("bind supports function-valued services", () => {
     const container = defineContainer(
         tokenList,
-        bind(tokens.handler, () => (message) => message.length),
+        bind(tokens.handler).factory(() => (message) => message.length),
     ).create();
 
     expect(container.resolve(tokens.handler)).type.toBe<Handler>();
 });
 
 test("bind supports callable object services", () => {
-    const binding = bind(tokens.callableHandler, () =>
+    const binding = bind(tokens.callableHandler).factory(() =>
         Object.assign((message: string) => message.length, { kind: "callable" as const }),
     );
     const container = defineContainer(tokenList, binding).create();
@@ -29,7 +29,7 @@ test("bind supports overloaded function services", () => {
     const parser = ((input: string | number) => {
         return typeof input === "string" ? input.length : input.toString();
     }) as Parser;
-    const binding = bind(tokens.parser, () => parser);
+    const binding = bind(tokens.parser).factory(() => parser);
     const container = defineContainer(tokenList, binding).create();
     const resolvedParser = container.resolve(tokens.parser);
 
@@ -38,12 +38,12 @@ test("bind supports overloaded function services", () => {
     expect(resolvedParser(3000)).type.toBe<string>();
 
     expect(() => {
-        bind(tokens.parser, parser);
+        bind(tokens.parser).factory(parser);
     }).type.toRaiseError();
 });
 
 test("bind supports constructor-valued services", () => {
-    const binding = bind(tokens.serviceConstructor, () => InjectableService);
+    const binding = bind(tokens.serviceConstructor).factory(() => InjectableService);
     const container = defineContainer(tokenList, binding).create();
     const ServiceConstructor = container.resolve(tokens.serviceConstructor);
 
@@ -52,24 +52,24 @@ test("bind supports constructor-valued services", () => {
     expect(new ServiceConstructor().status).type.toBe<"ready">();
 
     expect(() => {
-        bind(tokens.serviceConstructor, InjectableService);
+        bind(tokens.serviceConstructor).factory(InjectableService);
     }).type.toRaiseError();
 });
 
 test("bind rejects direct function-valued services", () => {
     expect(() => {
-        bind(tokens.handler, (message) => message.length);
+        bind(tokens.handler).factory((message) => message.length);
     }).type.toRaiseError();
 });
 
 test("bind supports function-valued services with dependencies", () => {
-    const binding = bind(tokens.handler, { config: tokens.config }, ({ config }) => (message) => {
+    const binding = bind(tokens.handler).factory({ config: tokens.config }, ({ config }) => (message) => {
         return message.length + config.port;
     });
     const container = defineContainer(
         tokenList,
         binding,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
 
     expect<Parameters<typeof binding.factory>[0]["config"]>().type.toBe<Config>();
@@ -78,7 +78,7 @@ test("bind supports function-valued services with dependencies", () => {
 });
 
 test("bind requires factories for zero-argument function-valued services", () => {
-    const binding = bind(tokens.counter, () => () => 1);
+    const binding = bind(tokens.counter).factory(() => () => 1);
     const container = defineContainer(tokenList, binding).create();
 
     expect<typeof binding.factory>().type.toBe<() => Counter>();
@@ -86,6 +86,6 @@ test("bind requires factories for zero-argument function-valued services", () =>
     expect(container.resolve(tokens.counter)).type.toBe<Counter>();
 
     expect(() => {
-        bind(tokens.counter, () => 1);
+        bind(tokens.counter).factory(() => 1);
     }).type.toRaiseError();
 });

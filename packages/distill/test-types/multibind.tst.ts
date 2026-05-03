@@ -31,8 +31,8 @@ test("resolveAll returns all values for a multibind token", () => {
     const handlers = multiToken("handlers").of<Handler>();
     const container = defineContainer(
         [handlers],
-        bind(handlers, () => () => 1),
-        bind(handlers, () => () => 2),
+        bind(handlers).factory(() => () => 1),
+        bind(handlers).factory(() => () => 2),
     ).create();
 
     expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
@@ -67,8 +67,8 @@ test("resolve rejects multibind tokens and resolveAll rejects regular tokens", (
     const config = token("config").of<Config>();
     const container = defineContainer(
         [handlers, config],
-        bind(handlers, () => () => 1),
-        bind(config, () => ({ port: 3000 })),
+        bind(handlers).factory(() => () => 1),
+        bind(config).factory(() => ({ port: 3000 })),
     ).create();
 
     expect(() => {
@@ -83,9 +83,9 @@ test("createScope preserves parent multibind values and adds scope values", () =
     const handlers = multiToken("handlers").of<Handler>();
     const app = defineContainer(
         [handlers],
-        bind(handlers, () => () => 1),
+        bind(handlers).factory(() => () => 1),
     ).create();
-    const scope = app.createScope(bind(handlers, () => () => 2));
+    const scope = app.createScope(bind(handlers).factory(() => () => 2));
 
     expect(app.resolveAll(handlers)).type.toBe<Handler[]>();
     expect(scope.resolveAll(handlers)).type.toBe<Handler[]>();
@@ -95,14 +95,13 @@ test("multibind bindings validate dependency maps", () => {
     const handlers = multiToken("handlers").of<Handler>();
     const container = defineContainer(
         [handlers, tokens.config],
-        bind(
-            handlers,
+        bind(handlers).factory(
             { config: tokens.config },
             ({ config }) =>
                 (message: string) =>
                     config.port + message.length,
         ),
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
 
     expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
@@ -114,11 +113,11 @@ test("all dependencies inject multibind values into dependency factories", () =>
     };
     const handlers = multiToken("handlers").of<Handler>();
     const registry = token("registry").of<Registry>();
-    const binding = bind(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers }));
+    const binding = bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers }));
     const container = defineContainer(
         [handlers, registry],
-        bind(handlers, () => () => 1),
-        bind(handlers, () => () => 2),
+        bind(handlers).factory(() => () => 1),
+        bind(handlers).factory(() => () => 2),
         binding,
     ).create();
 
@@ -135,7 +134,7 @@ test("all dependencies accept multibind tokens with no bindings", () => {
     const registry = token("registry").of<Registry>();
     const container = defineContainer(
         [handlers, registry],
-        bind(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+        bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
     ).create();
 
     expect(container.resolve(registry)).type.toBe<Registry>();
@@ -151,7 +150,7 @@ test("all dependencies validate token lists", () => {
     expect(() => {
         defineContainer(
             [registry],
-            bind(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+            bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
         ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
@@ -166,9 +165,8 @@ test("all dependencies validate multibind contribution dependencies", () => {
     expect(() => {
         defineContainer(
             [handlers, registry, tokens.config],
-            bind(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
-            bind(
-                handlers,
+            bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+            bind(handlers).factory(
                 { config: tokens.config },
                 ({ config }) =>
                     (message: string) =>
@@ -186,16 +184,23 @@ test("scoped all dependencies can be satisfied by child scopes", () => {
     const registry = token("registry").of<Registry>();
     const app = defineContainer(
         [handlers, registry, tokens.config],
-        bind.scoped(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
-        bind.scoped(
-            handlers,
-            { config: tokens.config },
-            ({ config }) =>
-                (message: string) =>
-                    config.port + message.length,
-        ),
+        bind(registry)
+            .scoped()
+            .factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+        bind(handlers)
+            .scoped()
+            .factory(
+                { config: tokens.config },
+                ({ config }) =>
+                    (message: string) =>
+                        config.port + message.length,
+            ),
     ).create();
-    const scope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
+    const scope = app.createScope(
+        bind(tokens.config)
+            .scoped()
+            .factory(() => ({ port: 3000 })),
+    );
 
     expect(() => {
         app.resolve(registry);
@@ -213,8 +218,12 @@ test("all dependencies reject scoped multibind contributions in singletons", () 
     expect(() => {
         defineContainer(
             [handlers, registry],
-            bind.singleton(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
-            bind.scoped(handlers, () => () => 1),
+            bind(registry)
+                .singleton()
+                .factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+            bind(handlers)
+                .scoped()
+                .factory(() => () => 1),
         ).create();
     }).type.toRaiseError("__scoped_dependency_in_singleton__");
 });
@@ -229,8 +238,8 @@ test("all dependencies reject eager circular dependencies", () => {
     expect(() => {
         defineContainer(
             [handlers, registry],
-            bind(registry, { handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
-            bind(handlers, { registry }, () => () => 1),
+            bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+            bind(handlers).factory({ registry }, () => () => 1),
         ).create();
     }).type.toRaiseError("__circular_dependency__");
 });
@@ -241,7 +250,7 @@ test("multibind singleton bindings reject missing dependencies", () => {
     expect(() => {
         defineContainer(
             [handlers, ...tokenList],
-            bind(handlers, { config: tokens.config }, () => () => 1),
+            bind(handlers).factory({ config: tokens.config }, () => () => 1),
         ).create();
     }).type.toRaiseError("__missing_dependencies__");
 });
@@ -250,15 +259,20 @@ test("scoped multibind bindings can be completed by child scopes", () => {
     const handlers = multiToken("handlers").of<Handler>();
     const app = defineContainer(
         [handlers, ...tokenList],
-        bind.scoped(
-            handlers,
-            { config: tokens.config },
-            ({ config }) =>
-                (message: string) =>
-                    config.port + message.length,
-        ),
+        bind(handlers)
+            .scoped()
+            .factory(
+                { config: tokens.config },
+                ({ config }) =>
+                    (message: string) =>
+                        config.port + message.length,
+            ),
     ).create();
-    const scope = app.createScope(bind.scoped(tokens.config, () => ({ port: 3000 })));
+    const scope = app.createScope(
+        bind(tokens.config)
+            .scoped()
+            .factory(() => ({ port: 3000 })),
+    );
 
     expect(() => {
         app.resolveAll(handlers);
@@ -270,8 +284,8 @@ test("multibind tokens allow duplicate binding keys", () => {
     const handlers = multiToken("handlers").of<Handler>();
     const container = defineContainer(
         [handlers],
-        bind(handlers, () => () => 1),
-        bind(handlers, () => () => 2),
+        bind(handlers).factory(() => () => 1),
+        bind(handlers).factory(() => () => 2),
     ).create();
 
     expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
@@ -287,7 +301,7 @@ test("regular and multibind tokens with the same key are different token identit
     expect(() => {
         defineContainer(
             [handlers],
-            bind(handler, () => () => 1),
+            bind(handler).factory(() => () => 1),
         ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
 });
@@ -296,7 +310,7 @@ test("multibind tokens cannot be used as direct or ref dependencies", () => {
     const handlers = multiToken("handlers").of<Handler>();
 
     expect(() => {
-        bind(tokens.port, { handlers }, () => 3000);
+        bind(tokens.port).factory({ handlers }, () => 3000);
     }).type.toRaiseError();
     expect(() => {
         ref(handlers);

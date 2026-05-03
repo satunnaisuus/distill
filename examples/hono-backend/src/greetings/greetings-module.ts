@@ -9,10 +9,10 @@ import { createGreetingsSubRouter } from "./greetings-router.js";
 export const GreetingsModule = defineModule({
     imports: [Database],
     bindings: [
-        bind.value(ClockToken, systemClock),
-        exported(bind.class(GreetingServiceToken, { clock: ClockToken, database: Database }, GreetingService)),
+        bind(ClockToken).value(systemClock),
+        exported(bind(GreetingServiceToken).class({ clock: ClockToken, database: Database }, GreetingService)),
         exported(
-            bind(HttpSubRouterToken, { greetingService: GreetingServiceToken }, ({ greetingService }) =>
+            bind(HttpSubRouterToken).factory({ greetingService: GreetingServiceToken }, ({ greetingService }) =>
                 createGreetingsSubRouter(greetingService),
             ),
         ),

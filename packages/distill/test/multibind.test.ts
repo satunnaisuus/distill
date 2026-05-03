@@ -45,8 +45,8 @@ describe("resolveAll", () => {
 
         const container = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "first" })),
-            bind(Hooks, () => ({ name: "second" })),
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
         ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
@@ -66,7 +66,11 @@ describe("resolveAll", () => {
         const firstFactory = vi.fn(() => first);
         const secondFactory = vi.fn(() => second);
 
-        const container = defineContainer([Hooks], bind(Hooks, firstFactory), bind(Hooks, secondFactory)).create();
+        const container = defineContainer(
+            [Hooks],
+            bind(Hooks).factory(firstFactory),
+            bind(Hooks).factory(secondFactory),
+        ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([first, second]);
         expect(container.resolveAll(Hooks)).toEqual([first, second]);
@@ -80,8 +84,12 @@ describe("resolveAll", () => {
 
         const container = defineContainer(
             [Hooks],
-            bind.transient(Hooks, () => ({ id: nextId++ })),
-            bind.transient(Hooks, () => ({ id: nextId++ })),
+            bind(Hooks)
+                .transient()
+                .factory(() => ({ id: nextId++ })),
+            bind(Hooks)
+                .transient()
+                .factory(() => ({ id: nextId++ })),
         ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ id: 1 }, { id: 2 }]);
@@ -93,9 +101,9 @@ describe("resolveAll", () => {
 
         const app = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "root" })),
+            bind(Hooks).factory(() => ({ name: "root" })),
         ).create();
-        const request = app.createScope(bind(Hooks, () => ({ name: "request" })));
+        const request = app.createScope(bind(Hooks).factory(() => ({ name: "request" })));
 
         expect(app.resolveAll(Hooks)).toEqual([{ name: "root" }]);
         expect(request.resolveAll(Hooks)).toEqual([{ name: "root" }, { name: "request" }]);
@@ -107,7 +115,9 @@ describe("resolveAll", () => {
 
         const app = defineContainer(
             [Hooks],
-            bind.scoped(Hooks, () => ({ id: nextId++ })),
+            bind(Hooks)
+                .scoped()
+                .factory(() => ({ id: nextId++ })),
         ).create();
         const firstScope = app.createScope();
         const secondScope = app.createScope();
@@ -130,12 +140,12 @@ describe("resolveAll", () => {
 
         const container = defineContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "first" }), {
-                dispose: () => events.push("first"),
-            }),
-            bind(Hooks, () => ({ name: "second" }), {
-                dispose: () => events.push("second"),
-            }),
+            bind(Hooks)
+                .factory(() => ({ name: "first" }))
+                .disposable(() => events.push("first")),
+            bind(Hooks)
+                .factory(() => ({ name: "second" }))
+                .disposable(() => events.push("second")),
         ).create();
 
         expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
@@ -149,7 +159,7 @@ describe("resolveAll", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const container = createRuntimeContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "hook" })),
+            bind(Hooks).factory(() => ({ name: "hook" })),
         );
 
         expect(() => container.resolve(Hooks)).toThrowError('Multibind token "Hooks" must be resolved with resolveAll');
@@ -160,7 +170,7 @@ describe("resolveAll", () => {
         const Hooks = multiToken("Hook").of<{ readonly name: string }>();
         const container = createRuntimeContainer(
             [Hooks],
-            bind(Hooks, () => ({ name: "hook" })),
+            bind(Hooks).factory(() => ({ name: "hook" })),
         );
 
         expect(() => container.resolveAll(Hook)).toThrowError('Token "Hook" is not included in the token list');
@@ -171,7 +181,7 @@ describe("resolveAll", () => {
         const Hooks = multiToken("Hook").of<{ readonly name: string }>();
         const container = createRuntimeContainer(
             [Hook],
-            bind(Hook, () => ({ name: "hook" })),
+            bind(Hook).factory(() => ({ name: "hook" })),
         );
 
         expect(() => container.resolve(Hooks)).toThrowError('Token "Hook" is not included in the token list');
@@ -181,7 +191,7 @@ describe("resolveAll", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const container = createRuntimeContainer(
             [Config],
-            bind(Config, () => ({ port: 3000 })),
+            bind(Config).factory(() => ({ port: 3000 })),
         );
 
         expect(() => container.resolveAll(Config)).toThrowError('Token "Config" is not a multibind token');
@@ -198,9 +208,9 @@ describe("all dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Hooks, () => ({ name: "first" })),
-            bind(Hooks, () => ({ name: "second" })),
-            bind(Registry, { hooks: all(Hooks) }, factory),
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(Registry).factory({ hooks: all(Hooks) }, factory),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
@@ -214,7 +224,7 @@ describe("all dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ count: hooks.length })),
+            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({ count: hooks.length })),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ count: 0 });
@@ -226,12 +236,14 @@ describe("all dependencies", () => {
 
         const app = defineContainer(
             [Hooks, Registry],
-            bind(Hooks, () => ({ name: "root" })),
-            bind.scoped(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
-                names: hooks.map((hook) => hook.name),
-            })),
+            bind(Hooks).factory(() => ({ name: "root" })),
+            bind(Registry)
+                .scoped()
+                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
         ).create();
-        const request = app.createScope(bind(Hooks, () => ({ name: "request" })));
+        const request = app.createScope(bind(Hooks).factory(() => ({ name: "request" })));
 
         expect(app.resolve(Registry)).toEqual({ names: ["root"] });
         expect(request.resolve(Registry)).toEqual({ names: ["root", "request"] });
@@ -244,15 +256,15 @@ describe("all dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Hooks, () => {
+            bind(Hooks).factory(() => {
                 calls.push("first");
                 return { name: "first" };
             }),
-            bind(Hooks, () => {
+            bind(Hooks).factory(() => {
                 calls.push("second");
                 return { name: "second" };
             }),
-            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => {
+            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => {
                 calls.push("registry");
                 return { names: hooks.map((hook) => hook.name) };
             }),
@@ -269,15 +281,15 @@ describe("all dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Hooks, () => ({ name: "first" }), {
-                dispose: () => events.push("first"),
-            }),
-            bind(Hooks, () => ({ name: "second" }), {
-                dispose: () => events.push("second"),
-            }),
-            bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ hooks }), {
-                dispose: () => events.push("registry"),
-            }),
+            bind(Hooks)
+                .factory(() => ({ name: "first" }))
+                .disposable(() => events.push("first")),
+            bind(Hooks)
+                .factory(() => ({ name: "second" }))
+                .disposable(() => events.push("second")),
+            bind(Registry)
+                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({ hooks }))
+                .disposable(() => events.push("registry")),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ hooks: [{ name: "first" }, { name: "second" }] });
@@ -295,8 +307,8 @@ describe("all dependencies", () => {
         expect(() =>
             createRuntimeContainer(
                 [Config, Server],
-                bind(Config, () => ({ port: 3000 })),
-                bind(Server, { configs: allUnsafe(Config) as never }, () => ({ port: 3000 })),
+                bind(Config).factory(() => ({ port: 3000 })),
+                bind(Server).factory({ configs: allUnsafe(Config) as never }, () => ({ port: 3000 })),
             ),
         ).toThrowError('Token "Config" is not a multibind token');
     });
@@ -308,7 +320,7 @@ describe("all dependencies", () => {
         expect(() =>
             createRuntimeContainer(
                 [Hooks, Registry],
-                bind(Registry, { hooks: Hooks as never }, () => ({ names: [] })),
+                bind(Registry).factory({ hooks: Hooks as never }, () => ({ names: [] })),
             ),
         ).toThrowError('Multibind token "Hooks" must be resolved with resolveAll');
     });
@@ -320,8 +332,8 @@ describe("all dependencies", () => {
         expect(() =>
             createRuntimeContainer(
                 [Hooks, Registry],
-                bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({ hooks })),
-                bind(Hooks, { registry: Registry }, () => ({ name: "hook" })),
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({ hooks })),
+                bind(Hooks).factory({ registry: Registry }, () => ({ name: "hook" })),
             ),
         ).toThrowError("Circular dependency detected while registering services: Registry -> Hooks -> Registry");
     });

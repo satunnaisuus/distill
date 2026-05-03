@@ -3,5 +3,5 @@ import { healthSubRouter } from "./health-router.js";
 import { HttpSubRouterToken } from "./http-sub-router.js";
 
 export const HttpModule = defineModule({
-    bindings: [exported(bind.value(HttpSubRouterToken, healthSubRouter))],
+    bindings: [exported(bind(HttpSubRouterToken).value(healthSubRouter))],
 } as const);

@@ -24,7 +24,7 @@ test("symbol token keys preserve symbol identity and value types", () => {
     const Config = token(configKey).of<{ readonly port: number }>();
     const container = defineContainer(
         [Config],
-        bind(Config, () => ({ port: 3000 })),
+        bind(Config).factory(() => ({ port: 3000 })),
     ).create();
 
     expect(Config).type.toBe<Token<typeof configKey, { readonly port: number }>>();
@@ -41,7 +41,7 @@ test("class token keys default to the class instance type", () => {
 
     const ServiceToken = token(Service).of();
     const ExplicitServiceToken = token(Service).of<{ readonly status: string }>();
-    const container = defineContainer([ServiceToken], bind.class(ServiceToken, Service)).create();
+    const container = defineContainer([ServiceToken], bind(ServiceToken).class(Service)).create();
 
     expect(ServiceToken).type.toBe<Token<typeof Service, Service>>();
     expect(ExplicitServiceToken).type.toBe<Token<typeof Service, { readonly status: string }>>();
@@ -111,8 +111,8 @@ test("qualified class tokens with the same runtime name remain distinct", () => 
     const SecondJsonLogger = qualified(token(SecondLogger).of(), Json);
     const container = defineContainer(
         [FirstJsonLogger, SecondJsonLogger],
-        bind(FirstJsonLogger, () => new FirstLogger()),
-        bind(SecondJsonLogger, () => new SecondLogger()),
+        bind(FirstJsonLogger).factory(() => new FirstLogger()),
+        bind(SecondJsonLogger).factory(() => new SecondLogger()),
     ).create();
 
     expect(container.resolve(FirstJsonLogger)).type.toBe<InstanceType<typeof FirstLogger>>();
@@ -141,8 +141,8 @@ test("different classes with the same runtime name remain distinct", () => {
     const Second = token(SecondService).of();
     const container = defineContainer(
         [First, Second],
-        bind.class(First, FirstService),
-        bind.class(Second, SecondService),
+        bind(First).class(FirstService),
+        bind(Second).class(SecondService),
     ).create();
 
     expect(container.resolve(First)).type.toBe<InstanceType<typeof FirstService>>();
@@ -157,8 +157,8 @@ test("different classes with the same public shape remain distinct", () => {
     const Second = token(SecondService).of();
     const container = defineContainer(
         [First, Second],
-        bind.class(First, FirstService),
-        bind.class(Second, SecondService),
+        bind(First).class(FirstService),
+        bind(Second).class(SecondService),
     ).create();
 
     expect(container.resolve(First)).type.toBe<FirstService>();
@@ -170,8 +170,8 @@ test("qualified string token identity does not collide on delimiters", () => {
     const Second = qualified(token("A").of<"second">(), qualifier("B:C"));
     const container = defineContainer(
         [First, Second],
-        bind(First, () => "first" as const),
-        bind(Second, () => "second" as const),
+        bind(First).factory(() => "first" as const),
+        bind(Second).factory(() => "second" as const),
     ).create();
 
     expect<TokenKey<typeof First>>().type.toBe<"A:B:C">();
@@ -190,10 +190,10 @@ test("modules compose symbol and class tokens", () => {
     const Consumer = token(consumerKey).of<{ readonly config: Config }>();
     const ConsumerModule = defineModule({
         imports: [ConfigToken],
-        bindings: [exported(bind(Consumer, { config: ConfigToken }, ({ config }) => ({ config })))],
+        bindings: [exported(bind(Consumer).factory({ config: ConfigToken }, ({ config }) => ({ config })))],
     });
     const ConfigModule = defineModule({
-        bindings: [exported(bind.class(ConfigToken, Config))],
+        bindings: [exported(bind(ConfigToken).class(Config))],
     });
     const App = composeModules({
         modules: [ConsumerModule, ConfigModule],

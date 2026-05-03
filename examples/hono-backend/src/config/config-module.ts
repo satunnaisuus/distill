@@ -12,7 +12,7 @@ const port = parsePort(process.env.PORT);
 export const ConfigModule = defineModule({
     bindings: [
         exported(
-            bind.value(AppConfig, {
+            bind(AppConfig).value({
                 port,
                 databaseUrl: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
                 authBaseUrl: process.env.BETTER_AUTH_URL ?? `http://localhost:${port}`,

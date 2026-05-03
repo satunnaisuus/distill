@@ -7,10 +7,10 @@ test("rejects eager circular dependencies without ref", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
+            bind(tokens.serviceA).factory({ serviceB: tokens.serviceB }, ({ serviceB }) => ({
                 getB: () => serviceB,
             })),
-            bind(tokens.serviceB, { serviceA: tokens.serviceA }, ({ serviceA }) => ({
+            bind(tokens.serviceB).factory({ serviceA: tokens.serviceA }, ({ serviceA }) => ({
                 getA: () => serviceA,
             })),
         ).create();
@@ -29,7 +29,7 @@ test("rejects eager dependency on itself without ref", () => {
     expect(() => {
         defineContainer(
             selfTokenList,
-            bind(selfTokens.service, { service: selfTokens.service }, () => ({
+            bind(selfTokens.service).factory({ service: selfTokens.service }, () => ({
                 name: "service" as const,
             })),
         ).create();
@@ -56,13 +56,13 @@ test("rejects long eager circular dependencies without ref", () => {
     expect(() => {
         defineContainer(
             longCycleTokenList,
-            bind(longCycleTokens.serviceA, { serviceB: longCycleTokens.serviceB }, () => ({
+            bind(longCycleTokens.serviceA).factory({ serviceB: longCycleTokens.serviceB }, () => ({
                 name: "a" as const,
             })),
-            bind(longCycleTokens.serviceB, { serviceC: longCycleTokens.serviceC }, () => ({
+            bind(longCycleTokens.serviceB).factory({ serviceC: longCycleTokens.serviceC }, () => ({
                 name: "b" as const,
             })),
-            bind(longCycleTokens.serviceC, { serviceA: longCycleTokens.serviceA }, () => ({
+            bind(longCycleTokens.serviceC).factory({ serviceA: longCycleTokens.serviceA }, () => ({
                 name: "c" as const,
             })),
         ).create();
@@ -89,13 +89,13 @@ test("rejects eager circular dependencies regardless of binding order", () => {
     expect(() => {
         defineContainer(
             unorderedTokenList,
-            bind(unorderedTokens.serviceC, { serviceA: unorderedTokens.serviceA }, () => ({
+            bind(unorderedTokens.serviceC).factory({ serviceA: unorderedTokens.serviceA }, () => ({
                 name: "c" as const,
             })),
-            bind(unorderedTokens.serviceA, { serviceB: unorderedTokens.serviceB }, () => ({
+            bind(unorderedTokens.serviceA).factory({ serviceB: unorderedTokens.serviceB }, () => ({
                 name: "a" as const,
             })),
-            bind(unorderedTokens.serviceB, { serviceC: unorderedTokens.serviceC }, () => ({
+            bind(unorderedTokens.serviceB).factory({ serviceC: unorderedTokens.serviceC }, () => ({
                 name: "b" as const,
             })),
         ).create();
@@ -105,10 +105,10 @@ test("rejects eager circular dependencies regardless of binding order", () => {
 test("allows cycles when a single ref breaks the eager path", () => {
     const container = defineContainer(
         tokenList,
-        bind(tokens.serviceA, { serviceB: tokens.serviceB }, ({ serviceB }) => ({
+        bind(tokens.serviceA).factory({ serviceB: tokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
         })),
-        bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
+        bind(tokens.serviceB).factory({ serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
     ).create();
@@ -140,13 +140,13 @@ test("allows long cycles when ref breaks the eager path", () => {
 
     const container = defineContainer(
         longRefCycleTokenList,
-        bind(longRefCycleTokens.serviceA, { serviceB: longRefCycleTokens.serviceB }, ({ serviceB }) => ({
+        bind(longRefCycleTokens.serviceA).factory({ serviceB: longRefCycleTokens.serviceB }, ({ serviceB }) => ({
             getB: () => serviceB,
         })),
-        bind(longRefCycleTokens.serviceB, { serviceC: longRefCycleTokens.serviceC }, ({ serviceC }) => ({
+        bind(longRefCycleTokens.serviceB).factory({ serviceC: longRefCycleTokens.serviceC }, ({ serviceC }) => ({
             getC: () => serviceC,
         })),
-        bind(longRefCycleTokens.serviceC, { serviceA: ref(longRefCycleTokens.serviceA) }, ({ serviceA }) => ({
+        bind(longRefCycleTokens.serviceC).factory({ serviceA: ref(longRefCycleTokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
     ).create();
@@ -176,17 +176,16 @@ test("rejects eager cycles when an unrelated ref dependency is present", () => {
     expect(() => {
         defineContainer(
             mixedTokenList,
-            bind(
-                mixedTokens.serviceA,
+            bind(mixedTokens.serviceA).factory(
                 { serviceB: mixedTokens.serviceB, serviceC: ref(mixedTokens.serviceC) },
                 ({ serviceB }) => ({
                     getB: () => serviceB,
                 }),
             ),
-            bind(mixedTokens.serviceB, { serviceA: mixedTokens.serviceA }, ({ serviceA }) => ({
+            bind(mixedTokens.serviceB).factory({ serviceA: mixedTokens.serviceA }, ({ serviceA }) => ({
                 getA: () => serviceA,
             })),
-            bind(mixedTokens.serviceC, () => ({
+            bind(mixedTokens.serviceC).factory(() => ({
                 name: "c" as const,
             })),
         ).create();
@@ -213,17 +212,16 @@ test("rejects cycles through a branching dependency graph", () => {
     expect(() => {
         defineContainer(
             branchingTokenList,
-            bind(
-                branchingTokens.serviceA,
+            bind(branchingTokens.serviceA).factory(
                 { serviceB: branchingTokens.serviceB, serviceC: branchingTokens.serviceC },
                 () => ({
                     name: "a" as const,
                 }),
             ),
-            bind(branchingTokens.serviceB, () => ({
+            bind(branchingTokens.serviceB).factory(() => ({
                 name: "b" as const,
             })),
-            bind(branchingTokens.serviceC, { serviceA: branchingTokens.serviceA }, () => ({
+            bind(branchingTokens.serviceC).factory({ serviceA: branchingTokens.serviceA }, () => ({
                 name: "c" as const,
             })),
         ).create();
@@ -257,13 +255,13 @@ test("rejects cycles through eager union dependency tokens", () => {
     expect(() => {
         defineContainer(
             unionCycleTokenList,
-            bind(unionCycleTokens.serviceA, { next: serviceBOrC }, () => ({
+            bind(unionCycleTokens.serviceA).factory({ next: serviceBOrC }, () => ({
                 name: "a" as const,
             })),
-            bind(unionCycleTokens.serviceB, { serviceA: unionCycleTokens.serviceA }, () => ({
+            bind(unionCycleTokens.serviceB).factory({ serviceA: unionCycleTokens.serviceA }, () => ({
                 name: "b" as const,
             })),
-            bind(unionCycleTokens.serviceC, () => ({
+            bind(unionCycleTokens.serviceC).factory(() => ({
                 name: "c" as const,
             })),
         ).create();
@@ -290,13 +288,13 @@ test("allows acyclic eager union dependency tokens", () => {
 
     const container = defineContainer(
         unionTokenList,
-        bind(unionTokens.serviceA, { next: serviceBOrC }, ({ next }) => ({
+        bind(unionTokens.serviceA).factory({ next: serviceBOrC }, ({ next }) => ({
             getNext: () => next,
         })),
-        bind(unionTokens.serviceB, () => ({
+        bind(unionTokens.serviceB).factory(() => ({
             name: "b" as const,
         })),
-        bind(unionTokens.serviceC, () => ({
+        bind(unionTokens.serviceC).factory(() => ({
             name: "c" as const,
         })),
     ).create();
@@ -326,13 +324,13 @@ test("allows union dependency tokens when ref breaks the eager path", () => {
 
     const container = defineContainer(
         unionRefTokenList,
-        bind(unionRefTokens.serviceA, { next: ref(serviceBOrC) }, ({ next }) => ({
+        bind(unionRefTokens.serviceA).factory({ next: ref(serviceBOrC) }, ({ next }) => ({
             getNext: () => next.value,
         })),
-        bind(unionRefTokens.serviceB, { serviceA: unionRefTokens.serviceA }, ({ serviceA }) => ({
+        bind(unionRefTokens.serviceB).factory({ serviceA: unionRefTokens.serviceA }, ({ serviceA }) => ({
             getA: () => serviceA,
         })),
-        bind(unionRefTokens.serviceC, () => ({
+        bind(unionRefTokens.serviceC).factory(() => ({
             name: "c" as const,
         })),
     ).create();
@@ -370,16 +368,19 @@ test("allows acyclic eager dependency graphs with shared dependencies", () => {
 
     const container = defineContainer(
         acyclicTokenList,
-        bind(acyclicTokens.serviceA, { serviceB: acyclicTokens.serviceB, serviceC: acyclicTokens.serviceC }, () => ({
-            name: "a" as const,
-        })),
-        bind(acyclicTokens.serviceB, { serviceD: acyclicTokens.serviceD }, () => ({
+        bind(acyclicTokens.serviceA).factory(
+            { serviceB: acyclicTokens.serviceB, serviceC: acyclicTokens.serviceC },
+            () => ({
+                name: "a" as const,
+            }),
+        ),
+        bind(acyclicTokens.serviceB).factory({ serviceD: acyclicTokens.serviceD }, () => ({
             name: "b" as const,
         })),
-        bind(acyclicTokens.serviceC, { serviceD: acyclicTokens.serviceD }, () => ({
+        bind(acyclicTokens.serviceC).factory({ serviceD: acyclicTokens.serviceD }, () => ({
             name: "c" as const,
         })),
-        bind(acyclicTokens.serviceD, () => ({
+        bind(acyclicTokens.serviceD).factory(() => ({
             name: "d" as const,
         })),
     ).create();
@@ -399,7 +400,7 @@ test("allows self references through ref", () => {
 
     const container = defineContainer(
         selfRefTokenList,
-        bind(selfRefTokens.service, { service: ref(selfRefTokens.service) }, ({ service }) => ({
+        bind(selfRefTokens.service).factory({ service: ref(selfRefTokens.service) }, ({ service }) => ({
             getSelf: () => service.value,
         })),
     ).create();
@@ -410,10 +411,10 @@ test("allows self references through ref", () => {
 test("allows circular dependencies through ref", () => {
     const container = defineContainer(
         tokenList,
-        bind(tokens.serviceA, { serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
+        bind(tokens.serviceA).factory({ serviceB: ref(tokens.serviceB) }, ({ serviceB }) => ({
             getB: () => serviceB.value,
         })),
-        bind(tokens.serviceB, { serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
+        bind(tokens.serviceB).factory({ serviceA: ref(tokens.serviceA) }, ({ serviceA }) => ({
             getA: () => serviceA.value,
         })),
     ).create();

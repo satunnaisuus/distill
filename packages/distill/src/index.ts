@@ -1,4 +1,4 @@
-export { type Binding, type BindingLifetime, type BindingOptions, bind, type Disposer } from "./binding/index";
+export { type Binding, type BindingLifetime, bind, type Disposer } from "./binding/index";
 export { type Container, type ContainerDefinition, defineContainer } from "./container/index";
 export {
     type AllToken,

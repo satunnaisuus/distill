@@ -85,7 +85,7 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Config, Server],
-            bind(Server, { config: optional(Config) }, factory),
+            bind(Server).factory({ config: optional(Config) }, factory),
         ).create();
 
         expect(container.resolve(Server)).toEqual({ port: 8080 });
@@ -99,11 +99,11 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Config, Server],
-            bind(Server, { config: optional(Config) }, ({ config }) => {
+            bind(Server).factory({ config: optional(Config) }, ({ config }) => {
                 calls.push("server");
                 return { port: config?.port ?? 8080 };
             }),
-            bind(Config, () => {
+            bind(Config).factory(() => {
                 calls.push("config");
                 return { port: 3000 };
             }),
@@ -119,11 +119,17 @@ describe("optional dependencies", () => {
 
         const app = defineContainer(
             [Request, Service],
-            bind.scoped(Service, { request: optional(Request) }, ({ request }) => ({
-                requestId: request?.id ?? "none",
-            })),
+            bind(Service)
+                .scoped()
+                .factory({ request: optional(Request) }, ({ request }) => ({
+                    requestId: request?.id ?? "none",
+                })),
         ).create();
-        const requestScope = app.createScope(bind.scoped(Request, () => ({ id: "request-1" })));
+        const requestScope = app.createScope(
+            bind(Request)
+                .scoped()
+                .factory(() => ({ id: "request-1" })),
+        );
 
         expect(app.resolve(Service)).toEqual({ requestId: "none" });
         expect(requestScope.resolve(Service)).toEqual({ requestId: "request-1" });
@@ -135,7 +141,7 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Logger, Service],
-            bind(Service, { logger: optional(ref(Logger)) }, ({ logger }) => ({
+            bind(Service).factory({ logger: optional(ref(Logger)) }, ({ logger }) => ({
                 getLogger: () => logger?.value,
             })),
         ).create();
@@ -153,7 +159,7 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Logger, Service],
-            bind(Service, { logger: optional(ref(Logger)) }, ({ logger }) => ({
+            bind(Service).factory({ logger: optional(ref(Logger)) }, ({ logger }) => ({
                 getLogger: () => {
                     if (!logger) {
                         throw new Error("logger missing");
@@ -162,7 +168,7 @@ describe("optional dependencies", () => {
                     return logger.value;
                 },
             })),
-            bind(Logger, loggerFactory),
+            bind(Logger).factory(loggerFactory),
         ).create();
 
         const service = container.resolve(Service);
@@ -178,7 +184,7 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Registry, { hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
         ).create();
@@ -192,9 +198,9 @@ describe("optional dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Hooks, () => ({ name: "first" })),
-            bind(Hooks, () => ({ name: "second" })),
-            bind(Registry, { hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(Registry).factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
         ).create();
@@ -209,7 +215,7 @@ describe("optional dependencies", () => {
         expect(() =>
             createRuntimeContainer(
                 [Port],
-                bind(Port, { external: optional(externalToken) }, ({ external }) => external ?? 3000),
+                bind(Port).factory({ external: optional(externalToken) }, ({ external }) => external ?? 3000),
             ),
         ).toThrowError('Token "external" is not included in the token list');
     });
@@ -220,8 +226,8 @@ describe("optional dependencies", () => {
         const Server = token("Server").of<{ readonly port: number }>();
         const container = createRuntimeContainer(
             [Config, Port, Server],
-            bind(Server, { port: optional(Port) }, ({ port }) => ({ port: port ?? 8080 })),
-            bind(Port, { config: Config }, ({ config }) => config.port),
+            bind(Server).factory({ port: optional(Port) }, ({ port }) => ({ port: port ?? 8080 })),
+            bind(Port).factory({ config: Config }, ({ config }) => config.port),
         );
 
         expect(() => container.resolve(Server)).toThrowError('Service "Config" is not registered in the container');
@@ -234,8 +240,8 @@ describe("optional dependencies", () => {
         expect(() =>
             createRuntimeContainer(
                 [ServiceA, ServiceB],
-                bind(ServiceA, { serviceB: optional(ServiceB) }, () => ({ name: "a" as const })),
-                bind(ServiceB, { serviceA: ServiceA }, () => ({ name: "b" as const })),
+                bind(ServiceA).factory({ serviceB: optional(ServiceB) }, () => ({ name: "a" as const })),
+                bind(ServiceB).factory({ serviceA: ServiceA }, () => ({ name: "b" as const })),
             ),
         ).toThrowError("Circular dependency detected while registering services: ServiceA -> ServiceB -> ServiceA");
     });
@@ -245,7 +251,7 @@ describe("optional dependencies", () => {
         const externalToken = "external" as Token<"external", { readonly log: (message: string) => void }>;
         const container = createRuntimeContainer(
             [Service],
-            bind(Service, { logger: optional(ref(externalToken)) }, ({ logger }) => ({
+            bind(Service).factory({ logger: optional(ref(externalToken)) }, ({ logger }) => ({
                 hasLogger: Boolean(logger),
             })),
         );

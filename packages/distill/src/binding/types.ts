@@ -5,7 +5,6 @@ import {
     type BindingDependencies,
     type BindingLifetime,
     type BindingLifetimeOf,
-    type BindingOptions,
     type CoreBinding,
     type Disposer,
     getBindingLifetime,
@@ -13,7 +12,7 @@ import {
     isBinding,
 } from "./core-types";
 
-export type { AnyBinding, BindingDependencies, BindingLifetime, BindingLifetimeOf, BindingOptions, Disposer };
+export type { AnyBinding, BindingDependencies, BindingLifetime, BindingLifetimeOf, Disposer };
 export { getBindingLifetime, isBinding };
 
 export type BindingFactory<

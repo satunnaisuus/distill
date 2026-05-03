@@ -81,7 +81,7 @@ export const createRuntimeModuleWireAliasEntries = (
 
         entries.push({
             moduleId: currentWire.module.id,
-            binding: bind.transient.alias(currentWire.importToken, currentWire.providerToken) as AnyBinding,
+            binding: bind(currentWire.importToken).transient().alias(currentWire.providerToken) as AnyBinding,
         });
     }
 

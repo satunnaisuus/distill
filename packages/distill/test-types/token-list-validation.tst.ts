@@ -15,7 +15,7 @@ test("rejects binding tokens outside the token list", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(externalToken, () => 3000),
+            bind(externalToken).factory(() => 3000),
         ).create();
     }).type.toRaiseError("__token_not_in_tokens__");
 });
@@ -24,7 +24,7 @@ test("rejects dependency tokens outside the token list", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.port, { external: externalToken }, ({ external }) => external),
+            bind(tokens.port).factory({ external: externalToken }, ({ external }) => external),
         ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
@@ -33,7 +33,7 @@ test("rejects direct ref dependency tokens outside the token list", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.server, { external: ref(externalToken) }, () => ({
+            bind(tokens.server).factory({ external: ref(externalToken) }, () => ({
                 port: 3000,
             })),
         ).create();
@@ -44,7 +44,7 @@ test("rejects lazy ref dependency tokens outside the token list", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.server, { external: ref(() => externalToken) }, () => ({
+            bind(tokens.server).factory({ external: ref(() => externalToken) }, () => ({
                 port: 3000,
             })),
         ).create();
@@ -55,7 +55,7 @@ test("rejects eager dependency tokens without bindings", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+            bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
                 port: config.port,
             })),
         ).create();
@@ -66,7 +66,7 @@ test("rejects ref dependency tokens without bindings", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.server, { logger: ref(tokens.logger) }, () => ({
+            bind(tokens.server).factory({ logger: ref(tokens.logger) }, () => ({
                 port: 3000,
             })),
         ).create();
@@ -77,7 +77,7 @@ test("rejects lazy ref dependency tokens without bindings", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.server, { logger: ref(() => tokens.logger) }, () => ({
+            bind(tokens.server).factory({ logger: ref(() => tokens.logger) }, () => ({
                 port: 3000,
             })),
         ).create();
@@ -88,10 +88,14 @@ test("rejects singleton bindings with transitive missing dependencies", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind.singleton(tokens.server, { port: tokens.port }, ({ port }) => ({
-                port,
-            })),
-            bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+            bind(tokens.server)
+                .singleton()
+                .factory({ port: tokens.port }, ({ port }) => ({
+                    port,
+                })),
+            bind(tokens.port)
+                .transient()
+                .factory({ config: tokens.config }, ({ config }) => config.port),
         ).create();
     }).type.toRaiseError("__missing_dependencies__");
 });
@@ -100,17 +104,21 @@ test("rejects singleton bindings with transitive ref missing dependencies", () =
     expect(() => {
         defineContainer(
             tokenList,
-            bind.singleton(tokens.server, { port: ref(tokens.port) }, () => ({
-                port: 3000,
-            })),
-            bind.transient(tokens.port, { config: tokens.config }, ({ config }) => config.port),
+            bind(tokens.server)
+                .singleton()
+                .factory({ port: ref(tokens.port) }, () => ({
+                    port: 3000,
+                })),
+            bind(tokens.port)
+                .transient()
+                .factory({ config: tokens.config }, ({ config }) => config.port),
         ).create();
     }).type.toRaiseError("__missing_dependencies__");
 });
 
 test("missing dependency errors report every missing token key", () => {
     const bindings = [
-        bind(tokens.server, { config: tokens.config, logger: ref(tokens.logger) }, () => ({
+        bind(tokens.server).factory({ config: tokens.config, logger: ref(tokens.logger) }, () => ({
             port: 3000,
         })),
     ] as const;
@@ -122,7 +130,7 @@ test("missing dependency errors report every missing token key", () => {
 
 test("missing dependency errors report token keys instead of dependency property names", () => {
     const bindings = [
-        bind(tokens.server, { settings: tokens.config }, () => ({
+        bind(tokens.server).factory({ settings: tokens.config }, () => ({
             port: 3000,
         })),
     ] as const;
@@ -136,8 +144,8 @@ test("rejects duplicate binding tokens", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(tokens.port, () => 3000),
-            bind(tokens.port, () => 4000),
+            bind(tokens.port).factory(() => 3000),
+            bind(tokens.port).factory(() => 4000),
         ).create();
     }).type.toRaiseError("__duplicate_binding__");
 });
@@ -148,7 +156,7 @@ test("rejects union binding tokens", () => {
     expect(() => {
         defineContainer(
             tokenList,
-            bind(configOrPortToken, () => 3000),
+            bind(configOrPortToken).factory(() => 3000),
         ).create();
     }).type.toRaiseError("__union_binding_token__");
 });
@@ -156,10 +164,10 @@ test("rejects union binding tokens", () => {
 test("allows dependencies declared after dependent bindings", () => {
     const container = defineContainer(
         tokenList,
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
 
     expect(container.resolve(tokens.server)).type.toBe<{ readonly port: number }>();

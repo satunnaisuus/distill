@@ -23,7 +23,14 @@ app.use("*", async (c, next) => {
     const session = authSession?.session ?? null;
 
     await container.runScoped(
-        [bind.scoped(CurrentUser, () => user), bind.scoped(CurrentSession, () => session)] as const,
+        [
+            bind(CurrentUser)
+                .scoped()
+                .factory(() => user),
+            bind(CurrentSession)
+                .scoped()
+                .factory(() => session),
+        ] as const,
         async (requestContainer) => {
             c.set("requestContainer", requestContainer);
             c.set("user", requestContainer.resolve(CurrentUser));

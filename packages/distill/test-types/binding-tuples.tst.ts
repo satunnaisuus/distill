@@ -5,10 +5,10 @@ import { type ConfigBinding, type PortBinding, type ServerBinding, tokenList, to
 
 test("defineContainer validates and preserves bindings passed as readonly tuples", () => {
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ] as const;
 
     const container = defineContainer(tokenList, ...bindings).create();
@@ -19,10 +19,10 @@ test("defineContainer validates and preserves bindings passed as readonly tuples
 
 test("defineContainer validates and preserves bindings passed as typed tuples", () => {
     const bindings: readonly [ServerBinding, ConfigBinding] = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ];
 
     const container = defineContainer(tokenList, ...bindings).create();
@@ -33,10 +33,10 @@ test("defineContainer validates and preserves bindings passed as typed tuples", 
 
 test("defineContainer validates and preserves bindings passed as mutable tuples", () => {
     const bindings: [ServerBinding, ConfigBinding] = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ];
 
     const container = defineContainer(tokenList, ...bindings).create();
@@ -47,11 +47,11 @@ test("defineContainer validates and preserves bindings passed as mutable tuples"
 
 test("defineContainer validates and preserves bindings passed with satisfies readonly tuple", () => {
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.config, () => ({ port: 3000 })),
-        bind(tokens.port, () => 3000),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+        bind(tokens.port).factory(() => 3000),
     ] satisfies readonly [ServerBinding, ConfigBinding, PortBinding];
 
     const container = defineContainer(tokenList, ...bindings).create();
@@ -63,7 +63,7 @@ test("defineContainer validates and preserves bindings passed with satisfies rea
 
 test("defineContainer rejects invalid bindings passed as readonly tuples", () => {
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ] as const;
@@ -74,7 +74,7 @@ test("defineContainer rejects invalid bindings passed as readonly tuples", () =>
 });
 
 test("defineContainer rejects valid bindings passed through mutable arrays", () => {
-    const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+    const bindings = [bind(tokens.config).factory(() => ({ port: 3000 })), bind(tokens.port).factory(() => 3000)];
 
     expect(() => {
         defineContainer(tokenList, ...bindings).create();
@@ -82,7 +82,10 @@ test("defineContainer rejects valid bindings passed through mutable arrays", () 
 });
 
 test("defineContainer rejects valid bindings passed through readonly arrays", () => {
-    const bindings: readonly Binding[] = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+    const bindings: readonly Binding[] = [
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+        bind(tokens.port).factory(() => 3000),
+    ];
 
     expect(() => {
         defineContainer(tokenList, ...bindings).create();
@@ -92,10 +95,10 @@ test("defineContainer rejects valid bindings passed through readonly arrays", ()
 test("createScope validates and preserves bindings passed as readonly tuples", () => {
     const app = defineContainer(
         tokenList,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ] as const;
@@ -109,10 +112,10 @@ test("createScope validates and preserves bindings passed as readonly tuples", (
 test("createScope validates and preserves bindings passed as typed tuples", () => {
     const app = defineContainer(
         tokenList,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
     const bindings: readonly [ServerBinding] = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ];
@@ -126,10 +129,10 @@ test("createScope validates and preserves bindings passed as typed tuples", () =
 test("createScope validates and preserves bindings passed as mutable tuples", () => {
     const app = defineContainer(
         tokenList,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
     const bindings: [ServerBinding] = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ];
@@ -143,13 +146,13 @@ test("createScope validates and preserves bindings passed as mutable tuples", ()
 test("createScope validates and preserves bindings passed with satisfies readonly tuple", () => {
     const app = defineContainer(
         tokenList,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
-        bind(tokens.port, () => 3000),
+        bind(tokens.port).factory(() => 3000),
     ] satisfies readonly [ServerBinding, PortBinding];
 
     const scope = app.createScope(...bindings);
@@ -162,7 +165,7 @@ test("createScope validates and preserves bindings passed with satisfies readonl
 test("createScope rejects invalid bindings passed as readonly tuples", () => {
     const app = defineContainer(tokenList).create();
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ] as const;
@@ -174,7 +177,7 @@ test("createScope rejects invalid bindings passed as readonly tuples", () => {
 
 test("createScope rejects valid bindings passed through mutable arrays", () => {
     const app = defineContainer(tokenList).create();
-    const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+    const bindings = [bind(tokens.config).factory(() => ({ port: 3000 })), bind(tokens.port).factory(() => 3000)];
 
     expect(() => {
         app.createScope(...bindings);
@@ -183,7 +186,10 @@ test("createScope rejects valid bindings passed through mutable arrays", () => {
 
 test("createScope rejects valid bindings passed through readonly arrays", () => {
     const app = defineContainer(tokenList).create();
-    const bindings: readonly Binding[] = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+    const bindings: readonly Binding[] = [
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+        bind(tokens.port).factory(() => 3000),
+    ];
 
     expect(() => {
         app.createScope(...bindings);
@@ -193,10 +199,10 @@ test("createScope rejects valid bindings passed through readonly arrays", () => 
 test("runScoped validates and preserves bindings passed as readonly tuples", () => {
     const app = defineContainer(
         tokenList,
-        bind(tokens.config, () => ({ port: 3000 })),
+        bind(tokens.config).factory(() => ({ port: 3000 })),
     ).create();
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ] as const;
@@ -214,7 +220,7 @@ test("runScoped validates and preserves bindings passed as readonly tuples", () 
 test("runScoped rejects invalid bindings passed as readonly tuples", () => {
     const app = defineContainer(tokenList).create();
     const bindings = [
-        bind(tokens.server, { config: tokens.config }, ({ config }) => ({
+        bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
             port: config.port,
         })),
     ] as const;
@@ -226,7 +232,7 @@ test("runScoped rejects invalid bindings passed as readonly tuples", () => {
 
 test("runScoped rejects valid bindings passed through mutable arrays", () => {
     const app = defineContainer(tokenList).create();
-    const bindings = [bind(tokens.config, () => ({ port: 3000 })), bind(tokens.port, () => 3000)];
+    const bindings = [bind(tokens.config).factory(() => ({ port: 3000 })), bind(tokens.port).factory(() => 3000)];
 
     expect(() => {
         app.runScoped(bindings, () => undefined);

@@ -7,25 +7,3 @@ export const assertDisposeOption: (dispose: unknown) => asserts dispose is Unkno
         throw new Error(DISPOSE_OPTION_TYPE_ERROR);
     }
 };
-
-export const getDisposeOption = <TDisposer extends UnknownDisposer>(
-    options: { readonly dispose?: TDisposer } | undefined,
-): TDisposer | undefined => {
-    if (options === undefined) {
-        return undefined;
-    }
-
-    if (typeof options !== "object" || options === null) {
-        throw new Error("Binding options must be an object");
-    }
-
-    const dispose = (options as { readonly dispose?: unknown }).dispose;
-
-    if (dispose === undefined) {
-        return undefined;
-    }
-
-    assertDisposeOption(dispose);
-
-    return dispose as TDisposer;
-};

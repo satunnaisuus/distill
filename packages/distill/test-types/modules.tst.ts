@@ -18,8 +18,8 @@ test("module containers expose only composition exports", () => {
     const Public = token("Public").of<{ readonly value: string }>();
     const AppModule = defineModule({
         bindings: [
-            bind(Internal, () => ({ value: "internal" })),
-            exported(bind(Public, { internal: Internal }, ({ internal }) => ({ value: internal.value }))),
+            bind(Internal).factory(() => ({ value: "internal" })),
+            exported(bind(Public).factory({ internal: Internal }, ({ internal }) => ({ value: internal.value }))),
         ],
     });
     const App = composeModules({
@@ -38,11 +38,11 @@ test("module token imports allow factory dependencies after composition", () => 
     const Config = token("Config").of<{ readonly port: number }>();
     const Server = token("Server").of<{ readonly port: number }>();
     const ConfigModule = defineModule({
-        bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
     });
     const ServerModule = defineModule({
         imports: [Config],
-        bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
+        bindings: [exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })))],
     });
     const App = composeModules({
         modules: [ServerModule, ConfigModule],
@@ -56,7 +56,7 @@ test("module token imports allow factory dependencies after composition", () => 
 test("old module-to-module imports no longer type-check", () => {
     const Config = token("Config").of<{ readonly port: number }>();
     const ConfigModule = defineModule({
-        bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
     });
 
     expect(() => {
@@ -70,7 +70,7 @@ test("old module-to-module imports no longer type-check", () => {
 test("defineContainer.module requires a composed module root", () => {
     const Config = token("Config").of<{ readonly port: number }>();
     const ConfigModule = defineModule({
-        bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
     });
     const App = composeModules({
         modules: [ConfigModule],
@@ -88,7 +88,7 @@ test("composeModules rejects missing and ambiguous single providers", () => {
     const Server = token("Server").of<{ readonly port: number }>();
     const ServerModule = defineModule({
         imports: [Config],
-        bindings: [exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port })))],
+        bindings: [exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })))],
     });
 
     expect(() => {
@@ -99,10 +99,10 @@ test("composeModules rejects missing and ambiguous single providers", () => {
     }).type.toRaiseError("__missing_provider__");
 
     const FirstConfigModule = defineModule({
-        bindings: [exported(bind(Config, () => ({ port: 3000 })))],
+        bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
     });
     const SecondConfigModule = defineModule({
-        bindings: [exported(bind(Config, () => ({ port: 4000 })))],
+        bindings: [exported(bind(Config).factory(() => ({ port: 4000 })))],
     });
 
     expect(() => {
@@ -116,13 +116,13 @@ test("composeModules rejects missing and ambiguous single providers", () => {
     const NumberConfig = token("SameKeyConfig").of<number>();
     const Public = token("Public").of<{ readonly ok: true }>();
     const StringConfigModule = defineModule({
-        bindings: [exported(bind(StringConfig, () => "config"))],
+        bindings: [exported(bind(StringConfig).factory(() => "config"))],
     });
     const NumberConfigModule = defineModule({
-        bindings: [exported(bind(NumberConfig, () => 3000))],
+        bindings: [exported(bind(NumberConfig).factory(() => 3000))],
     });
     const PublicModule = defineModule({
-        bindings: [exported(bind(Public, () => ({ ok: true as const })))],
+        bindings: [exported(bind(Public).factory(() => ({ ok: true as const })))],
     });
 
     expect(() => {
@@ -152,14 +152,14 @@ test("composeModules rejects incompatible same-key exported multibind providers"
     const NumberHooks = multiToken("Hooks").of<number>();
     const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
     const StringModule = defineModule({
-        bindings: [exported(bind(StringHooks, () => "hook"))],
+        bindings: [exported(bind(StringHooks).factory(() => "hook"))],
     });
     const NumberModule = defineModule({
-        bindings: [exported(bind(NumberHooks, () => 1))],
+        bindings: [exported(bind(NumberHooks).factory(() => 1))],
     });
     const RegistryModule = defineModule({
         imports: [StringHooks],
-        bindings: [exported(bind(Registry, { hooks: all(StringHooks) }, ({ hooks }) => ({ names: hooks })))],
+        bindings: [exported(bind(Registry).factory({ hooks: all(StringHooks) }, ({ hooks }) => ({ names: hooks })))],
     });
 
     expect(() => {
@@ -175,11 +175,23 @@ test("singleton consumers cannot capture scoped imported providers after composi
     const Service = token("Service").of<{ readonly requestId: string }>();
     const Consumer = token("Consumer").of<{ readonly requestId: string }>();
     const ApiModule = defineModule({
-        bindings: [exported(bind.scoped(Service, { request: Request }, ({ request }) => ({ requestId: request.id })))],
+        bindings: [
+            exported(
+                bind(Service)
+                    .scoped()
+                    .factory({ request: Request }, ({ request }) => ({ requestId: request.id })),
+            ),
+        ],
     });
     const AppModule = defineModule({
         imports: [Service],
-        bindings: [exported(bind.singleton(Consumer, { service: Service }, ({ service }) => service))],
+        bindings: [
+            exported(
+                bind(Consumer)
+                    .singleton()
+                    .factory({ service: Service }, ({ service }) => service),
+            ),
+        ],
     });
 
     expect(() => {
@@ -195,11 +207,23 @@ test("imported exported bindings preserve unresolved scoped dependencies", () =>
     const Service = token("Service").of<{ readonly requestId: string }>();
     const AppService = token("AppService").of<{ readonly requestId: string }>();
     const ApiModule = defineModule({
-        bindings: [exported(bind.scoped(Service, { request: Request }, ({ request }) => ({ requestId: request.id })))],
+        bindings: [
+            exported(
+                bind(Service)
+                    .scoped()
+                    .factory({ request: Request }, ({ request }) => ({ requestId: request.id })),
+            ),
+        ],
     });
     const AppModule = defineModule({
         imports: [Service],
-        bindings: [exported(bind.scoped(AppService, { service: Service }, ({ service }) => service))],
+        bindings: [
+            exported(
+                bind(AppService)
+                    .scoped()
+                    .factory({ service: Service }, ({ service }) => service),
+            ),
+        ],
     });
     const App = composeModules({
         modules: [ApiModule, AppModule],
@@ -211,7 +235,11 @@ test("imported exported bindings preserve unresolved scoped dependencies", () =>
         app.resolve(AppService);
     }).type.toRaiseError();
 
-    const requestScope = app.createScope(bind.scoped(Request, () => ({ id: "request-1" })));
+    const requestScope = app.createScope(
+        bind(Request)
+            .scoped()
+            .factory(() => ({ id: "request-1" })),
+    );
 
     expect(requestScope.resolve(AppService)).type.toBe<{ readonly requestId: string }>();
 });
@@ -221,13 +249,16 @@ test("module bindings reject imported internals", () => {
     const Public = token("Public").of<{ readonly value: string }>();
     const Broken = token("Broken").of<{ readonly value: string }>();
     const SecretModule = defineModule({
-        bindings: [bind(Secret, () => ({ value: "secret" })), exported(bind(Public, () => ({ value: "public" })))],
+        bindings: [
+            bind(Secret).factory(() => ({ value: "secret" })),
+            exported(bind(Public).factory(() => ({ value: "public" }))),
+        ],
     });
 
     expect(() => {
         defineModule({
             imports: [Public],
-            bindings: [exported(bind(Broken, { secret: Secret }, ({ secret }) => ({ value: secret.value })))],
+            bindings: [exported(bind(Broken).factory({ secret: Secret }, ({ secret }) => ({ value: secret.value })))],
         });
     }).type.toRaiseError("__missing_dependencies__");
 
@@ -240,7 +271,7 @@ test("single token imports cannot be locally rebound in the same module", () => 
     expect(() => {
         defineModule({
             imports: [Config],
-            bindings: [bind(Config, () => ({ port: 3000 }))],
+            bindings: [bind(Config).factory(() => ({ port: 3000 }))],
         });
     }).type.toRaiseError("__duplicate_binding__");
 });
@@ -253,7 +284,7 @@ test("module bindings reject same-key dependencies with incompatible token types
     expect(() => {
         defineModule({
             imports: [NumberPort],
-            bindings: [exported(bind(Server, { port: StringPort }, ({ port }) => ({ port })))],
+            bindings: [exported(bind(Server).factory({ port: StringPort }, ({ port }) => ({ port })))],
         });
     }).type.toRaiseError("__missing_dependencies__");
 });
@@ -262,14 +293,14 @@ test("multibind imports aggregate exported contributions and owner-local contrib
     const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
     const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
     const PluginModule = defineModule({
-        bindings: [exported(bind(Hooks, () => ({ name: "public" })))],
+        bindings: [exported(bind(Hooks).factory(() => ({ name: "public" })))],
     });
     const RegistryModule = defineModule({
         imports: [Hooks],
         bindings: [
-            bind(Hooks, () => ({ name: "local-private" })),
+            bind(Hooks).factory(() => ({ name: "local-private" })),
             exported(
-                bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                     names: hooks.map((hook) => hook.name),
                 })),
             ),
@@ -292,7 +323,7 @@ test("composeModules rejects imported and exported multibind tokens without cont
         imports: [Hooks],
         bindings: [
             exported(
-                bind(Registry, { hooks: all(Hooks) }, ({ hooks }) => ({
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
                     names: hooks.map((hook) => hook.name),
                 })),
             ),
@@ -321,8 +352,8 @@ test("module overrides are limited to composition exports", () => {
     const Server = token("Server").of<{ readonly port: number }>();
     const AppModule = defineModule({
         bindings: [
-            exported(bind(Config, () => ({ port: 3000 }))),
-            exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port }))),
+            exported(bind(Config).factory(() => ({ port: 3000 }))),
+            exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port }))),
         ],
     });
     const App = composeModules({
@@ -332,12 +363,12 @@ test("module overrides are limited to composition exports", () => {
     const definition = defineContainer.module(App);
 
     expect(() => {
-        definition.create(override(bind(Config, () => ({ port: 4000 }))));
+        definition.create(override(bind(Config).factory(() => ({ port: 4000 }))));
     }).type.toRaiseError("__override_token_not_in_tokens__");
     expect(() => {
         definition.create(unbind(Config));
     }).type.toRaiseError("__override_token_not_in_tokens__");
-    expect(definition.create(override(bind(Server, () => ({ port: 5000 })))).resolve(Server)).type.toBe<{
+    expect(definition.create(override(bind(Server).factory(() => ({ port: 5000 })))).resolve(Server)).type.toBe<{
         readonly port: number;
     }>();
 });
@@ -348,9 +379,9 @@ test("module override types preserve non-overridden composition exports", () => 
     const Server = token("Server").of<{ readonly port: number }>();
     const AppModule = defineModule({
         bindings: [
-            exported(bind(Credentials, () => ({ port: 4000 }))),
-            exported(bind(Config, () => ({ port: 3000 }))),
-            exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port }))),
+            exported(bind(Credentials).factory(() => ({ port: 4000 }))),
+            exported(bind(Config).factory(() => ({ port: 3000 }))),
+            exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port }))),
         ],
     });
     const App = composeModules({
@@ -360,14 +391,20 @@ test("module override types preserve non-overridden composition exports", () => 
     const definition = defineContainer.module(App);
 
     expect(() => {
-        definition.create(override(bind.scoped(Config, () => ({ port: 4000 }))));
+        definition.create(
+            override(
+                bind(Config)
+                    .scoped()
+                    .factory(() => ({ port: 4000 })),
+            ),
+        );
     }).type.toRaiseError("__invalid_overrides__");
     expect(() => {
         definition.create(unbind(Config));
     }).type.toRaiseError("__invalid_overrides__");
 
     const app = definition.create(
-        override(bind(Config, { credentials: Credentials }, ({ credentials }) => ({ port: credentials.port }))),
+        override(bind(Config).factory({ credentials: Credentials }, ({ credentials }) => ({ port: credentials.port }))),
     );
 
     expect(app.resolve(Config)).type.toBe<{ readonly port: number }>();
@@ -380,9 +417,13 @@ test("module override validation follows public override dependencies", () => {
     const Server = token("Server").of<{ readonly port: number }>();
     const AppModule = defineModule({
         bindings: [
-            exported(bind.scoped(Request, () => ({ port: 4000 }))),
-            exported(bind(Config, () => ({ port: 3000 }))),
-            exported(bind(Server, { config: Config }, ({ config }) => ({ port: config.port }))),
+            exported(
+                bind(Request)
+                    .scoped()
+                    .factory(() => ({ port: 4000 })),
+            ),
+            exported(bind(Config).factory(() => ({ port: 3000 }))),
+            exported(bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port }))),
         ],
     });
     const App = composeModules({
@@ -393,7 +434,11 @@ test("module override validation follows public override dependencies", () => {
 
     expect(() => {
         definition.create(
-            override(bind.transient(Config, { request: Request }, ({ request }) => ({ port: request.port }))),
+            override(
+                bind(Config)
+                    .transient()
+                    .factory({ request: Request }, ({ request }) => ({ port: request.port })),
+            ),
         );
     }).type.toRaiseError("__invalid_overrides__");
 });
@@ -402,7 +447,7 @@ test("module scopes reject same-key bindings with incompatible public token type
     const NumberHooks = multiToken("Hooks").of<number>();
     const StringHooks = multiToken("Hooks").of<string>();
     const AppModule = defineModule({
-        bindings: [exported(bind(StringHooks, () => "hook"))],
+        bindings: [exported(bind(StringHooks).factory(() => "hook"))],
     });
     const App = composeModules({
         modules: [AppModule],
@@ -411,7 +456,7 @@ test("module scopes reject same-key bindings with incompatible public token type
     const app = defineContainer.module(App).create();
 
     expect(() => {
-        app.createScope(bind(NumberHooks, () => 1));
+        app.createScope(bind(NumberHooks).factory(() => 1));
     }).type.toRaiseError("__token_not_in_tokens__");
 
     expect(NumberHooks).type.toBe<MultiToken<"Hooks", number>>();

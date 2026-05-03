@@ -1,15 +1,8 @@
 import type { DependencyMap, ResolvedDependencies } from "../dependency/index";
 import type { IfNever, IsAny } from "../shared/index";
-import {
-    type AnyQualifier,
-    type AnySingleToken,
-    type AnyToken,
-    qualified as createQualifiedToken,
-    type QualifiedToken,
-    type TokenValue,
-} from "../token/index";
+import type { AnySingleToken, AnyToken, TokenValue } from "../token/index";
 import { bindingBrand, bindingDependenciesBrand, bindingLifetimeBrand } from "./brands";
-import { assertDisposeOption, getDisposeOption } from "./dispose-option";
+import { assertDisposeOption } from "./dispose-option";
 import {
     type AnyBinding,
     type Binding,
@@ -17,14 +10,13 @@ import {
     type BindingFactory,
     type BindingLifetime,
     type BindingLifetimeOf,
-    type BindingOptions,
     type Disposer,
     getBindingDependencies,
     getBindingLifetime,
     isBinding,
 } from "./types";
 
-export type { AnyBinding, Binding, BindingDependencies, BindingLifetime, BindingLifetimeOf, BindingOptions, Disposer };
+export type { AnyBinding, Binding, BindingDependencies, BindingLifetime, BindingLifetimeOf, Disposer };
 export { assertDisposeOption, getBindingDependencies, getBindingLifetime, isBinding };
 
 type UndefinedDependencyKeys<TDependencies> = {
@@ -47,57 +39,35 @@ type DependencyClass<TDependencies extends DependencyMap, TValue> = new (
     dependencies: ResolvedDependencies<TDependencies>,
 ) => TValue;
 
-type BindFunction<TLifetime extends BindingLifetime> = {
-    <TToken extends AnyToken>(
-        currentToken: TToken,
-        factory: () => NoInfer<TokenValue<TToken>>,
-        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, undefined, TLifetime>;
+type ResolveLifetime<
+    TLifetime extends BindingLifetime | undefined,
+    TDefaultLifetime extends BindingLifetime,
+> = TLifetime extends BindingLifetime ? TLifetime : TDefaultLifetime;
 
-    <TToken extends AnyToken, TDependencies extends DependencyMap>(
-        currentToken: TToken,
+type BindFactoryMethod<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined> = {
+    <TReturn extends NoInfer<TokenValue<TToken>>>(
+        factory: () => TReturn,
+    ): FluentBinding<TToken, undefined, ResolveLifetime<TLifetime, "singleton">>;
+
+    <TDependencies extends DependencyMap, TReturn extends NoInfer<TokenValue<TToken>>>(
         dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
-        factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
-        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, TDependencies, TLifetime>;
+        factory: (dependencies: ResolvedDependencies<TDependencies>) => TReturn,
+    ): FluentBinding<TToken, TDependencies, ResolveLifetime<TLifetime, "singleton">>;
 };
 
-type BindQualifiedFunction<TLifetime extends BindingLifetime> = {
-    <TBaseToken extends AnySingleToken, TQualifier extends AnyQualifier>(
-        baseToken: TBaseToken,
-        currentQualifier: TQualifier,
-        factory: () => NoInfer<TokenValue<TBaseToken>>,
-        options?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
-    ): Binding<QualifiedToken<TBaseToken, TQualifier>, undefined, TLifetime>;
-
-    <TBaseToken extends AnySingleToken, TQualifier extends AnyQualifier, TDependencies extends DependencyMap>(
-        baseToken: TBaseToken,
-        currentQualifier: TQualifier,
-        dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
-        factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TBaseToken>>,
-        options?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
-    ): Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies, TLifetime>;
-};
-
-type BindValueFunction<TLifetime extends BindingLifetime> = <TToken extends AnyToken>(
-    currentToken: TToken,
+type BindValueMethod<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined> = (
     value: NoInfer<TokenValue<TToken>>,
-    options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-) => Binding<TToken, undefined, TLifetime>;
+) => FluentBinding<TToken, undefined, ResolveLifetime<TLifetime, "singleton">>;
 
-type BindClassFunction<TLifetime extends BindingLifetime> = {
-    <TToken extends AnyToken>(
-        currentToken: TToken,
+type BindClassMethod<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined> = {
+    (
         serviceClass: DependencyFreeClass<NoInfer<TokenValue<TToken>>>,
-        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, undefined, TLifetime>;
+    ): FluentBinding<TToken, undefined, ResolveLifetime<TLifetime, "singleton">>;
 
-    <TToken extends AnyToken, TDependencies extends DependencyMap>(
-        currentToken: TToken,
+    <TDependencies extends DependencyMap>(
         dependencies: TDependencies & DefinedDependencyMap<TDependencies>,
         serviceClass: DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>,
-        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, TDependencies, TLifetime>;
+    ): FluentBinding<TToken, TDependencies, ResolveLifetime<TLifetime, "singleton">>;
 };
 
 type ExistingTokenValueConstraint<TToken extends AnyToken, TExistingToken extends AnySingleToken> =
@@ -107,39 +77,76 @@ type ExistingTokenValueConstraint<TToken extends AnyToken, TExistingToken extend
               readonly __existing_value_not_assignable__: TokenValue<TExistingToken>;
           };
 
-type BindAliasFunction<TLifetime extends BindingLifetime> = <
-    TToken extends AnyToken,
+type BindAliasMethod<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined> = <
     TExistingToken extends AnySingleToken,
 >(
-    currentToken: TToken,
     existingToken: TExistingToken & ExistingTokenValueConstraint<TToken, TExistingToken>,
-) => Binding<TToken, { readonly existing: TExistingToken }, TLifetime>;
+) => FluentBinding<TToken, { readonly existing: TExistingToken }, ResolveLifetime<TLifetime, "transient">>;
 
-type BindProviderFunctions<TLifetime extends BindingLifetime, TAliasLifetime extends BindingLifetime = TLifetime> = {
-    readonly value: BindValueFunction<TLifetime>;
-    readonly factory: BindFunction<TLifetime>;
-    readonly class: BindClassFunction<TLifetime>;
-    readonly alias: BindAliasFunction<TAliasLifetime>;
-    readonly useExisting: BindAliasFunction<TAliasLifetime>;
-    readonly qualified: BindQualifiedFunction<TLifetime>;
+type DisposeReturn = void | Promise<void>;
+type VoidValue<TValue = void> = TValue;
+type IsExactlyVoid<TValue> =
+    IsAny<TValue> extends true
+        ? false
+        : [VoidValue] extends [TValue]
+          ? [TValue] extends [VoidValue]
+              ? true
+              : false
+          : false;
+type ExactDisposerParameters<TValue, TDisposer extends (...args: any[]) => DisposeReturn> =
+    IsExactlyVoid<TValue> extends true
+        ? unknown
+        : Parameters<TDisposer> extends [any]
+          ? unknown
+          : {
+                readonly __dispose_must_accept_exactly_one_value__: true;
+            };
+
+type FluentDisposalMethod<TToken extends AnyToken, TNext> = {
+    readonly disposable: <TDisposer extends (value: NoInfer<TokenValue<TToken>>) => DisposeReturn>(
+        dispose: TDisposer & ExactDisposerParameters<NoInfer<TokenValue<TToken>>, TDisposer>,
+    ) => TNext;
 };
 
-type BindWithProviders<TLifetime extends BindingLifetime> = BindFunction<TLifetime> & BindProviderFunctions<TLifetime>;
+interface FluentBindBuilder<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined = undefined>
+    extends FluentDisposalMethod<TToken, FluentBindBuilder<TToken, TLifetime>> {
+    readonly singleton: () => FluentBindBuilder<TToken, "singleton">;
+    readonly scoped: () => FluentBindBuilder<TToken, "scoped">;
+    readonly transient: () => FluentBindBuilder<TToken, "transient">;
+    readonly value: BindValueMethod<TToken, TLifetime>;
+    readonly factory: BindFactoryMethod<TToken, TLifetime>;
+    readonly class: BindClassMethod<TToken, TLifetime>;
+    readonly alias: BindAliasMethod<TToken, TLifetime>;
+    readonly useExisting: BindAliasMethod<TToken, TLifetime>;
+}
 
-type Bind = BindFunction<"singleton"> &
-    BindProviderFunctions<"singleton", "transient"> & {
-        readonly singleton: BindWithProviders<"singleton">;
-        readonly scoped: BindWithProviders<"scoped">;
-        readonly transient: BindWithProviders<"transient">;
-    };
+type FluentBinding<
+    TToken extends AnyToken,
+    TDependencies extends DependencyMap | undefined,
+    TLifetime extends BindingLifetime,
+> = Binding<TToken, TDependencies, TLifetime> & FluentBindingMethods<TToken, TDependencies, TLifetime>;
+
+interface FluentBindingMethods<
+    TToken extends AnyToken,
+    TDependencies extends DependencyMap | undefined,
+    TLifetime extends BindingLifetime,
+> extends FluentDisposalMethod<TToken, FluentBinding<TToken, TDependencies, TLifetime>> {
+    readonly singleton: () => FluentBinding<TToken, TDependencies, "singleton">;
+    readonly scoped: () => FluentBinding<TToken, TDependencies, "scoped">;
+    readonly transient: () => FluentBinding<TToken, TDependencies, "transient">;
+}
+
+type Bind = <TToken extends AnyToken>(currentToken: TToken) => FluentBindBuilder<TToken>;
 
 const createBindingWithoutDependencies = <TToken extends AnyToken, const TLifetime extends BindingLifetime>(
     lifetime: TLifetime,
     currentToken: TToken,
     factory: BindingFactory<TToken, undefined>,
-    options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
+    dispose?: Disposer<NoInfer<TokenValue<TToken>>>,
 ): Binding<TToken, undefined, TLifetime> => {
-    const dispose = getDisposeOption(options);
+    if (dispose !== undefined) {
+        assertDisposeOption(dispose);
+    }
 
     return {
         [bindingBrand]: true,
@@ -159,9 +166,11 @@ const createBindingWithDependencies = <
     currentToken: TToken,
     dependencies: TDependencies,
     factory: BindingFactory<TToken, TDependencies>,
-    options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
+    dispose?: Disposer<NoInfer<TokenValue<TToken>>>,
 ): Binding<TToken, TDependencies, TLifetime> => {
-    const dispose = getDisposeOption(options);
+    if (dispose !== undefined) {
+        assertDisposeOption(dispose);
+    }
 
     return {
         [bindingBrand]: true,
@@ -173,177 +182,223 @@ const createBindingWithDependencies = <
     };
 };
 
-const createBind = <const TLifetime extends BindingLifetime>(lifetime: TLifetime): BindFunction<TLifetime> => {
-    const bindWithLifetime = <TToken extends AnyToken, TDependencies extends DependencyMap>(
-        currentToken: TToken,
-        dependenciesOrFactory: TDependencies | (() => NoInfer<TokenValue<TToken>>),
-        maybeFactoryOrOptions?:
-            | ((dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>)
-            | BindingOptions<NoInfer<TokenValue<TToken>>>,
-        maybeOptions?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, TDependencies | undefined, TLifetime> => {
-        if (typeof dependenciesOrFactory === "function") {
-            const options = maybeFactoryOrOptions as BindingOptions<NoInfer<TokenValue<TToken>>> | undefined;
+type BuilderState<TToken extends AnyToken, TLifetime extends BindingLifetime | undefined> = {
+    readonly currentToken: TToken;
+    readonly lifetime?: TLifetime;
+    readonly dispose?: Disposer<TokenValue<TToken>>;
+};
 
-            return createBindingWithoutDependencies(
-                lifetime,
-                currentToken,
-                dependenciesOrFactory as BindingFactory<TToken, undefined>,
-                options,
-            );
+const resolveLifetime = <const TDefaultLifetime extends BindingLifetime>(
+    lifetime: BindingLifetime | undefined,
+    defaultLifetime: TDefaultLifetime,
+): BindingLifetime => {
+    return lifetime ?? defaultLifetime;
+};
+
+const assertNoExtraArguments = (actualLength: number, expectedLength: number, message: string): void => {
+    if (actualLength > expectedLength) {
+        throw new Error(message);
+    }
+};
+
+const createFluentBinding = <
+    TToken extends AnyToken,
+    TDependencies extends DependencyMap | undefined,
+    const TLifetime extends BindingLifetime,
+>(
+    binding: Binding<TToken, TDependencies, TLifetime>,
+): FluentBinding<TToken, TDependencies, TLifetime> => {
+    const withLifetime = <const TNextLifetime extends BindingLifetime>(
+        lifetime: TNextLifetime,
+    ): FluentBinding<TToken, TDependencies, TNextLifetime> => {
+        const nextBinding = {
+            ...binding,
+            [bindingLifetimeBrand]: lifetime,
+        } as Binding<TToken, TDependencies, TNextLifetime>;
+
+        return createFluentBinding(nextBinding);
+    };
+
+    return Object.assign(binding, {
+        singleton: () => withLifetime("singleton"),
+        scoped: () => withLifetime("scoped"),
+        transient: () => withLifetime("transient"),
+        disposable: (dispose: Disposer<NoInfer<TokenValue<TToken>>>) => {
+            assertDisposeOption(dispose);
+
+            return createFluentBinding({
+                ...binding,
+                dispose,
+            });
+        },
+    }) as FluentBinding<TToken, TDependencies, TLifetime>;
+};
+
+const createFluentBuilder = <TToken extends AnyToken, TLifetime extends BindingLifetime | undefined = undefined>(
+    state: BuilderState<TToken, TLifetime>,
+): FluentBindBuilder<TToken, TLifetime> => {
+    const withLifetime = <const TNextLifetime extends BindingLifetime>(
+        lifetime: TNextLifetime,
+    ): FluentBindBuilder<TToken, TNextLifetime> => {
+        return createFluentBuilder({ ...state, lifetime });
+    };
+
+    const createFactoryBinding = <
+        TDependencies extends DependencyMap | undefined,
+        const TDefaultLifetime extends BindingLifetime,
+    >(
+        defaultLifetime: TDefaultLifetime,
+        dependencies: TDependencies,
+        factory: BindingFactory<TToken, TDependencies>,
+    ): FluentBinding<TToken, TDependencies, ResolveLifetime<TLifetime, TDefaultLifetime>> => {
+        const lifetime = resolveLifetime(state.lifetime, defaultLifetime) as ResolveLifetime<
+            TLifetime,
+            TDefaultLifetime
+        >;
+
+        if (dependencies === undefined) {
+            return createFluentBinding(
+                createBindingWithoutDependencies(
+                    lifetime,
+                    state.currentToken,
+                    factory as BindingFactory<TToken, undefined>,
+                    state.dispose,
+                ),
+            ) as FluentBinding<TToken, TDependencies, ResolveLifetime<TLifetime, TDefaultLifetime>>;
         }
 
-        if (typeof maybeFactoryOrOptions !== "function") {
+        return createFluentBinding(
+            createBindingWithDependencies(
+                lifetime,
+                state.currentToken,
+                dependencies as Exclude<TDependencies, undefined>,
+                factory as BindingFactory<TToken, Exclude<TDependencies, undefined>>,
+                state.dispose,
+            ),
+        ) as FluentBinding<TToken, TDependencies, ResolveLifetime<TLifetime, TDefaultLifetime>>;
+    };
+
+    const bindFactory = <TDependencies extends DependencyMap>(
+        ...args:
+            | [factory: () => NoInfer<TokenValue<TToken>>]
+            | [
+                  dependencies: TDependencies,
+                  factory: (dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TToken>>,
+              ]
+    ): FluentBinding<TToken, TDependencies | undefined, ResolveLifetime<TLifetime, "singleton">> => {
+        const [dependenciesOrFactory, maybeFactory] = args;
+
+        if (typeof dependenciesOrFactory === "function") {
+            assertNoExtraArguments(args.length, 1, "Factory bindings use .disposable(...) instead of options");
+
+            return createFactoryBinding(
+                "singleton",
+                undefined,
+                dependenciesOrFactory as BindingFactory<TToken, undefined>,
+            ) as FluentBinding<TToken, TDependencies | undefined, ResolveLifetime<TLifetime, "singleton">>;
+        }
+
+        if (typeof maybeFactory !== "function") {
             throw new Error("Factory is required when dependencies are provided");
         }
 
-        return createBindingWithDependencies(
-            lifetime,
-            currentToken,
+        assertNoExtraArguments(args.length, 2, "Factory bindings use .disposable(...) instead of options");
+
+        return createFactoryBinding(
+            "singleton",
             dependenciesOrFactory,
-            maybeFactoryOrOptions as BindingFactory<TToken, TDependencies>,
-            maybeOptions,
-        );
+            maybeFactory as BindingFactory<TToken, TDependencies>,
+        ) as FluentBinding<TToken, TDependencies | undefined, ResolveLifetime<TLifetime, "singleton">>;
     };
 
-    return bindWithLifetime as BindFunction<TLifetime>;
-};
+    const bindValue = (
+        ...args: [value: NoInfer<TokenValue<TToken>>]
+    ): FluentBinding<TToken, undefined, ResolveLifetime<TLifetime, "singleton">> => {
+        const [value] = args;
 
-const createBindValue = <const TLifetime extends BindingLifetime>(
-    lifetime: TLifetime,
-): BindValueFunction<TLifetime> => {
-    const bindValue = <TToken extends AnyToken>(
-        currentToken: TToken,
-        value: NoInfer<TokenValue<TToken>>,
-        options?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, undefined, TLifetime> => {
-        return createBindingWithoutDependencies(lifetime, currentToken, () => value, options);
+        assertNoExtraArguments(args.length, 1, "Value bindings use .disposable(...) instead of options");
+
+        return createFactoryBinding("singleton", undefined, () => value);
     };
 
-    return bindValue as BindValueFunction<TLifetime>;
-};
+    const bindClass = <TDependencies extends DependencyMap>(
+        ...args:
+            | [serviceClass: DependencyFreeClass<NoInfer<TokenValue<TToken>>>]
+            | [dependencies: TDependencies, serviceClass: DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>]
+    ): FluentBinding<TToken, TDependencies | undefined, ResolveLifetime<TLifetime, "singleton">> => {
+        const [dependenciesOrClass, maybeClass] = args;
 
-const createBindClass = <const TLifetime extends BindingLifetime>(
-    lifetime: TLifetime,
-): BindClassFunction<TLifetime> => {
-    const bindClass = <TToken extends AnyToken, TDependencies extends DependencyMap>(
-        currentToken: TToken,
-        dependenciesOrClass:
-            | TDependencies
-            | DependencyFreeClass<NoInfer<TokenValue<TToken>>>
-            | DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>,
-        maybeClassOrOptions?:
-            | DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>
-            | BindingOptions<NoInfer<TokenValue<TToken>>>,
-        maybeOptions?: BindingOptions<NoInfer<TokenValue<TToken>>>,
-    ): Binding<TToken, TDependencies | undefined, TLifetime> => {
         if (typeof dependenciesOrClass === "function") {
-            const serviceClass = dependenciesOrClass as DependencyFreeClass<NoInfer<TokenValue<TToken>>>;
-            const options = maybeClassOrOptions as BindingOptions<NoInfer<TokenValue<TToken>>> | undefined;
+            assertNoExtraArguments(args.length, 1, "Class bindings use .disposable(...) instead of options");
 
-            return createBindingWithoutDependencies(lifetime, currentToken, () => new serviceClass(), options);
+            const serviceClass = dependenciesOrClass as DependencyFreeClass<NoInfer<TokenValue<TToken>>>;
+
+            return createFactoryBinding("singleton", undefined, () => new serviceClass()) as FluentBinding<
+                TToken,
+                TDependencies | undefined,
+                ResolveLifetime<TLifetime, "singleton">
+            >;
         }
 
         if (typeof dependenciesOrClass !== "object" || dependenciesOrClass === null) {
             throw new Error("Class constructor must be a function");
         }
 
-        if (typeof maybeClassOrOptions !== "function") {
+        if (typeof maybeClass !== "function") {
             throw new Error("Class constructor is required when dependencies are provided");
         }
 
-        const serviceClass = maybeClassOrOptions as DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>;
+        assertNoExtraArguments(args.length, 2, "Class bindings use .disposable(...) instead of options");
+
         const dependencies = dependenciesOrClass as TDependencies;
+        const serviceClass = maybeClass as DependencyClass<TDependencies, NoInfer<TokenValue<TToken>>>;
         const factory = ((dependencies: ResolvedDependencies<TDependencies>) => {
             return new serviceClass(dependencies);
         }) as BindingFactory<TToken, TDependencies>;
 
-        return createBindingWithDependencies(lifetime, currentToken, dependencies, factory, maybeOptions);
+        return createFactoryBinding("singleton", dependencies, factory) as FluentBinding<
+            TToken,
+            TDependencies | undefined,
+            ResolveLifetime<TLifetime, "singleton">
+        >;
     };
 
-    return bindClass as BindClassFunction<TLifetime>;
-};
+    const bindAlias = <TExistingToken extends AnySingleToken>(
+        ...args: [existingToken: TExistingToken & ExistingTokenValueConstraint<TToken, TExistingToken>]
+    ): FluentBinding<TToken, { readonly existing: TExistingToken }, ResolveLifetime<TLifetime, "transient">> => {
+        const [existingToken] = args;
 
-const createBindAlias = <const TLifetime extends BindingLifetime>(
-    lifetime: TLifetime,
-): BindAliasFunction<TLifetime> => {
-    const bindAlias = <TToken extends AnyToken, TExistingToken extends AnySingleToken>(
-        currentToken: TToken,
-        existingToken: TExistingToken & ExistingTokenValueConstraint<TToken, TExistingToken>,
-    ): Binding<TToken, { readonly existing: TExistingToken }, TLifetime> => {
+        assertNoExtraArguments(args.length, 1, "Alias bindings use .disposable(...) instead of options");
+
         const dependencies = { existing: existingToken as TExistingToken } as const;
         const factory = (({ existing }: ResolvedDependencies<typeof dependencies>) => {
             return existing as TokenValue<TToken>;
         }) as BindingFactory<TToken, typeof dependencies>;
 
-        return createBindingWithDependencies(lifetime, currentToken, dependencies, factory, undefined);
+        return createFactoryBinding("transient", dependencies, factory);
     };
 
-    return bindAlias as BindAliasFunction<TLifetime>;
+    return {
+        singleton: () => withLifetime("singleton"),
+        scoped: () => withLifetime("scoped"),
+        transient: () => withLifetime("transient"),
+        disposable: (dispose: Disposer<NoInfer<TokenValue<TToken>>>) => {
+            assertDisposeOption(dispose);
+
+            return createFluentBuilder({ ...state, dispose });
+        },
+        value: bindValue,
+        factory: bindFactory,
+        class: bindClass,
+        alias: bindAlias,
+        useExisting: bindAlias,
+    } as FluentBindBuilder<TToken, TLifetime>;
 };
 
-const createBindQualified = <const TLifetime extends BindingLifetime>(
-    lifetime: TLifetime,
-): BindQualifiedFunction<TLifetime> => {
-    const bindWithLifetime = createBind(lifetime);
-    const bindQualified = <
-        TBaseToken extends AnySingleToken,
-        TQualifier extends AnyQualifier,
-        TDependencies extends DependencyMap,
-    >(
-        baseToken: TBaseToken,
-        currentQualifier: TQualifier,
-        dependenciesOrFactory: TDependencies | (() => NoInfer<TokenValue<TBaseToken>>),
-        maybeFactoryOrOptions?:
-            | ((dependencies: ResolvedDependencies<TDependencies>) => NoInfer<TokenValue<TBaseToken>>)
-            | BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
-        maybeOptions?: BindingOptions<NoInfer<TokenValue<TBaseToken>>>,
-    ): Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies | undefined, TLifetime> => {
-        const currentToken = createQualifiedToken(baseToken, currentQualifier);
+export const bind = (<TToken extends AnyToken>(...args: [currentToken: TToken]): FluentBindBuilder<TToken> => {
+    const [currentToken] = args;
 
-        if (typeof dependenciesOrFactory === "function") {
-            return bindWithLifetime(
-                currentToken,
-                dependenciesOrFactory as () => TokenValue<QualifiedToken<TBaseToken, TQualifier>>,
-                maybeFactoryOrOptions as BindingOptions<TokenValue<QualifiedToken<TBaseToken, TQualifier>>> | undefined,
-            ) as Binding<QualifiedToken<TBaseToken, TQualifier>, undefined, TLifetime>;
-        }
+    assertNoExtraArguments(args.length, 1, "bind(...) now returns a fluent builder; use bind(token).factory(...)");
 
-        return bindWithLifetime(
-            currentToken,
-            dependenciesOrFactory as TDependencies & DefinedDependencyMap<TDependencies>,
-            maybeFactoryOrOptions as (
-                dependencies: ResolvedDependencies<TDependencies>,
-            ) => TokenValue<QualifiedToken<TBaseToken, TQualifier>>,
-            maybeOptions as BindingOptions<TokenValue<QualifiedToken<TBaseToken, TQualifier>>> | undefined,
-        ) as Binding<QualifiedToken<TBaseToken, TQualifier>, TDependencies, TLifetime>;
-    };
-
-    return bindQualified as BindQualifiedFunction<TLifetime>;
-};
-
-const createBindWithProviders = <const TLifetime extends BindingLifetime>(
-    lifetime: TLifetime,
-): BindWithProviders<TLifetime> => {
-    const bindWithLifetime = createBind(lifetime);
-    const alias = createBindAlias(lifetime);
-
-    return Object.assign(bindWithLifetime, {
-        value: createBindValue(lifetime),
-        factory: bindWithLifetime,
-        class: createBindClass(lifetime),
-        alias,
-        useExisting: alias,
-        qualified: createBindQualified(lifetime),
-    }) as BindWithProviders<TLifetime>;
-};
-
-const topLevelAlias = createBindAlias("transient");
-
-export const bind = Object.assign(createBindWithProviders("singleton"), {
-    alias: topLevelAlias,
-    useExisting: topLevelAlias,
-    singleton: createBindWithProviders("singleton"),
-    scoped: createBindWithProviders("scoped"),
-    transient: createBindWithProviders("transient"),
+    return createFluentBuilder({ currentToken });
 }) as Bind;

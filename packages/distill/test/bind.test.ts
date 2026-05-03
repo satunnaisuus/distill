@@ -10,7 +10,7 @@ describe("bind", () => {
         };
         const factory = () => 3000;
 
-        const binding = bind(tokens.port, factory);
+        const binding = bind(tokens.port).factory(factory);
 
         expect(binding.token).toBe(tokens.port);
         expect(binding.factory).toBe(factory);
@@ -33,7 +33,7 @@ describe("bind", () => {
         };
         const factory = ({ config }: { readonly config: { readonly port: number } }) => config.port;
 
-        const binding = bind(tokens.port, dependencies, factory);
+        const binding = bind(tokens.port).factory(dependencies, factory);
 
         expect(binding.token).toBe(tokens.port);
         expect(binding.factory).toBe(factory);
@@ -50,9 +50,51 @@ describe("bind", () => {
             port: token("port").of<number>(),
         };
 
-        expect(getBindingLifetime(bind.singleton(tokens.port, () => 3000))).toBe("singleton");
-        expect(getBindingLifetime(bind.scoped(tokens.port, () => 3000))).toBe("scoped");
-        expect(getBindingLifetime(bind.transient(tokens.port, () => 3000))).toBe("transient");
+        expect(
+            getBindingLifetime(
+                bind(tokens.port)
+                    .singleton()
+                    .factory(() => 3000),
+            ),
+        ).toBe("singleton");
+        expect(
+            getBindingLifetime(
+                bind(tokens.port)
+                    .scoped()
+                    .factory(() => 3000),
+            ),
+        ).toBe("scoped");
+        expect(
+            getBindingLifetime(
+                bind(tokens.port)
+                    .transient()
+                    .factory(() => 3000),
+            ),
+        ).toBe("transient");
+    });
+
+    it("allows lifetime and disposable methods before or after provider methods", () => {
+        const tokens = {
+            port: token("port").of<number>(),
+        };
+        const dispose = vi.fn();
+
+        const beforeProvider = bind(tokens.port)
+            .disposable(dispose)
+            .scoped()
+            .factory(() => 3000);
+        const afterProvider = bind(tokens.port)
+            .factory(() => 3000)
+            .disposable(dispose)
+            .transient();
+        const mixed = bind(tokens.port).singleton().disposable(dispose).value(3000);
+
+        expect(getBindingLifetime(beforeProvider)).toBe("scoped");
+        expect(beforeProvider.dispose).toBe(dispose);
+        expect(getBindingLifetime(afterProvider)).toBe("transient");
+        expect(afterProvider.dispose).toBe(dispose);
+        expect(getBindingLifetime(mixed)).toBe("singleton");
+        expect(mixed.dispose).toBe(dispose);
     });
 
     it("creates factory provider bindings", () => {
@@ -65,7 +107,7 @@ describe("bind", () => {
         };
         const factory = ({ config }: { readonly config: { readonly port: number } }) => config.port;
 
-        const binding = bind.factory(tokens.port, dependencies, factory);
+        const binding = bind(tokens.port).factory(dependencies, factory);
 
         expect(binding.token).toBe(tokens.port);
         expect(binding.factory).toBe(factory);
@@ -83,9 +125,9 @@ describe("bind", () => {
         const handler = vi.fn((message: string) => message.length);
         const dispose = vi.fn();
 
-        const portBinding = bind.value(tokens.port, 3000, { dispose });
-        const handlerBinding = bind.value(tokens.handler, handler);
-        const emptyBinding = bind.value(tokens.empty, undefined);
+        const portBinding = bind(tokens.port).value(3000).disposable(dispose);
+        const handlerBinding = bind(tokens.handler).value(handler);
+        const emptyBinding = bind(tokens.empty).value(undefined);
 
         expect(portBinding.factory()).toBe(3000);
         expect(portBinding.dispose).toBe(dispose);
@@ -102,7 +144,7 @@ describe("bind", () => {
             readonly status = "ready";
         }
 
-        const binding = bind.class(Service, ServiceImpl);
+        const binding = bind(Service).class(ServiceImpl);
         const instance = binding.factory();
 
         expect(instance).toBeInstanceOf(ServiceImpl);
@@ -126,7 +168,7 @@ describe("bind", () => {
             }
         }
 
-        const binding = bind.class(tokens.server, dependencies, ServerImpl);
+        const binding = bind(tokens.server).class(dependencies, ServerImpl);
         const instance = binding.factory({ config: { port: 3000 } });
 
         expect(instance).toBeInstanceOf(ServerImpl);
@@ -141,9 +183,9 @@ describe("bind", () => {
         };
         const logger = { log: vi.fn() };
 
-        const binding = bind.alias(tokens.logger, tokens.consoleLogger);
-        const useExistingBinding = bind.useExisting(tokens.logger, tokens.consoleLogger);
-        const singletonBinding = bind.singleton.alias(tokens.logger, tokens.consoleLogger);
+        const binding = bind(tokens.logger).alias(tokens.consoleLogger);
+        const useExistingBinding = bind(tokens.logger).useExisting(tokens.consoleLogger);
+        const singletonBinding = bind(tokens.logger).singleton().alias(tokens.consoleLogger);
 
         expect(binding.factory({ existing: logger })).toBe(logger);
         expect(useExistingBinding.factory({ existing: logger })).toBe(logger);
@@ -162,9 +204,13 @@ describe("bind", () => {
         let nextId = 1;
         const container = defineContainer(
             Object.values(tokens),
-            bind.transient(tokens.transient, () => ({ id: nextId++ })),
-            bind.scoped(tokens.scoped, () => ({ id: nextId++ })),
-            bind.alias(tokens.alias, tokens.transient),
+            bind(tokens.transient)
+                .transient()
+                .factory(() => ({ id: nextId++ })),
+            bind(tokens.scoped)
+                .scoped()
+                .factory(() => ({ id: nextId++ })),
+            bind(tokens.alias).alias(tokens.transient),
         ).create();
 
         expect(container.resolve(tokens.alias)).toEqual({ id: 1 });
@@ -172,8 +218,10 @@ describe("bind", () => {
 
         const scopedAliasContainer = defineContainer(
             Object.values(tokens),
-            bind.scoped(tokens.scoped, () => ({ id: nextId++ })),
-            bind.alias(tokens.alias, tokens.scoped),
+            bind(tokens.scoped)
+                .scoped()
+                .factory(() => ({ id: nextId++ })),
+            bind(tokens.alias).alias(tokens.scoped),
         ).create();
         const firstScope = scopedAliasContainer.createScope();
         const secondScope = scopedAliasContainer.createScope();
@@ -188,7 +236,9 @@ describe("bind", () => {
         };
         const dispose = vi.fn();
 
-        const binding = bind(tokens.port, () => 3000, { dispose });
+        const binding = bind(tokens.port)
+            .factory(() => 3000)
+            .disposable(dispose);
 
         expect(binding.dispose).toBe(dispose);
     });
@@ -200,7 +250,9 @@ describe("bind", () => {
         };
         const dispose = vi.fn();
 
-        const binding = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, { dispose });
+        const binding = bind(tokens.port)
+            .factory({ config: tokens.config }, ({ config }) => config.port)
+            .disposable(dispose);
 
         expect(binding.dispose).toBe(dispose);
     });
@@ -211,34 +263,41 @@ describe("bind", () => {
             port: token("port").of<number>(),
         };
 
-        const bindingWithoutDependencies = bind(tokens.port, () => 3000, {});
-        const bindingWithDependencies = bind(tokens.port, { config: tokens.config }, ({ config }) => config.port, {});
+        const bindingWithoutDependencies = bind(tokens.port).factory(() => 3000);
+        const bindingWithDependencies = bind(tokens.port).factory(
+            { config: tokens.config },
+            ({ config }) => config.port,
+        );
 
         expect(bindingWithoutDependencies.dispose).toBeUndefined();
         expect(bindingWithDependencies.dispose).toBeUndefined();
     });
 
-    it("throws when binding options are not objects at runtime", () => {
+    it("throws when fluent providers receive option arguments at runtime", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
 
-        expect(() => bind(tokens.port, () => 3000, null as never)).toThrowError("Binding options must be an object");
-        expect(() => bind(tokens.port, () => 3000, "not options" as never)).toThrowError(
-            "Binding options must be an object",
+        expect(() => bind(tokens.port).factory(() => 3000, null as never)).toThrowError(
+            "Factory bindings use .disposable(...) instead of options",
         );
-        expect(() => bind(tokens.port, {}, () => 3000, null as never)).toThrowError(
-            "Binding options must be an object",
+        expect(() => bind(tokens.port).factory(() => 3000, "not options" as never)).toThrowError(
+            "Factory bindings use .disposable(...) instead of options",
         );
-        expect(() => bind(tokens.port, {}, () => 3000, "not options" as never)).toThrowError(
-            "Binding options must be an object",
+        expect(() => bind(tokens.port).factory({}, () => 3000, null as never)).toThrowError(
+            "Factory bindings use .disposable(...) instead of options",
         );
-        expect(() => bind.value(tokens.port, 3000, null as never)).toThrowError("Binding options must be an object");
-        expect(() => bind.class(tokens.port, class Port {}, "not options" as never)).toThrowError(
-            "Binding options must be an object",
+        expect(() => bind(tokens.port).factory({}, () => 3000, "not options" as never)).toThrowError(
+            "Factory bindings use .disposable(...) instead of options",
         );
-        expect(() => bind.class(tokens.port, {}, class Port {}, null as never)).toThrowError(
-            "Binding options must be an object",
+        expect(() => bind(tokens.port).value(3000, null as never)).toThrowError(
+            "Value bindings use .disposable(...) instead of options",
+        );
+        expect(() => bind(tokens.port).class(class Port {}, "not options" as never)).toThrowError(
+            "Class bindings use .disposable(...) instead of options",
+        );
+        expect(() => bind(tokens.port).class({}, class Port {}, null as never)).toThrowError(
+            "Class bindings use .disposable(...) instead of options",
         );
     });
 
@@ -246,30 +305,24 @@ describe("bind", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
-        const bindWithoutFactory = bind as unknown as (
-            token: typeof tokens.port,
+        const bindWithoutFactory = bind(tokens.port).factory as unknown as (
             dependencies: Record<string, never>,
         ) => unknown;
 
-        expect(() => bindWithoutFactory(tokens.port, {})).toThrowError(
-            "Factory is required when dependencies are provided",
-        );
+        expect(() => bindWithoutFactory({})).toThrowError("Factory is required when dependencies are provided");
     });
 
     it("throws when class bindings are missing a constructor at runtime", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
-        const bindClass = bind.class as unknown as (
-            token: typeof tokens.port,
+        const bindClass = bind(tokens.port).class as unknown as (
             dependenciesOrClass: unknown,
             serviceClass?: unknown,
         ) => unknown;
 
-        expect(() => bindClass(tokens.port, "not class")).toThrowError("Class constructor must be a function");
-        expect(() => bindClass(tokens.port, {})).toThrowError(
-            "Class constructor is required when dependencies are provided",
-        );
+        expect(() => bindClass("not class")).toThrowError("Class constructor must be a function");
+        expect(() => bindClass({})).toThrowError("Class constructor is required when dependencies are provided");
     });
 });
 
@@ -278,7 +331,7 @@ describe("getBindingDependencies", () => {
         const tokens = {
             port: token("port").of<number>(),
         };
-        const binding = bind(tokens.port, () => 3000);
+        const binding = bind(tokens.port).factory(() => 3000);
 
         expect(getBindingDependencies(binding)).toBeUndefined();
     });
@@ -291,7 +344,7 @@ describe("getBindingDependencies", () => {
         const dependencies = {
             config: tokens.config,
         };
-        const binding = bind(tokens.port, dependencies, () => 3000);
+        const binding = bind(tokens.port).factory(dependencies, () => 3000);
 
         expect(getBindingDependencies(binding)).toBe(dependencies);
     });
