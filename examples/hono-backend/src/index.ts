@@ -1,19 +1,38 @@
 import { serve } from "@hono/node-server";
-import { composeModules, defineContainer } from "@satunnaisuus/distill";
+import { bind, composeModules, defineContainer } from "@satunnaisuus/distill";
 import { Hono } from "hono";
+import { AuthModule, AuthToken, CurrentSession, CurrentUser } from "./auth/index.js";
 import { AppConfig, ConfigModule } from "./config/index.js";
 import { DatabaseModule } from "./database/index.js";
 import { GreetingsModule } from "./greetings/index.js";
-import { HttpModule, HttpSubRouterToken } from "./http/index.js";
+import { type HttpBindings, HttpModule, HttpSubRouterToken } from "./http/index.js";
 
 const AppModule = composeModules({
-    modules: [HttpModule, ConfigModule, DatabaseModule, GreetingsModule],
-    exports: [AppConfig, HttpSubRouterToken],
+    modules: [HttpModule, ConfigModule, DatabaseModule, AuthModule, GreetingsModule],
+    exports: [AppConfig, AuthToken, HttpSubRouterToken],
 } as const);
 
 const container = defineContainer.module(AppModule).create();
 
-const app = new Hono();
+const app = new Hono<HttpBindings>();
+
+app.use("*", async (c, next) => {
+    const auth = container.resolve(AuthToken);
+    const authSession = await auth.api.getSession({ headers: c.req.raw.headers });
+    const user = authSession?.user ?? null;
+    const session = authSession?.session ?? null;
+
+    await container.runScoped(
+        [bind.scoped(CurrentUser, () => user), bind.scoped(CurrentSession, () => session)] as const,
+        async (requestContainer) => {
+            c.set("requestContainer", requestContainer);
+            c.set("user", requestContainer.resolve(CurrentUser));
+            c.set("session", requestContainer.resolve(CurrentSession));
+
+            await next();
+        },
+    );
+});
 
 for (const subRouter of container.resolveAll(HttpSubRouterToken)) {
     app.route(subRouter.path, subRouter.router);

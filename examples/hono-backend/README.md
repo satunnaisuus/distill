@@ -24,3 +24,21 @@ Create and list persisted greetings:
 curl -X POST "http://localhost:3000/greetings?name=Distill"
 curl "http://localhost:3000/greetings"
 ```
+
+Better Auth is mounted at `/api/auth/*`:
+
+```sh
+curl -i -c cookies.txt \
+  -H "content-type: application/json" \
+  -X POST "http://localhost:3000/api/auth/sign-up/email" \
+  --data '{"email":"dev@example.com","password":"password123","name":"Dev"}'
+
+curl -b cookies.txt "http://localhost:3000/api/auth/get-session"
+```
+
+Request handlers can read the request-scoped auth data from the Hono context:
+
+```ts
+const user = c.var.requestContainer.resolve(CurrentUser);
+const session = c.var.requestContainer.resolve(CurrentSession);
+```
