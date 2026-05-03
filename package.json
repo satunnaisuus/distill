@@ -3,22 +3,27 @@
   "private": true,
   "packageManager": "pnpm@10.24.0",
   "scripts": {
-    "build": "pnpm --filter @satunnaisuus/distill build",
+    "build": "nx run-many -t build",
     "check": "biome check .",
     "check:fix": "biome check --write .",
     "format": "biome format --write .",
     "lint": "biome lint .",
-    "typecheck": "pnpm --filter @satunnaisuus/distill typecheck",
-    "test": "pnpm --filter @satunnaisuus/distill test",
-    "test:unit": "pnpm --filter @satunnaisuus/distill test:unit",
-    "test:types": "pnpm --filter @satunnaisuus/distill test:types",
-    "coverage": "pnpm --filter @satunnaisuus/distill coverage",
+    "typecheck": "nx run-many -t typecheck",
+    "test": "nx run-many -t test",
+    "test:unit": "nx run-many -t test:unit",
+    "test:types": "nx run-many -t test:types",
+    "coverage": "nx run-many -t coverage",
+    "affected:build": "nx affected -t build",
+    "affected:typecheck": "nx affected -t typecheck",
+    "affected:test": "nx affected -t test",
+    "graph": "nx graph",
     "prepare": "lefthook install || true"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.13",
     "@commitlint/cli": "^20.5.2",
     "@commitlint/config-conventional": "^20.5.0",
-    "lefthook": "^2.1.6"
+    "lefthook": "^2.1.6",
+    "nx": "^22.7.1"
   }
 }
