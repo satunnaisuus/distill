@@ -1,52 +1,23 @@
 import { serve } from "@hono/node-server";
-import { bind, defineContainer, token } from "@satunnaisuus/distill";
+import { composeModules, defineContainer } from "@satunnaisuus/distill";
 import { Hono } from "hono";
+import { AppConfig, ConfigModule } from "./config/index.js";
+import { DatabaseModule } from "./database/index.js";
+import { GreetingsModule } from "./greetings/index.js";
+import { HttpModule, HttpSubRouterToken } from "./http/index.js";
 
-type AppConfig = {
-    readonly port: number;
-};
+const AppModule = composeModules({
+    modules: [HttpModule, ConfigModule, DatabaseModule, GreetingsModule],
+    exports: [AppConfig, HttpSubRouterToken],
+} as const);
 
-type Clock = {
-    readonly now: () => Date;
-};
-
-type GreetingService = {
-    readonly greet: (name: string) => string;
-};
-
-const AppConfig = token("AppConfig").of<AppConfig>();
-const Clock = token("Clock").of<Clock>();
-const GreetingService = token("GreetingService").of<GreetingService>();
-
-const parsePort = (value: string | undefined) => {
-    const port = Number.parseInt(value ?? "3000", 10);
-    return Number.isInteger(port) && port > 0 ? port : 3000;
-};
-
-const container = defineContainer(
-    [AppConfig, Clock, GreetingService],
-    bind.value(AppConfig, {
-        port: parsePort(process.env.PORT),
-    }),
-    bind.value(Clock, {
-        now: () => new Date(),
-    }),
-    bind(GreetingService, { clock: Clock }, ({ clock }) => ({
-        greet: (name) => `Hello, ${name}! It is ${clock.now().toISOString()}.`,
-    })),
-).create();
+const container = defineContainer.module(AppModule).create();
 
 const app = new Hono();
 
-app.get("/", (c) => {
-    const greetingService = container.resolve(GreetingService);
-
-    return c.json({
-        greeting: greetingService.greet(c.req.query("name") ?? "Hono"),
-    });
-});
-
-app.get("/health", (c) => c.json({ ok: true }));
+for (const subRouter of container.resolveAll(HttpSubRouterToken)) {
+    app.route(subRouter.path, subRouter.router);
+}
 
 const config = container.resolve(AppConfig);
 
@@ -59,3 +30,15 @@ serve(
         console.log(`Listening on http://localhost:${info.port}`);
     },
 );
+
+const shutdown = async () => {
+    await container.dispose();
+};
+
+process.once("SIGINT", () => {
+    void shutdown().finally(() => process.exit(0));
+});
+
+process.once("SIGTERM", () => {
+    void shutdown().finally(() => process.exit(0));
+});
