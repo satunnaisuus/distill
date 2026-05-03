@@ -1,6 +1,6 @@
 import { allDependencyBrand } from "./brands";
+import { createDependencyResolver } from "./dependency-resolver";
 import type { AnyMultiToken } from "./token";
-import { isRuntimeToken } from "./token";
 
 export type AllToken<TToken extends AnyMultiToken> = {
     readonly [allDependencyBrand]: true;
@@ -16,13 +16,8 @@ export const isAllDependency = (dependency: unknown): dependency is AnyAllToken 
 export function all<TToken extends AnyMultiToken>(dependency: TToken): AllToken<TToken>;
 export function all<TToken extends AnyMultiToken>(dependencyFactory: () => TToken): AllToken<TToken>;
 export function all<TToken extends AnyMultiToken>(dependencyOrFactory: TToken | (() => TToken)): AllToken<TToken> {
-    const resolveToken =
-        typeof dependencyOrFactory === "function" && !isRuntimeToken(dependencyOrFactory)
-            ? (dependencyOrFactory as () => TToken)
-            : () => dependencyOrFactory as TToken;
-
     return {
         [allDependencyBrand]: true,
-        resolveToken,
+        resolveToken: createDependencyResolver(dependencyOrFactory),
     };
 }

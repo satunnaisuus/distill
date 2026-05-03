@@ -1,6 +1,7 @@
 import type { AnyBinding } from "./bind";
 import { bindingOverrideAllBrand, bindingOverrideBrand, bindingUnbindBrand } from "./brands";
 import type { AnyMultiToken, AnySingleToken, TokenKey, TokensNotIn } from "./token";
+import type { TupleError, ValidationErrorIf } from "./type-utils";
 
 type AnySingleBinding = AnyBinding & {
     readonly token: AnySingleToken;
@@ -27,13 +28,12 @@ export type BindingUnbind<TToken extends AnySingleToken = AnySingleToken> = {
 
 export type AnyBindingOverride = BindingOverride | BindingOverrideAll | BindingUnbind;
 
-type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extends TBindings["length"]
-    ? {
-          readonly __bindings_must_be_tuple__: true;
-      }
-    : {};
-
-type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
+type TupleBindingsError<TBindings extends readonly AnyBinding[]> = TupleError<
+    TBindings,
+    {
+        readonly __bindings_must_be_tuple__: true;
+    }
+>;
 
 type OverrideAllBindingTokenError<TBinding extends AnyBinding, TToken extends AnyMultiToken> = ValidationErrorIf<
     [TokensNotIn<TBinding["token"], TToken>] extends [never] ? false : true,

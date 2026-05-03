@@ -20,7 +20,15 @@ import type {
     SameTokenKey,
 } from "./graph";
 import type { AnyToken, AnyTokenArray, IsMultiToken, TokenArrayTokens, TokenKey, TokensNotIn } from "./token";
-import type { HasTrue, IfNever, IsUnion } from "./type-utils";
+import type { DuplicateTokenKeys } from "./token-type-utils";
+import type {
+    HasTrue,
+    IfNever,
+    IsUnion,
+    TupleError,
+    ValidationErrorIf,
+    ValidationErrorUnlessNever,
+} from "./type-utils";
 
 type HasCircularDependencyFromTokens<
     TScopes extends BindingScopes,
@@ -117,18 +125,11 @@ type MissingDependencyKeysFromAllTokens<
     ? MissingDependencyKeysFromResolution<ResolveAllBindingContextsInScopes<TScopes, TTokens>, TPath>
     : never;
 
-type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
-
-type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
-
-type TupleBindingsError<TBindings extends readonly AnyBinding[]> = number extends TBindings["length"]
-    ? {
-          readonly __bindings_must_be_tuple__: true;
-      }
-    : {};
-
-type HasTokenWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = HasTrue<
-    TTokens extends AnyToken ? SameTokenKey<TTokens, TToken> : false
+type TupleBindingsError<TBindings extends readonly AnyBinding[]> = TupleError<
+    TBindings,
+    {
+        readonly __bindings_must_be_tuple__: true;
+    }
 >;
 
 type TokensWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = TTokens extends AnyToken
@@ -136,20 +137,6 @@ type TokensWithSameKey<TTokens extends AnyToken, TToken extends AnyToken> = TTok
         ? TTokens
         : never
     : never;
-
-type DuplicateTokenKeys<
-    TTokenArray extends AnyTokenArray,
-    TSeenTokens extends AnyToken = never,
-> = number extends TTokenArray["length"]
-    ? never
-    : TTokenArray extends readonly [
-            infer TCurrentToken extends AnyToken,
-            ...infer TRemainingTokens extends AnyTokenArray,
-        ]
-      ? HasTokenWithSameKey<TSeenTokens, TCurrentToken> extends true
-          ? TokenKey<TCurrentToken> | DuplicateTokenKeys<TRemainingTokens, TSeenTokens>
-          : DuplicateTokenKeys<TRemainingTokens, TSeenTokens | TCurrentToken>
-      : never;
 
 type HasDuplicateBindingToken<
     TBindings extends readonly AnyBinding[],

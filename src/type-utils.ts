@@ -4,6 +4,12 @@ export type IfNever<TValue, TWhenNever, TWhenPresent> = [TValue] extends [never]
 
 export type HasTrue<TValue> = Extract<TValue, true> extends never ? false : true;
 
+export type ValidationErrorIf<TCondition extends boolean, TError> = [TCondition] extends [true] ? TError : {};
+
+export type ValidationErrorUnlessNever<TValue, TError> = IfNever<TValue, {}, TError>;
+
+export type TupleError<TTuple extends readonly unknown[], TError> = number extends TTuple["length"] ? TError : {};
+
 export type IsExact<TActual, TExpected> =
     IsAny<TActual> extends true
         ? IsAny<TExpected>
