@@ -2,7 +2,6 @@ import {
     all,
     bind,
     composeModules,
-    defineContainer,
     defineModule,
     exported,
     type MultiToken,
@@ -26,7 +25,7 @@ test("module containers expose only composition exports", () => {
         modules: [AppModule],
         exports: [Public],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(app.resolve(Public)).type.toBe<{ readonly value: string }>();
     expect(() => {
@@ -48,7 +47,7 @@ test("omitted composition exports expose all exported bindings", () => {
     const App = composeModules({
         modules: [AppModule],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(app.resolve(Public)).type.toBe<{ readonly value: string }>();
     expect(app.resolveAll(Hooks)).type.toBe<Array<{ readonly name: string }>>();
@@ -71,7 +70,7 @@ test("module token imports allow factory dependencies after composition", () => 
         modules: [ServerModule, ConfigModule],
         exports: [Server],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(app.resolve(Server)).type.toBe<{ readonly port: number }>();
 });
@@ -90,7 +89,7 @@ test("old module-to-module imports no longer type-check", () => {
     }).type.toRaiseError();
 });
 
-test("defineContainer.module requires a composed module root", () => {
+test("only composed modules create containers", () => {
     const Config = token("Config").of<{ readonly port: number }>();
     const ConfigModule = defineModule({
         bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
@@ -100,9 +99,9 @@ test("defineContainer.module requires a composed module root", () => {
         exports: [Config],
     });
 
-    expect(defineContainer.module(App).create().resolve(Config)).type.toBe<{ readonly port: number }>();
+    expect(App.createContainer().resolve(Config)).type.toBe<{ readonly port: number }>();
     expect(() => {
-        defineContainer.module(ConfigModule);
+        ConfigModule.createContainer();
     }).type.toRaiseError();
 });
 
@@ -252,7 +251,7 @@ test("imported exported bindings preserve unresolved scoped dependencies", () =>
         modules: [ApiModule, AppModule],
         exports: [AppService],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(() => {
         app.resolve(AppService);
@@ -333,7 +332,7 @@ test("multibind imports aggregate exported contributions and owner-local contrib
         modules: [RegistryModule, PluginModule],
         exports: [Registry, Hooks],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(app.resolve(Registry)).type.toBe<{ readonly names: readonly string[] }>();
     expect(app.resolveAll(Hooks)).type.toBe<Array<{ readonly name: string }>>();
@@ -383,15 +382,17 @@ test("module overrides are limited to composition exports", () => {
         modules: [AppModule],
         exports: [Server],
     });
-    const definition = defineContainer.module(App);
+    const definition = App;
 
     expect(() => {
-        definition.create(override(bind(Config).factory(() => ({ port: 4000 }))));
+        definition.createContainer(override(bind(Config).factory(() => ({ port: 4000 }))));
     }).type.toRaiseError("__override_token_not_in_tokens__");
     expect(() => {
-        definition.create(unbind(Config));
+        definition.createContainer(unbind(Config));
     }).type.toRaiseError("__override_token_not_in_tokens__");
-    expect(definition.create(override(bind(Server).factory(() => ({ port: 5000 })))).resolve(Server)).type.toBe<{
+    expect(
+        definition.createContainer(override(bind(Server).factory(() => ({ port: 5000 })))).resolve(Server),
+    ).type.toBe<{
         readonly port: number;
     }>();
 });
@@ -411,10 +412,10 @@ test("module override types preserve non-overridden composition exports", () => 
         modules: [AppModule],
         exports: [Credentials, Config, Server],
     });
-    const definition = defineContainer.module(App);
+    const definition = App;
 
     expect(() => {
-        definition.create(
+        definition.createContainer(
             override(
                 bind(Config)
                     .scoped()
@@ -423,10 +424,10 @@ test("module override types preserve non-overridden composition exports", () => 
         );
     }).type.toRaiseError("__invalid_overrides__");
     expect(() => {
-        definition.create(unbind(Config));
+        definition.createContainer(unbind(Config));
     }).type.toRaiseError("__invalid_overrides__");
 
-    const app = definition.create(
+    const app = definition.createContainer(
         override(bind(Config).factory({ credentials: Credentials }, ({ credentials }) => ({ port: credentials.port }))),
     );
 
@@ -453,10 +454,10 @@ test("module override validation follows public override dependencies", () => {
         modules: [AppModule],
         exports: [Request, Config, Server],
     });
-    const definition = defineContainer.module(App);
+    const definition = App;
 
     expect(() => {
-        definition.create(
+        definition.createContainer(
             override(
                 bind(Config)
                     .transient()
@@ -476,7 +477,7 @@ test("module scopes reject same-key bindings with incompatible public token type
         modules: [AppModule],
         exports: [StringHooks],
     });
-    const app = defineContainer.module(App).create();
+    const app = App.createContainer();
 
     expect(() => {
         app.createScope(bind(NumberHooks).factory(() => 1));

@@ -3,7 +3,6 @@ import {
     all,
     bind,
     composeModules,
-    defineContainer,
     defineModule,
     exported,
     multiToken,
@@ -26,7 +25,7 @@ type RuntimeContainerForTest = {
     readonly disposed: boolean;
 };
 
-describe("defineContainer.module", () => {
+describe("module createContainer", () => {
     it("supports symbol and class tokens in module imports and exports", () => {
         class Config {
             readonly port = 3000;
@@ -47,7 +46,7 @@ describe("defineContainer.module", () => {
             exports: [Consumer],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Consumer).config).toBeInstanceOf(Config);
     });
@@ -96,7 +95,7 @@ describe("defineContainer.module", () => {
             exports: [FirstConsumer, SecondConsumer],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(FirstConsumer)).toEqual({ loggerName: "json" });
         expect(app.resolve(SecondConsumer)).toEqual({ loggerName: "human" });
@@ -121,16 +120,16 @@ describe("defineContainer.module", () => {
             modules: [PlainLoggerModule, QualifiedLoggerModule],
             exports: [PlainJsonLogger],
         });
-        const definition = defineContainer.module(App);
-        const app = definition.create();
+        const definition = App;
+        const app = definition.createContainer();
 
         expect(app.resolve(PlainJsonLogger)).toEqual({ name: "plain" });
         expect(() => (app as RuntimeContainerForTest).resolve(JsonLogger)).toThrowError(
             'Service "Logger:json" is not exported by the module',
         );
-        expect(() => definition.create(override(bind(JsonLogger).factory(() => ({ name: "override" }))))).toThrowError(
-            'Service "Logger:json" is not exported by the module',
-        );
+        expect(() =>
+            definition.createContainer(override(bind(JsonLogger).factory(() => ({ name: "override" })))),
+        ).toThrowError('Service "Logger:json" is not exported by the module');
     });
 
     it("wires same-key plain imports to qualified providers by runtime identity", () => {
@@ -159,7 +158,7 @@ describe("defineContainer.module", () => {
             exports: [Consumer],
         });
 
-        expect(defineContainer.module(App).create().resolve(Consumer)).toEqual({ loggerName: "qualified" });
+        expect(App.createContainer().resolve(Consumer)).toEqual({ loggerName: "qualified" });
     });
 
     it("lets public base-token overrides take precedence over wired imports", () => {
@@ -190,7 +189,7 @@ describe("defineContainer.module", () => {
             exports: [Consumer, Logger],
         });
 
-        const app = defineContainer.module(App).create(override(bind(Logger).factory(() => ({ name: "override" }))));
+        const app = App.createContainer(override(bind(Logger).factory(() => ({ name: "override" }))));
 
         expect(app.resolve(Consumer)).toEqual({ loggerName: "override" });
         expect(app.resolve(Logger)).toEqual({ name: "override" });
@@ -220,9 +219,9 @@ describe("defineContainer.module", () => {
             wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
             exports: [Consumer, JsonLogger],
         });
-        const definition = defineContainer.module(App);
+        const definition = App;
 
-        expect(() => definition.create(unbind(JsonLogger) as never)).toThrowError(
+        expect(() => definition.createContainer(unbind(JsonLogger) as never)).toThrowError(
             'Service "Logger:json" is wired to import "Logger", but no exported provider exists',
         );
     });
@@ -308,7 +307,7 @@ describe("defineContainer.module", () => {
             exports: [Db],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Db)).toEqual({ url: "postgres://localhost" });
         expect(() => (app as RuntimeContainerForTest).resolve(Pool)).toThrowError(
@@ -336,7 +335,7 @@ describe("defineContainer.module", () => {
             exports: [Server],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Server)).toEqual({ value: "secret" });
         expect(() => (app as RuntimeContainerForTest).resolve(Secret)).toThrowError(
@@ -359,16 +358,16 @@ describe("defineContainer.module", () => {
             modules: [ConfigModule, ServerModule],
             exports: [Server],
         });
-        const definition = defineContainer.module(App);
+        const definition = App;
 
-        expect(() => (definition.create() as RuntimeContainerForTest).resolve(Config)).toThrowError(
+        expect(() => (definition.createContainer() as RuntimeContainerForTest).resolve(Config)).toThrowError(
             'Service "Config" is not exported by the module',
         );
-        expect(() => definition.create(override(bind(Config).factory(() => ({ port: 4000 }))))).toThrowError(
+        expect(() => definition.createContainer(override(bind(Config).factory(() => ({ port: 4000 }))))).toThrowError(
             'Service "Config" is not exported by the module',
         );
 
-        const app = definition.create(override(bind(Server).factory(() => ({ port: 5000 }))));
+        const app = definition.createContainer(override(bind(Server).factory(() => ({ port: 5000 }))));
 
         expect(app.resolve(Server)).toEqual({ port: 5000 });
     });
@@ -405,7 +404,7 @@ describe("defineContainer.module", () => {
             modules: [ConfigModule, RegistryModule, FirstPluginModule, SecondPluginModule],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Config)).toEqual({ value: "public" });
         expect(app.resolve(Registry)).toEqual({ names: ["first", "second"] });
@@ -430,21 +429,19 @@ describe("defineContainer.module", () => {
             exports: [Config, Server],
         });
 
-        const app = defineContainer.module(App).create(override(bind(Config).factory(() => ({ port: 4000 }))));
+        const app = App.createContainer(override(bind(Config).factory(() => ({ port: 4000 }))));
 
         expect(app.resolve(Config)).toEqual({ port: 4000 });
         expect(app.resolve(Server)).toEqual({ port: 4000 });
     });
 
-    it("rejects direct module containers and old module-to-module imports", () => {
+    it("does not add container creation to direct modules and rejects old module-to-module imports", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const ConfigModule = defineModule({
             bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
         });
 
-        expect(() => defineContainer.module(ConfigModule as never)).toThrowError(
-            "Module container root must be created with composeModules",
-        );
+        expect(Object.hasOwn(ConfigModule, "createContainer")).toBe(false);
         expect(() =>
             defineModule({
                 imports: [ConfigModule],
@@ -560,7 +557,7 @@ describe("defineContainer.module", () => {
             exports: [Registry, Hooks],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Registry)).toEqual({ names: ["first", "second"] });
         expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
@@ -589,7 +586,7 @@ describe("defineContainer.module", () => {
             exports: [Registry, Hooks],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Registry)).toEqual({ names: ["local-private", "public"] });
         expect(app.resolveAll(Hooks)).toEqual([{ name: "public" }]);
@@ -615,7 +612,7 @@ describe("defineContainer.module", () => {
             exports: [Registry, Hooks],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
 
         expect(app.resolve(Registry)).toEqual({ names: ["self"] });
         expect(app.resolveAll(Hooks)).toEqual([{ name: "self" }]);
@@ -675,9 +672,7 @@ describe("defineContainer.module", () => {
             exports: [Registry, Hooks],
         });
 
-        const app = defineContainer
-            .module(App)
-            .create(overrideAll(Hooks, [bind(Hooks).factory(() => ({ name: "override" }))]));
+        const app = App.createContainer(overrideAll(Hooks, [bind(Hooks).factory(() => ({ name: "override" }))]));
 
         expect(app.resolveAll(Hooks)).toEqual([{ name: "override" }]);
         expect(app.resolve(Registry)).toEqual({ names: ["override"] });
@@ -710,7 +705,7 @@ describe("defineContainer.module", () => {
             exports: [Service],
         });
 
-        const app = defineContainer.module(App).create();
+        const app = App.createContainer();
         const rootService = app.resolve(Service);
         const request = app.createScope(
             bind(Request)

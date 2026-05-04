@@ -83,10 +83,10 @@ test("same-key plain and qualified module providers are not ambiguous", () => {
         exports: [JsonLogger],
     });
 
-    expect(defineContainer.module(PlainApp).create().resolve(PlainJsonLogger)).type.toBe<{
+    expect(PlainApp.createContainer().resolve(PlainJsonLogger)).type.toBe<{
         readonly name: string;
     }>();
-    expect(defineContainer.module(QualifiedApp).create().resolve(JsonLogger)).type.toBe<{
+    expect(QualifiedApp.createContainer().resolve(JsonLogger)).type.toBe<{
         readonly name: string;
     }>();
 });
@@ -140,7 +140,7 @@ test("provideImport wires single imports to assignable provider tokens", () => {
         exports: [Consumer],
     });
 
-    expect(defineContainer.module(App).create().resolve(Consumer)).type.toBe<{ readonly loggerName: string }>();
+    expect(App.createContainer().resolve(Consumer)).type.toBe<{ readonly loggerName: string }>();
 });
 
 test("wired imports reject structurally ambiguous module targets", () => {
@@ -200,7 +200,7 @@ test("wired imports do not require an unwired provider when mixed with other imp
         exports: [Consumer],
     });
 
-    expect(defineContainer.module(App).create().resolve(Consumer)).type.toBe<{
+    expect(App.createContainer().resolve(Consumer)).type.toBe<{
         readonly loggerName: string;
         readonly port: number;
     }>();
@@ -287,10 +287,10 @@ test("wired provider overrides participate in module override validation", () =>
         wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
         exports: [Consumer, JsonLogger],
     });
-    const definition = defineContainer.module(App);
+    const definition = App;
 
     expect(() => {
-        definition.create(
+        definition.createContainer(
             override(
                 bind(JsonLogger)
                     .scoped()
@@ -300,7 +300,7 @@ test("wired provider overrides participate in module override validation", () =>
     }).type.toRaiseError("__invalid_overrides__");
 
     expect(() => {
-        definition.create(unbind(JsonLogger));
+        definition.createContainer(unbind(JsonLogger));
     }).type.toRaiseError("__invalid_overrides__");
 });
 
@@ -328,7 +328,7 @@ test("wired provider overrides match exact token identity when keys collide", ()
         wire: [provideImport(ConsumerModule, PlainJsonLogger).with(JsonLogger)],
         exports: [Consumer, JsonLogger],
     });
-    const app = defineContainer.module(App).create(override(bind(JsonLogger).factory(() => ({ name: "override" }))));
+    const app = App.createContainer(override(bind(JsonLogger).factory(() => ({ name: "override" }))));
 
     expect(app.resolve(Consumer)).type.toBe<{ readonly loggerName: string }>();
 });

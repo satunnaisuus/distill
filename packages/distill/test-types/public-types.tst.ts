@@ -94,6 +94,7 @@ test("public helper types preserve their documented type relationships", () => {
     expect(defaultConfigComposition).type.toBe<
         ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
     >();
+    expect(configComposition.createContainer().resolve(tokens.config)).type.toBe<Config>();
     expect(provideImport).type.toBeAssignableTo<
         (
             module: ModuleDefinition<readonly [typeof tokens.config], readonly []>,

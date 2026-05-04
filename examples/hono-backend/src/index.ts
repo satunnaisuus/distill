@@ -1,5 +1,5 @@
 import { serve } from "@hono/node-server";
-import { bind, composeModules, defineContainer } from "@satunnaisuus/distill";
+import { bind, composeModules } from "@satunnaisuus/distill";
 import { Hono } from "hono";
 import { AuthModule, AuthToken, CurrentSession, CurrentUser } from "./auth/index.js";
 import { AppConfig, ConfigModule } from "./config/index.js";
@@ -11,7 +11,7 @@ const AppModule = composeModules({
     modules: [HttpModule, ConfigModule, DatabaseModule, AuthModule, GreetingsModule],
 } as const);
 
-const container = defineContainer.module(AppModule).create();
+const container = AppModule.createContainer();
 
 const app = new Hono<HttpBindings>();
 

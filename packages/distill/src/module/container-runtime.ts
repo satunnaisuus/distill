@@ -6,8 +6,14 @@ import {
     type RuntimeModuleGraph,
     type RuntimePublicAccess,
 } from "../runtime/index";
-import type { TokenListContext } from "../token/index";
-import { type AnySingleToken, type AnyToken, isMultiToken, tokenDisplayKey, tokenRuntimeId } from "../token/index";
+import {
+    type AnySingleToken,
+    type AnyToken,
+    isMultiToken,
+    type TokenListContext,
+    tokenDisplayKey,
+    tokenRuntimeId,
+} from "../token/index";
 import { isExportedBinding, unwrapModuleBinding } from "./binding-runtime";
 import type { AnyBinding, AnyComposedModuleDefinition, AnyModuleDefinition } from "./types";
 

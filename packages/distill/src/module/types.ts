@@ -23,6 +23,7 @@ import type {
     moduleDefinitionBrand,
     moduleImportWireBrand,
 } from "./brands";
+import type { CreateModuleContainerFn } from "./container-definition-types";
 
 export type {
     HasTrue,
@@ -104,16 +105,24 @@ export type AnyComposedModuleDefinition = {
     readonly wire: readonly AnyModuleImportWire[];
 };
 
-export type ComposedModuleDefinition<
-    TModules extends readonly AnyModuleDefinition[] = readonly AnyModuleDefinition[],
-    TExports extends readonly AnyToken[] = readonly AnyToken[],
-    TWire extends readonly AnyModuleImportWire[] = readonly [],
+type ComposedModuleDefinitionShape<
+    TModules extends readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[],
+    TWire extends readonly AnyModuleImportWire[],
 > = {
     readonly [TBrand in typeof composedModuleDefinitionBrand]: true;
 } & {
     readonly modules: TModules;
     readonly exports: TExports;
     readonly wire: TWire;
+};
+
+export type ComposedModuleDefinition<
+    TModules extends readonly AnyModuleDefinition[] = readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[] = readonly AnyToken[],
+    TWire extends readonly AnyModuleImportWire[] = readonly [],
+> = ComposedModuleDefinitionShape<TModules, TExports, TWire> & {
+    readonly createContainer: CreateModuleContainerFn<ComposedModuleDefinitionShape<TModules, TExports, TWire>>;
 };
 
 export type UnwrapModuleBinding<TBinding extends ModuleBindingInput> =

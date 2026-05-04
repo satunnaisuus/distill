@@ -105,7 +105,7 @@ The `server` factory receives `{ config, logger }` with the correct inferred typ
 ### Compose modules with private bindings
 
 ```ts
-import { bind, composeModules, defineContainer, defineModule, exported, token } from "@satunnaisuus/distill";
+import { bind, composeModules, defineModule, exported, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly url: string;
@@ -140,7 +140,7 @@ const App = composeModules({
     exports: [Db],
 } as const);
 
-const app = defineContainer.module(App).create();
+const app = App.createContainer();
 
 app.resolve(Db);
 //    ^? Db
@@ -158,7 +158,7 @@ Modules are visibility boundaries, not disposal scopes. Singleton, scoped, trans
 ### Export selected multibind contributions
 
 ```ts
-import { all, bind, composeModules, defineContainer, defineModule, exported, multiToken, token } from "@satunnaisuus/distill";
+import { all, bind, composeModules, defineModule, exported, multiToken, token } from "@satunnaisuus/distill";
 
 type Hook = {
     readonly name: string;
@@ -184,7 +184,7 @@ const App = composeModules({
     exports: [Hooks, Registry],
 } as const);
 
-const app = defineContainer.module(App).create();
+const app = App.createContainer();
 
 app.resolveAll(Hooks);
 // [{ name: "public" }]
@@ -515,7 +515,8 @@ composeModules({ modules, exports })
 composeModules({ modules, exports, wire })
 provideImport(module, importToken).with(providerToken)
 defineContainer([Config, Logger], ...bindings)
-defineContainer.module(composedModule)
+composedModule.createContainer()
+composedModule.createContainer(override(binding))
 definition.create()
 definition.create(override(binding))
 definition.create(overrideAll(multibindToken, bindings))
@@ -843,7 +844,7 @@ const App = composeModules({
     exports: [Consumer],
 } as const);
 
-const app = defineContainer.module(App).create();
+const app = App.createContainer();
 ```
 
 `defineModule({ imports?, bindings })` creates a visibility boundary. Local bindings can depend on local tokens and imported tokens. Only `exported(bind(...))` bindings can satisfy another module's imports or a composition public export.
@@ -852,9 +853,9 @@ const app = defineContainer.module(App).create();
 
 `provideImport(module, importToken).with(providerToken)` creates a wire entry for one imported regular token. The module must be included in the composition, the import token must appear in that module's `imports`, and the provider token's value type must be assignable to the import token's value type. Multibind imports are collected by token and are not wired with `provideImport`.
 
-### `definition.create(...overrides)`
+### `definition.create(...overrides)` and `composition.createContainer(...overrides)`
 
-Creates an isolated runtime container from a definition. Each call has its own singleton, scoped, and disposal state.
+Creates an isolated runtime container from a flat container definition or composed module. Each call has its own singleton, scoped, and disposal state.
 
 ```ts
 const production = app.create();

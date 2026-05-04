@@ -199,7 +199,7 @@ test("modules compose symbol and class tokens", () => {
         modules: [ConsumerModule, ConfigModule],
         exports: [Consumer],
     });
-    const container = defineContainer.module(App).create();
+    const container = App.createContainer();
 
     expect(container.resolve(Consumer)).type.toBe<{ readonly config: Config }>();
 });

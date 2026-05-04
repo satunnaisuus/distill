@@ -4,7 +4,7 @@ import type { ModuleContainer } from "./container-scope-types";
 import type { CompositionPublicBindings, CompositionPublicTokenArray } from "./interface-types";
 import type { AnyBinding, AnyComposedModuleDefinition, AnyTokenArray } from "./types";
 
-type CreateModuleDefinitionContainerFn<TComposition extends AnyComposedModuleDefinition> = {
+export type CreateModuleContainerFn<TComposition extends AnyComposedModuleDefinition> = {
     (): ModuleContainer<
         TComposition,
         CompositionPublicBindings<TComposition>,
@@ -27,8 +27,3 @@ type CreateModuleDefinitionContainerFn<TComposition extends AnyComposedModuleDef
         TOverrides
     >;
 };
-
-export type ModuleContainerDefinition<TComposition extends AnyComposedModuleDefinition = AnyComposedModuleDefinition> =
-    {
-        create: CreateModuleDefinitionContainerFn<TComposition>;
-    };

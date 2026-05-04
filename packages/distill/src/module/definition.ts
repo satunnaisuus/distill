@@ -1,3 +1,5 @@
+import { createRuntimeModuleContainer } from "../container/index";
+import type { AnyBindingOverride } from "../override/index";
 import { composedModuleDefinitionBrand, moduleDefinitionBrand, moduleImportWireBrand } from "./brands";
 import type { ComposeModules } from "./compose-validation-types";
 import type { ValidateModuleBindingInputTuple, ValidateModuleImports } from "./definition-validation-types";
@@ -37,7 +39,7 @@ import type {
 } from "./types";
 
 export { exported, isExportedBinding, unwrapModuleBinding } from "./binding-runtime";
-export type { ModuleContainerDefinition } from "./container-definition-types";
+export type { CreateModuleContainerFn } from "./container-definition-types";
 export type { RuntimeRegisteredModuleEntry } from "./container-runtime";
 export {
     applyModuleBindingOverrides,
@@ -135,18 +137,25 @@ const composeModulesImplementation = (options: {
     readonly modules: readonly AnyModuleDefinition[];
     readonly exports?: readonly AnyToken[];
     readonly wire?: readonly AnyModuleImportWire[];
-}): AnyComposedModuleDefinition => {
+}) => {
     const compositionExports =
         options.exports === undefined ? collectModuleExportTokens(options.modules) : options.exports;
     const wire = options.wire ?? [];
 
     validateComposedModuleRuntime(options.modules, compositionExports, wire);
 
-    return {
-        [composedModuleDefinitionBrand]: true,
+    const composition = {
+        [composedModuleDefinitionBrand]: true as const,
         modules: options.modules,
         exports: compositionExports,
         wire,
+    };
+
+    return {
+        ...composition,
+        createContainer(...overrides: AnyBindingOverride[]) {
+            return createRuntimeModuleContainer(composition, overrides);
+        },
     };
 };
 
