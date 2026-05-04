@@ -2,6 +2,7 @@ import { composedModuleDefinitionBrand, moduleDefinitionBrand, moduleImportWireB
 import type { ComposeModules } from "./compose-validation-types";
 import type { ValidateModuleBindingInputTuple, ValidateModuleImports } from "./definition-validation-types";
 import type {
+    CompositionExportedTokenArray,
     CompositionLocalBindings,
     CompositionPublicBindings,
     CompositionPublicInterfaceBindings,
@@ -12,7 +13,11 @@ import type {
     ModuleImportWireBuilder,
     ModuleSingleImportTokens,
 } from "./interface-types";
-import { validateComposedModuleRuntime, validateModuleDefinitionRuntime } from "./runtime-validation";
+import {
+    collectModuleExportTokens,
+    validateComposedModuleRuntime,
+    validateModuleDefinitionRuntime,
+} from "./runtime-validation";
 import type {
     AnyComposedModuleDefinition,
     AnyModuleDefinition,
@@ -46,6 +51,7 @@ export type {
     AnyModuleDefinition,
     AnyModuleImportWire,
     ComposedModuleDefinition,
+    CompositionExportedTokenArray,
     CompositionLocalBindings,
     CompositionPublicBindings,
     CompositionPublicInterfaceBindings,
@@ -127,17 +133,19 @@ export function defineModule(options: {
 
 const composeModulesImplementation = (options: {
     readonly modules: readonly AnyModuleDefinition[];
-    readonly exports: readonly AnyToken[];
+    readonly exports?: readonly AnyToken[];
     readonly wire?: readonly AnyModuleImportWire[];
 }): AnyComposedModuleDefinition => {
+    const compositionExports =
+        options.exports === undefined ? collectModuleExportTokens(options.modules) : options.exports;
     const wire = options.wire ?? [];
 
-    validateComposedModuleRuntime(options.modules, options.exports, wire);
+    validateComposedModuleRuntime(options.modules, compositionExports, wire);
 
     return {
         [composedModuleDefinitionBrand]: true,
         modules: options.modules,
-        exports: options.exports,
+        exports: compositionExports,
         wire,
     };
 };

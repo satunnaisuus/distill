@@ -34,6 +34,29 @@ test("module containers expose only composition exports", () => {
     }).type.toRaiseError();
 });
 
+test("omitted composition exports expose all exported bindings", () => {
+    const Internal = token("Internal").of<{ readonly value: string }>();
+    const Public = token("Public").of<{ readonly value: string }>();
+    const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+    const AppModule = defineModule({
+        bindings: [
+            bind(Internal).factory(() => ({ value: "internal" })),
+            exported(bind(Public).factory(() => ({ value: "public" }))),
+            exported(bind(Hooks).factory(() => ({ name: "hook" }))),
+        ],
+    });
+    const App = composeModules({
+        modules: [AppModule],
+    });
+    const app = defineContainer.module(App).create();
+
+    expect(app.resolve(Public)).type.toBe<{ readonly value: string }>();
+    expect(app.resolveAll(Hooks)).type.toBe<Array<{ readonly name: string }>>();
+    expect(() => {
+        app.resolve(Internal);
+    }).type.toRaiseError();
+});
+
 test("module token imports allow factory dependencies after composition", () => {
     const Config = token("Config").of<{ readonly port: number }>();
     const Server = token("Server").of<{ readonly port: number }>();

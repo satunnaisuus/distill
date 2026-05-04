@@ -149,7 +149,7 @@ app.resolve(Pool);
 // TypeScript error: Pool is internal to DbModule.
 ```
 
-Module `imports` are tokens, not other modules. A module binding can depend on local bindings and on imported tokens; `composeModules(...)` then wires those imports to exported providers from the listed modules. The composition `exports` list is the full public interface of the container.
+Module `imports` are tokens, not other modules. A module binding can depend on local bindings and on imported tokens; `composeModules(...)` then wires those imports to exported providers from the listed modules. If `exports` is omitted, every `exported(...)` token from the listed modules is public; pass `exports` to expose only selected exported tokens.
 
 Only bindings wrapped with `exported(...)` can satisfy another module's token import or a composition public export. Local bindings stay private to their module.
 
@@ -509,6 +509,8 @@ ref(token)
 ref(() => token)
 exported(binding)
 defineModule({ imports?, bindings })
+composeModules({ modules })
+composeModules({ modules, wire })
 composeModules({ modules, exports })
 composeModules({ modules, exports, wire })
 provideImport(module, importToken).with(providerToken)
@@ -846,7 +848,7 @@ const app = defineContainer.module(App).create();
 
 `defineModule({ imports?, bindings })` creates a visibility boundary. Local bindings can depend on local tokens and imported tokens. Only `exported(bind(...))` bindings can satisfy another module's imports or a composition public export.
 
-`composeModules({ modules, exports })` wires module imports to exported providers with the same token. Use `composeModules({ modules, exports, wire })` when a specific module import should be satisfied by a different exported provider token.
+`composeModules({ modules })` wires module imports to exported providers with the same token and exposes all `exported(...)` tokens publicly. Use `exports` to narrow the public container surface, and use `wire` when a specific module import should be satisfied by a different exported provider token.
 
 `provideImport(module, importToken).with(providerToken)` creates a wire entry for one imported regular token. The module must be included in the composition, the import token must appear in that module's `imports`, and the provider token's value type must be assignable to the import token's value type. Multibind imports are collected by token and are not wired with `provideImport`.
 

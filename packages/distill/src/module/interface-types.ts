@@ -18,6 +18,7 @@ import type {
     BindingDependencies,
     BindingLifetimeOf,
     HasExactToken,
+    HasTokenWithSameKey,
     HasTrue,
     IfNever,
     IsExact,
@@ -444,5 +445,40 @@ export type CompositionPublicBindings<TComposition extends AnyComposedModuleDefi
         readonly [],
         TComposition["wire"]
     >;
+
+type AppendUniqueToken<TTokens extends readonly AnyToken[], TToken extends AnyToken> =
+    HasTokenWithSameKey<TTokens[number], TToken> extends true ? TTokens : readonly [...TTokens, TToken];
+
+type ExportedTokenArrayFromBindings<
+    TBindings extends readonly AnyBinding[],
+    TTokens extends readonly AnyToken[],
+> = number extends TBindings["length"]
+    ? readonly (TTokens[number] | TBindings[number]["token"])[]
+    : TBindings extends readonly [
+            infer TCurrentBinding extends AnyBinding,
+            ...infer TRemainingBindings extends readonly AnyBinding[],
+        ]
+      ? ExportedTokenArrayFromBindings<TRemainingBindings, AppendUniqueToken<TTokens, TCurrentBinding["token"]>>
+      : TTokens;
+
+type ModuleExportedToken<TModule extends AnyModuleDefinition> = ModuleExportedBindings<TModule>[number]["token"];
+
+type CompositionExportedTokenArrayFromModules<
+    TModules extends readonly AnyModuleDefinition[],
+    TTokens extends readonly AnyToken[],
+> = number extends TModules["length"]
+    ? readonly (TTokens[number] | ModuleExportedToken<TModules[number]>)[]
+    : TModules extends readonly [
+            infer TCurrentModule extends AnyModuleDefinition,
+            ...infer TRemainingModules extends readonly AnyModuleDefinition[],
+        ]
+      ? CompositionExportedTokenArrayFromModules<
+            TRemainingModules,
+            ExportedTokenArrayFromBindings<ModuleExportedBindings<TCurrentModule>, TTokens>
+        >
+      : TTokens;
+
+export type CompositionExportedTokenArray<TModules extends readonly AnyModuleDefinition[]> =
+    CompositionExportedTokenArrayFromModules<TModules, readonly []>;
 
 export type CompositionPublicTokenArray<TComposition extends AnyComposedModuleDefinition> = TComposition["exports"];

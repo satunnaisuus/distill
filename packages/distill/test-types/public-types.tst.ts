@@ -62,6 +62,9 @@ test("public helper types preserve their documented type relationships", () => {
         modules: [configModule],
         exports: [tokens.config],
     });
+    const defaultConfigComposition = composeModules({
+        modules: [configModule],
+    });
     const configOverride = override(configBinding);
     const configUnbind = unbind(tokens.config);
     const handlersOverride = overrideAll(handlers, []);
@@ -86,6 +89,9 @@ test("public helper types preserve their documented type relationships", () => {
     expect(exportedConfigBinding).type.toBe<ExportedBinding<typeof configBinding>>();
     expect(configModule).type.toBe<ModuleDefinition<readonly [], readonly [typeof exportedConfigBinding]>>();
     expect(configComposition).type.toBe<
+        ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
+    >();
+    expect(defaultConfigComposition).type.toBe<
         ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
     >();
     expect(provideImport).type.toBeAssignableTo<

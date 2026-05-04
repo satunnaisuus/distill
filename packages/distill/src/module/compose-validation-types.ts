@@ -2,6 +2,7 @@ import type { BindingSingleDependencyTokens, ValidateGraphBindings } from "../ru
 import type {
     AmbiguousWireModuleTargets,
     BindingByExactToken,
+    CompositionExportedTokenArray,
     HasExactModule,
     ModuleBindingScopesFromComposition,
     ModuleExportedInterfaceBindingForToken,
@@ -418,22 +419,25 @@ export type ValidateComposeWire<TWire extends readonly AnyModuleImportWire[]> = 
 };
 
 export type ComposeModules = {
-    <const TModules extends readonly AnyModuleDefinition[], const TExports extends readonly AnyToken[]>(
+    <
+        const TModules extends readonly AnyModuleDefinition[],
+        const TWire extends readonly AnyModuleImportWire[] = readonly [],
+    >(
         options: {
             readonly modules: TModules & ValidateComposeModules<TModules>;
-            readonly exports: TExports & ValidateComposeExports<TExports>;
-        } & ValidateComposeOptions<TModules, TExports, readonly []>,
-    ): ComposedModuleDefinition<TModules, TExports, readonly []>;
+            readonly wire?: TWire & ValidateComposeWire<TWire>;
+        } & ValidateComposeOptions<TModules, CompositionExportedTokenArray<TModules>, TWire>,
+    ): ComposedModuleDefinition<TModules, CompositionExportedTokenArray<TModules>, TWire>;
 
     <
         const TModules extends readonly AnyModuleDefinition[],
         const TExports extends readonly AnyToken[],
-        const TWire extends readonly AnyModuleImportWire[],
+        const TWire extends readonly AnyModuleImportWire[] = readonly [],
     >(
         options: {
             readonly modules: TModules & ValidateComposeModules<TModules>;
             readonly exports: TExports & ValidateComposeExports<TExports>;
-            readonly wire: TWire & ValidateComposeWire<TWire>;
+            readonly wire?: TWire & ValidateComposeWire<TWire>;
         } & ValidateComposeOptions<TModules, TExports, TWire>,
     ): ComposedModuleDefinition<TModules, TExports, TWire>;
 };

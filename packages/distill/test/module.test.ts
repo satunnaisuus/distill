@@ -373,6 +373,48 @@ describe("defineContainer.module", () => {
         expect(app.resolve(Server)).toEqual({ port: 5000 });
     });
 
+    it("exposes all exported providers when composition exports are omitted", () => {
+        const Secret = token("Secret").of<{ readonly value: string }>();
+        const Config = token("Config").of<{ readonly value: string }>();
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const ConfigModule = defineModule({
+            bindings: [
+                bind(Secret).factory(() => ({ value: "secret" })),
+                exported(bind(Config).factory(() => ({ value: "public" }))),
+            ],
+        });
+        const FirstPluginModule = defineModule({
+            bindings: [exported(bind(Hooks).factory(() => ({ name: "first" })))],
+        });
+        const SecondPluginModule = defineModule({
+            bindings: [exported(bind(Hooks).factory(() => ({ name: "second" })))],
+        });
+        const RegistryModule = defineModule({
+            imports: [Hooks],
+            bindings: [
+                exported(
+                    bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                        names: hooks.map((hook) => hook.name),
+                    })),
+                ),
+            ],
+        });
+        const App = composeModules({
+            modules: [ConfigModule, RegistryModule, FirstPluginModule, SecondPluginModule],
+        });
+
+        const app = defineContainer.module(App).create();
+
+        expect(app.resolve(Config)).toEqual({ value: "public" });
+        expect(app.resolve(Registry)).toEqual({ names: ["first", "second"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(() => (app as RuntimeContainerForTest).resolve(Secret)).toThrowError(
+            'Service "Secret" is not exported by the module',
+        );
+    });
+
     it("applies public overrides to same-module exported dependencies", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const Server = token("Server").of<{ readonly port: number }>();

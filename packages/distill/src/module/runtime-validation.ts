@@ -162,6 +162,31 @@ const collectExportedEntries = (modules: readonly AnyModuleDefinition[]): readon
     return entries;
 };
 
+export const collectModuleExportTokens = (modules: readonly AnyModuleDefinition[]): readonly AnyToken[] => {
+    const exportTokens: AnyToken[] = [];
+    const seenTokenKeyIds = new Set<string>();
+
+    for (const currentModule of modules) {
+        for (const moduleBinding of currentModule.bindings) {
+            if (!isExportedBinding(moduleBinding)) {
+                continue;
+            }
+
+            const currentToken = moduleBinding.binding.token;
+            const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
+
+            if (seenTokenKeyIds.has(currentTokenKeyId)) {
+                continue;
+            }
+
+            seenTokenKeyIds.add(currentTokenKeyId);
+            exportTokens.push(currentToken);
+        }
+    }
+
+    return exportTokens;
+};
+
 const findExportedProviders = (
     entries: readonly RuntimeExportedEntry[],
     currentToken: AnyToken,

@@ -9,7 +9,6 @@ import { type HttpBindings, HttpModule, HttpSubRouterToken } from "./http/index.
 
 const AppModule = composeModules({
     modules: [HttpModule, ConfigModule, DatabaseModule, AuthModule, GreetingsModule],
-    exports: [AppConfig, AuthToken, HttpSubRouterToken],
 } as const);
 
 const container = defineContainer.module(AppModule).create();
