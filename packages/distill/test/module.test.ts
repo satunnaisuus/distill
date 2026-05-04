@@ -16,6 +16,8 @@ import {
     token,
     unbind,
 } from "../src/index";
+import { isComposedModuleDefinition, isModuleDefinition, isModuleImportWire } from "../src/module/index";
+import { assertNoDuplicateTokenKeys, assertNoImportedLocalSingleBindings } from "../src/module/runtime-validation";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
@@ -26,6 +28,41 @@ type RuntimeContainerForTest = {
 };
 
 describe("module createContainer", () => {
+    it("rejects exported values that were not created with bind", () => {
+        expect(() => exported({} as never)).toThrowError("exported(...) expects a binding created with bind");
+    });
+
+    it("identifies module runtime definitions and import wires", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const ConfigModule = defineModule({
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
+        });
+        const ConsumerModule = defineModule({
+            imports: [Config],
+            bindings: [],
+        });
+        const App = composeModules({
+            modules: [ConfigModule],
+            exports: [Config],
+        });
+        const wire = provideImport(ConsumerModule, Config).with(Config);
+
+        expect(isModuleDefinition(ConfigModule)).toBe(true);
+        expect(isModuleDefinition({})).toBe(false);
+        expect(isModuleDefinition(null)).toBe(false);
+        expect(isModuleDefinition("module")).toBe(false);
+
+        expect(isComposedModuleDefinition(App)).toBe(true);
+        expect(isComposedModuleDefinition({})).toBe(false);
+        expect(isComposedModuleDefinition(null)).toBe(false);
+        expect(isComposedModuleDefinition("composition")).toBe(false);
+
+        expect(isModuleImportWire(wire)).toBe(true);
+        expect(isModuleImportWire({})).toBe(false);
+        expect(isModuleImportWire(null)).toBe(false);
+        expect(isModuleImportWire("wire")).toBe(false);
+    });
+
     it("supports symbol and class tokens in module imports and exports", () => {
         class Config {
             readonly port = 3000;
@@ -376,11 +413,13 @@ describe("module createContainer", () => {
         const Secret = token("Secret").of<{ readonly value: string }>();
         const Config = token("Config").of<{ readonly value: string }>();
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const PrivateHooks = multiToken("PrivateHooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
         const ConfigModule = defineModule({
             bindings: [
                 bind(Secret).factory(() => ({ value: "secret" })),
+                bind(PrivateHooks).factory(() => ({ name: "private" })),
                 exported(bind(Config).factory(() => ({ value: "public" }))),
             ],
         });
@@ -411,6 +450,12 @@ describe("module createContainer", () => {
         expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
         expect(() => (app as RuntimeContainerForTest).resolve(Secret)).toThrowError(
             'Service "Secret" is not exported by the module',
+        );
+        expect(() => (app as RuntimeContainerForTest).resolveAll(PrivateHooks)).toThrowError(
+            'Multibind token "PrivateHooks" is not exported by the module',
+        );
+        expect(() => App.createContainer(overrideAll(PrivateHooks, []))).toThrowError(
+            'Multibind token "PrivateHooks" is not exported by the module',
         );
     });
 
@@ -448,6 +493,253 @@ describe("module createContainer", () => {
                 bindings: [],
             } as never),
         ).toThrowError("Module imports must be tokens");
+    });
+
+    it("validates module token key helpers at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const SingleHooks = token("Hooks").of<{ readonly name: string }>();
+        const ManyHooks = multiToken("Hooks").of<{ readonly name: string }>();
+
+        expect(() =>
+            assertNoDuplicateTokenKeys([Config], (currentKey) => `Token "${currentKey}" is duplicated`),
+        ).not.toThrow();
+        expect(() =>
+            assertNoDuplicateTokenKeys([Config, Config], (currentKey) => `Token "${currentKey}" is duplicated`),
+        ).toThrowError('Token "Config" is duplicated');
+        expect(() => assertNoImportedLocalSingleBindings([SingleHooks, ManyHooks], [])).toThrowError(
+            'Token "Hooks" is already included in module imports',
+        );
+    });
+
+    it("rejects malformed module definitions at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const SingleHooks = token("Hooks").of<{ readonly name: string }>();
+        const ManyHooks = multiToken("Hooks").of<{ readonly name: string }>();
+
+        expect(() =>
+            defineModule({
+                imports: [{}],
+                bindings: [],
+            } as never),
+        ).toThrowError("Module imports must be tokens");
+
+        expect(() =>
+            defineModule({
+                imports: [Config, Config],
+                bindings: [],
+            } as never),
+        ).toThrowError('Token "Config" is already imported');
+
+        expect(() =>
+            defineModule({
+                imports: [Config],
+                bindings: [bind(Config).factory(() => ({ port: 3000 }))],
+            } as never),
+        ).toThrowError('Service "Config" cannot be both imported and locally bound in the same module');
+
+        expect(() =>
+            defineModule({
+                imports: [SingleHooks],
+                bindings: [bind(ManyHooks).factory(() => ({ name: "many" }))],
+            } as never),
+        ).toThrowError('Token "Hooks" is already included in module imports');
+
+        expect(() =>
+            defineModule({
+                bindings: [
+                    bind(SingleHooks).factory(() => ({ name: "single" })),
+                    bind(ManyHooks).factory(() => ({ name: "many" })),
+                ],
+            } as never),
+        ).toThrowError('Token "Hooks" is already included in module bindings');
+
+        expect(() =>
+            defineModule({
+                bindings: [{}],
+            } as never),
+        ).toThrowError("Module bindings must be created with bind or exported(bind(...))");
+    });
+
+    it("rejects malformed module compositions at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Consumer = token("Consumer").of<{ readonly port: number }>();
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+
+        const EmptyModule = defineModule({ bindings: [] });
+        const ConsumerModule = defineModule({
+            imports: [Config],
+            bindings: [],
+        });
+        const ProviderModule = defineModule({
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
+        });
+
+        expect(() =>
+            composeModules({
+                modules: {},
+                exports: [],
+                wire: [],
+            } as never),
+        ).toThrowError("composeModules modules must be an array");
+
+        expect(() =>
+            composeModules({
+                modules: [],
+                exports: {},
+                wire: [],
+            } as never),
+        ).toThrowError("composeModules exports must be an array");
+
+        expect(() =>
+            composeModules({
+                modules: [],
+                exports: [],
+                wire: {},
+            } as never),
+        ).toThrowError("composeModules wire must be an array");
+
+        expect(() =>
+            composeModules({
+                modules: [{}],
+                exports: [],
+            } as never),
+        ).toThrowError("composeModules modules must be created with defineModule");
+
+        expect(() =>
+            composeModules({
+                modules: [EmptyModule, EmptyModule],
+                exports: [],
+            } as never),
+        ).toThrowError("Module is already included in the composition");
+
+        expect(() =>
+            composeModules({
+                modules: [],
+                exports: [{}],
+            } as never),
+        ).toThrowError("composeModules exports must be tokens");
+
+        expect(() =>
+            composeModules({
+                modules: [ProviderModule],
+                exports: [Config, Config],
+            } as never),
+        ).toThrowError('Token "Config" is already exported');
+
+        expect(() =>
+            composeModules({
+                modules: [],
+                exports: [],
+                wire: [{}],
+            } as never),
+        ).toThrowError("composeModules wire entries must be created with provideImport");
+
+        const invalidImportWire = provideImport(ConsumerModule, Config).with(Config);
+        (invalidImportWire as { importToken: unknown }).importToken = {};
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, ProviderModule],
+                exports: [],
+                wire: [invalidImportWire],
+            } as never),
+        ).toThrowError("Wire import token must be a token");
+
+        const invalidProviderWire = provideImport(ConsumerModule, Config).with(Config);
+        (invalidProviderWire as { providerToken: unknown }).providerToken = {};
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, ProviderModule],
+                exports: [],
+                wire: [invalidProviderWire],
+            } as never),
+        ).toThrowError("Wire provider token must be a token");
+
+        const HookConsumerModule = defineModule({
+            imports: [Hooks],
+            bindings: [],
+        });
+
+        expect(() =>
+            composeModules({
+                modules: [HookConsumerModule, ProviderModule],
+                exports: [],
+                wire: [provideImport(HookConsumerModule as never, Hooks as never).with(Config as never)],
+            } as never),
+        ).toThrowError('Multibind token "Hooks" cannot be wired with provideImport');
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, ProviderModule],
+                exports: [],
+                wire: [provideImport(ConsumerModule, Config).with(Hooks as never)],
+            } as never),
+        ).toThrowError('Multibind token "Hooks" cannot be used as a wired provider');
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, ProviderModule],
+                exports: [Consumer],
+            } as never),
+        ).toThrowError('Service "Consumer" is exported, but no exported provider exists');
+    });
+
+    it("wires imports to falsey string provider tokens", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const EmptyLogger = token("").of<{ readonly name: string }>();
+        const Consumer = token("Consumer").of<{ readonly loggerName: string }>();
+        const ConsumerModule = defineModule({
+            imports: [Logger],
+            bindings: [
+                exported(
+                    bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
+                        loggerName: logger.name,
+                    })),
+                ),
+            ],
+        });
+        const LoggerModule = defineModule({
+            bindings: [exported(bind(EmptyLogger).factory(() => ({ name: "empty" })))],
+        });
+        const App = composeModules({
+            modules: [ConsumerModule, LoggerModule],
+            exports: [Consumer],
+            wire: [provideImport(ConsumerModule, Logger).with(EmptyLogger)],
+        });
+
+        expect(App.createContainer().resolve(Consumer)).toEqual({ loggerName: "empty" });
+    });
+
+    it("retains the ambiguity guard for unstable exported binding tokens", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const OtherConfig = token("OtherConfig").of<{ readonly port: number }>();
+        const ConsumerModule = defineModule({
+            imports: [Config],
+            bindings: [],
+        });
+        const FirstProviderModule = defineModule({
+            bindings: [exported(bind(Config).factory(() => ({ port: 3000 })))],
+        });
+        const SecondProviderModule = defineModule({
+            bindings: [exported(bind(OtherConfig).factory(() => ({ port: 4000 })))],
+        });
+        const secondProviderBinding = SecondProviderModule.bindings[0] as {
+            readonly binding: { readonly token: unknown };
+        };
+        let tokenReads = 0;
+
+        Object.defineProperty(secondProviderBinding.binding, "token", {
+            configurable: true,
+            get: () => (tokenReads++ === 0 ? OtherConfig : Config),
+        });
+
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, FirstProviderModule, SecondProviderModule],
+                exports: [],
+            } as never),
+        ).toThrowError('Service "Config" has multiple exported providers');
     });
 
     it("rejects duplicate local single-token bindings at runtime", () => {
@@ -723,5 +1015,28 @@ describe("module createContainer", () => {
         await app.dispose();
 
         expect(events).toEqual(["service", "service", "config"]);
+    });
+
+    it("extends module scope public access with local multibind bindings", async () => {
+        const Service = token("Service").of<{ readonly name: string }>();
+        const Hooks = multiToken("RequestHooks").of<{ readonly name: string }>();
+        const AppModule = defineModule({
+            bindings: [exported(bind(Service).factory(() => ({ name: "app" })))],
+        });
+        const App = composeModules({
+            modules: [AppModule],
+            exports: [Service],
+        });
+
+        const app = App.createContainer();
+        const request = app.createScope(bind(Hooks).factory(() => ({ name: "request" })));
+
+        expect(request.resolveAll(Hooks)).toEqual([{ name: "request" }]);
+        expect(() => (app as RuntimeContainerForTest).resolveAll(Hooks)).toThrowError(
+            'Multibind token "RequestHooks" is not exported by the module',
+        );
+
+        await request.dispose();
+        await app.dispose();
     });
 });

@@ -274,6 +274,24 @@ describe("all dependencies", () => {
         expect(calls).toEqual(["first", "second", "registry"]);
     });
 
+    it("injects all dependencies into transient factories", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
+
+        const container = defineContainer(
+            [Hooks, Registry],
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(Registry)
+                .transient()
+                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+        ).create();
+
+        expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
+    });
+
     it("tracks all-injected dependencies for disposal ordering", async () => {
         const events: string[] = [];
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();

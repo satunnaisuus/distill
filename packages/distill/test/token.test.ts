@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { bind, defineContainer, multiToken, qualified, qualifier, ref, type Token, token } from "../src/index";
-import { isRuntimeMultiToken, tokenKey } from "../src/token/index";
+import {
+    isRuntimeMultiToken,
+    isRuntimeQualifiedToken,
+    isRuntimeToken,
+    tokenDisplayKey,
+    tokenKey,
+    tokenKeyRuntimeId,
+    tokenRuntimeId,
+} from "../src/token/index";
 
 describe("tokenKey", () => {
     it("returns the key for a token created by token().of()", () => {
@@ -73,6 +81,79 @@ describe("token arrays", () => {
 
     it("supports an empty token array", () => {
         expect([]).toEqual([]);
+    });
+});
+
+describe("runtime token metadata", () => {
+    it("derives metadata for runtime symbol and class tokens without builder registration", () => {
+        const runtimeSymbol = Symbol("Runtime");
+        class RuntimeService {}
+
+        expect(tokenKey(runtimeSymbol as never)).toBe(runtimeSymbol);
+        expect(tokenDisplayKey(runtimeSymbol as never)).toBe("Symbol(Runtime)");
+        expect(tokenKey(RuntimeService as never)).toBe(RuntimeService);
+        expect(tokenDisplayKey(RuntimeService as never)).toBe("RuntimeService");
+        expect(tokenDisplayKey(token(class {}).of())).toBe("<anonymous class>");
+        expect(() => tokenKey({} as never)).toThrowError("Token must be created with token, multiToken, or qualified");
+    });
+
+    it("reuses runtime key ids across single and multibind tokens from the same non-string key", () => {
+        const hookKey = Symbol("Hooks");
+        const Hook = token(hookKey).of<{ readonly name: string }>();
+        const Hooks = multiToken(hookKey).of<{ readonly name: string }>();
+        class ServiceClass {}
+        const Service = token(ServiceClass).of();
+        const Services = multiToken(ServiceClass).of();
+
+        expect(tokenKeyRuntimeId(Hooks)).toBe(tokenKeyRuntimeId(Hook));
+        expect(tokenRuntimeId(Hook)).toBe(`single:${tokenKeyRuntimeId(Hook)}`);
+        expect(tokenRuntimeId(Hooks)).toBe(`multi:${tokenKeyRuntimeId(Hook)}`);
+        expect(tokenKeyRuntimeId(Services)).toBe(tokenKeyRuntimeId(Service));
+        expect(tokenRuntimeId(Service)).toBe(`single:${tokenKeyRuntimeId(Service)}`);
+        expect(tokenRuntimeId(Services)).toBe(`multi:${tokenKeyRuntimeId(Service)}`);
+    });
+
+    it("classifies runtime tokens and token kinds", () => {
+        class RuntimeService {}
+
+        expect(isRuntimeToken("Config")).toBe(true);
+        expect(isRuntimeToken(Symbol("Config"))).toBe(true);
+        expect(isRuntimeToken(RuntimeService)).toBe(true);
+        expect(isRuntimeToken(() => undefined)).toBe(false);
+        expect(isRuntimeToken({})).toBe(false);
+        expect(isRuntimeToken(null)).toBe(false);
+        expect(isRuntimeToken(123)).toBe(false);
+
+        expect(isRuntimeMultiToken(Symbol("Hooks"))).toBe(false);
+        expect(isRuntimeMultiToken({})).toBe(false);
+        expect(isRuntimeMultiToken(123)).toBe(false);
+    });
+
+    it("classifies qualified runtime tokens", () => {
+        class Logger {}
+        const Json = qualifier("json");
+        const LoggerToken = token(Logger).of<{ readonly name: string }>();
+        const JsonLogger = qualified(LoggerToken, Json);
+        const StringJsonLogger = qualified(token("StringLogger").of<{ readonly name: string }>(), Json);
+
+        expect(isRuntimeQualifiedToken(JsonLogger)).toBe(true);
+        expect(isRuntimeQualifiedToken(StringJsonLogger)).toBe(true);
+        expect(isRuntimeQualifiedToken(LoggerToken)).toBe(false);
+        expect(isRuntimeQualifiedToken("StringLogger")).toBe(false);
+        expect(isRuntimeQualifiedToken({})).toBe(false);
+        expect(isRuntimeQualifiedToken(123)).toBe(false);
+    });
+
+    it("rejects invalid token and qualifier runtime inputs", () => {
+        expect(() => token({} as never)).toThrowError("Token key must be a string, symbol, or class");
+        expect(() => token("\u0000distill:multi\u0000Hooks")).toThrowError("Token key uses a reserved prefix");
+        expect(() => token('\u0000distill:qualified\u0000["Logger","json"]')).toThrowError(
+            "Token key uses a reserved prefix",
+        );
+        expect(() => qualifier(123 as never)).toThrowError("Qualifier key must be a string");
+        expect(() => qualified(multiToken("Hooks").of() as never, qualifier("json"))).toThrowError(
+            "qualified(...) only accepts single tokens",
+        );
     });
 });
 

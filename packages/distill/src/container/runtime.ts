@@ -7,12 +7,7 @@ import {
     createRuntimeModuleWireAliasEntries,
     type RuntimeRegisteredModuleEntry,
 } from "../module/index";
-import {
-    createRuntimeScope,
-    publicModuleContextId,
-    type RuntimeModuleGraph,
-    type RuntimeScope,
-} from "../runtime/index";
+import { createRuntimeScope, publicModuleContextId, type RuntimeScope } from "../runtime/index";
 import { createTokenListContext, type TokenListContext } from "../token/index";
 import { assertNoCircularDependencies } from "./circular-runtime";
 import { type AnyBindingOverride, applyBindingOverrides } from "./overrides-runtime";
@@ -20,11 +15,10 @@ import { registerBindings } from "./registration-runtime";
 import { resolveActual, resolveAllActual } from "./resolution-runtime";
 import { createRuntimeContainerForScope, type RuntimeContainer } from "./scope-runtime";
 
-const createRootScope = (tokenListContext: TokenListContext, moduleGraph?: RuntimeModuleGraph): RuntimeScope => {
+const createRootScope = (tokenListContext: TokenListContext): RuntimeScope => {
     return createRuntimeScope({
         assertTokenIsInTokenList: (currentToken) => tokenListContext.assertTokenIsInTokenList(currentToken as never),
         registerToken: (currentToken) => tokenListContext.registerToken(currentToken as never),
-        ...(moduleGraph ? { moduleGraph } : {}),
         resolvingPath: [],
     });
 };

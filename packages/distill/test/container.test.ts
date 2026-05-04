@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { createRuntimeBinding } from "../src/container/binding-runtime";
+import { applyBindingOverrides } from "../src/container/overrides-runtime";
+import { registerBindings } from "../src/container/registration-runtime";
 import {
     bind,
     defineContainer,
@@ -13,6 +16,8 @@ import {
     token,
     unbind,
 } from "../src/index";
+import { createRuntimeScope, findBinding } from "../src/runtime/index";
+import { createTokenListContext } from "../src/token/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
@@ -56,6 +61,120 @@ const createDeferred = (): Deferred => {
 };
 
 describe("defineContainer", () => {
+    it("rejects visible single and multibind token key collisions in module graph registrations", () => {
+        const Hook = token("Hook").of<{ readonly name: string }>();
+        const Hooks = multiToken("Hook").of<{ readonly name: string }>();
+        const tokenListContext = createTokenListContext([], { allowUnknownTokens: true });
+        const scope = createRuntimeScope({
+            assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
+            registerToken: tokenListContext.registerToken,
+            moduleGraph: {
+                moduleIds: [1],
+                visibleBindingIdsByModuleId: new Map(),
+            },
+            resolvingPath: [],
+        });
+
+        registerBindings(scope, [bind(Hook).factory(() => ({ name: "single" }))], {
+            moduleContextId: 1,
+            visibleInAllModuleContexts: false,
+            validateCircularDependencies: false,
+        });
+
+        expect(() =>
+            registerBindings(scope, [bind(Hooks).factory(() => ({ name: "multi" }))], {
+                moduleContextId: 1,
+                visibleInAllModuleContexts: false,
+                validateCircularDependencies: false,
+            }),
+        ).toThrowError('Token "Hook" is already included in the token list');
+    });
+
+    it("rejects non-binding entries while applying runtime overrides", () => {
+        const Port = token("Port").of<number>();
+
+        expect(() =>
+            applyBindingOverrides(
+                createTokenListContext([Port]),
+                [
+                    {
+                        token: Port,
+                        factory: () => 3000,
+                    } as never,
+                ],
+                [],
+            ),
+        ).toThrowError("Bindings must be created with bind");
+    });
+
+    it("preserves explicit module visibility metadata on runtime bindings", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const visibleModuleContextIds = [10, 20] as const;
+        const binding = bind(Config).factory(() => ({ port: 3000 }));
+        const runtimeBinding = createRuntimeBinding(
+            binding,
+            createTokenListContext([Config]),
+            5,
+            false,
+            visibleModuleContextIds,
+        );
+
+        expect(runtimeBinding.dependencyModuleContextId).toBe(5);
+        expect(runtimeBinding.visibleInAllModuleContexts).toBe(false);
+        expect(runtimeBinding.visibleModuleContextIds).toBe(visibleModuleContextIds);
+        expect(runtimeBinding.factory({} as never, undefined)).toEqual({ port: 3000 });
+    });
+
+    it("finds bindings exposed through explicit module visibility metadata", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const tokenListContext = createTokenListContext([Config]);
+        const runtimeBinding = createRuntimeBinding(
+            bind(Config).factory(() => ({ port: 3000 })),
+            tokenListContext,
+            5,
+            false,
+            [10],
+        );
+        const scope = createRuntimeScope({
+            assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
+            registerToken: tokenListContext.registerToken,
+            moduleGraph: {
+                moduleIds: [5, 10, 11],
+                visibleBindingIdsByModuleId: new Map(),
+            },
+            resolvingPath: [],
+        });
+
+        scope.bindings.set(runtimeBinding.tokenKeyId, [runtimeBinding]);
+
+        expect(findBinding(scope, runtimeBinding.tokenKeyId, 10, false, runtimeBinding.tokenId)?.binding).toBe(
+            runtimeBinding,
+        );
+        expect(findBinding(scope, runtimeBinding.tokenKeyId, 11, false, runtimeBinding.tokenId)).toBeUndefined();
+    });
+
+    it("keeps non-graph runtime bindings visible to all module contexts", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const tokenListContext = createTokenListContext([Config]);
+        const runtimeBinding = createRuntimeBinding(
+            bind(Config).factory(() => ({ port: 3000 })),
+            tokenListContext,
+            5,
+            false,
+        );
+        const scope = createRuntimeScope({
+            assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
+            registerToken: tokenListContext.registerToken,
+            resolvingPath: [],
+        });
+
+        scope.bindings.set(runtimeBinding.tokenKeyId, [runtimeBinding]);
+
+        expect(findBinding(scope, runtimeBinding.tokenKeyId, 99, false, runtimeBinding.tokenId)?.binding).toBe(
+            runtimeBinding,
+        );
+    });
+
     it("resolves qualified tokens through bind(qualified(...))", () => {
         const Logger = token("Logger").of<{ readonly name: string }>();
         const Json = qualifier("json");
@@ -210,6 +329,21 @@ describe("defineContainer", () => {
         );
     });
 
+    it("throws when an override contains a binding not created with bind", () => {
+        const Port = token("Port").of<number>();
+        const definition = defineContainer(
+            [Port],
+            bind(Port).factory(() => 3000),
+        );
+        const portOverride = override(bind(Port).factory(() => 4000)) as { binding: unknown };
+
+        portOverride.binding = { token: Port, factory: () => 4000 };
+
+        expect(() => definition.create(portOverride as never)).toThrowError(
+            "Override bindings must be created with bind",
+        );
+    });
+
     it("throws when a single override targets an unbound token", () => {
         const Config = token("Config").of<{ readonly port: number }>();
         const definition = defineContainer([Config]);
@@ -242,6 +376,17 @@ describe("defineContainer", () => {
         expect(() => create(unbind(Port), override(bind(Port).factory(() => 4000)))).toThrowError(
             'Service "Port" is already overridden',
         );
+    });
+
+    it("throws when a token is unbound more than once", () => {
+        const Port = token("Port").of<number>();
+        const definition = defineContainer(
+            [Port],
+            bind(Port).factory(() => 3000),
+        );
+        const create = definition.create as (...overrides: readonly unknown[]) => unknown;
+
+        expect(() => create(unbind(Port), unbind(Port))).toThrowError('Service "Port" is already overridden');
     });
 
     it("throws when unbind targets an unbound token", () => {

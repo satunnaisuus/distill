@@ -336,9 +336,10 @@ export const validateComposedModuleRuntime = (
 
     for (const currentModule of modules) {
         for (const currentImport of currentModule.imports) {
-            const wiredProvider = wireProviderByTarget.get(wireTargetId(currentModule, currentImport));
+            const targetId = wireTargetId(currentModule, currentImport);
 
-            if (wiredProvider) {
+            if (wireProviderByTarget.has(targetId)) {
+                const wiredProvider = wireProviderByTarget.get(targetId) as AnySingleToken;
                 assertProviders(
                     wiredProvider,
                     findExportedProviders(exportedEntries, wiredProvider),

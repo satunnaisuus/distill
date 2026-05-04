@@ -6,6 +6,7 @@ import {
     isAllDependency,
     isOptionalDependency,
     isRefDependency,
+    type OptionalDependencyReference,
 } from "../dependency/index";
 import {
     findBinding,
@@ -25,6 +26,14 @@ import {
     resolveBindingWithOwnership,
 } from "./resolution-runtime";
 
+const resolveNestedOptionalDependency = (dependency: DependencyReference): OptionalDependencyReference => {
+    if (isOptionalDependency(dependency)) {
+        return resolveNestedOptionalDependency(dependency.resolveDependency() as DependencyReference);
+    }
+
+    return dependency;
+};
+
 export const getEagerDependencyReferences = (
     dependencies: DependencyMap | undefined,
     tokenListContext: RuntimeTokenListContext,
@@ -36,9 +45,7 @@ export const getEagerDependencyReferences = (
     const eagerDependencies: RuntimeTokenReference[] = [];
 
     for (const dependencyReference of Object.values(dependencies)) {
-        const dependency = isOptionalDependency(dependencyReference)
-            ? dependencyReference.resolveDependency()
-            : dependencyReference;
+        const dependency = resolveNestedOptionalDependency(dependencyReference);
 
         if (isRefDependency(dependency)) {
             continue;
@@ -153,13 +160,7 @@ const resolveOptionalDependencyValue = (
     moduleContextId: number,
 ): unknown => {
     if (isOptionalDependency(dependency)) {
-        return resolveOptionalDependencyValue(
-            scope,
-            dependency.resolveDependency(),
-            tokenListContext,
-            dependencyTracker,
-            moduleContextId,
-        );
+        return resolveDependencyValue(scope, dependency, tokenListContext, dependencyTracker, moduleContextId);
     }
 
     if (isRefDependency(dependency)) {
@@ -238,7 +239,7 @@ export const createDependencyFactory = (
             const resolvedDependency = isOptionalDependency(dependency)
                 ? resolveOptionalDependencyValue(
                       scope,
-                      dependency.resolveDependency(),
+                      dependency,
                       tokenListContext,
                       dependencyTracker,
                       moduleContextId,

@@ -113,6 +113,36 @@ describe("optional dependencies", () => {
         expect(calls).toEqual(["config", "server"]);
     });
 
+    it("unwraps nested optional eager dependencies at runtime", () => {
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Server = token("Server").of<{ readonly port: number }>();
+        const optionalUnsafe = optional as unknown as (dependency: unknown) => unknown;
+        const nestedConfig = optionalUnsafe(optional(Config));
+
+        const configuredContainer = createRuntimeContainer(
+            [Config, Server],
+            bind(Server).factory(
+                { config: nestedConfig as never },
+                ({ config }: { readonly config: { readonly port: number } | undefined }) => ({
+                    port: config?.port ?? 8080,
+                }),
+            ),
+            bind(Config).factory(() => ({ port: 3000 })),
+        );
+        const defaultContainer = createRuntimeContainer(
+            [Config, Server],
+            bind(Server).factory(
+                { config: nestedConfig as never },
+                ({ config }: { readonly config: { readonly port: number } | undefined }) => ({
+                    port: config?.port ?? 8080,
+                }),
+            ),
+        );
+
+        expect(configuredContainer.resolve(Server)).toEqual({ port: 3000 });
+        expect(defaultContainer.resolve(Server)).toEqual({ port: 8080 });
+    });
+
     it("resolves optional eager dependencies from the active scope", () => {
         const Request = token("Request").of<{ readonly id: string }>();
         const Service = token("Service").of<{ readonly requestId: string }>();
@@ -178,6 +208,37 @@ describe("optional dependencies", () => {
         expect(loggerFactory).toHaveBeenCalledTimes(1);
     });
 
+    it("injects registered optional ref dependencies into transient factories", () => {
+        const Logger = token("Logger").of<{ readonly log: (message: string) => void }>();
+        const Service = token("Service").of<{
+            readonly getLogger: () => { readonly log: (message: string) => void };
+        }>();
+        const logger = { log: vi.fn() };
+        const loggerFactory = vi.fn(() => logger);
+
+        const container = defineContainer(
+            [Logger, Service],
+            bind(Service)
+                .transient()
+                .factory({ logger: optional(ref(Logger)) }, ({ logger }) => ({
+                    getLogger: () => {
+                        if (!logger) {
+                            throw new Error("logger missing");
+                        }
+
+                        return logger.value;
+                    },
+                })),
+            bind(Logger).factory(loggerFactory),
+        ).create();
+
+        const service = container.resolve(Service);
+
+        expect(loggerFactory).not.toHaveBeenCalled();
+        expect(service.getLogger()).toBe(logger);
+        expect(loggerFactory).toHaveBeenCalledTimes(1);
+    });
+
     it("injects undefined for an optional all dependency without registered contributions", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
@@ -203,6 +264,24 @@ describe("optional dependencies", () => {
             bind(Registry).factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
+        ).create();
+
+        expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
+    });
+
+    it("injects registered optional all dependencies into transient factories", () => {
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+        const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
+
+        const container = defineContainer(
+            [Hooks, Registry],
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(Registry)
+                .transient()
+                .factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+                    names: hooks?.map((hook) => hook.name),
+                })),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });

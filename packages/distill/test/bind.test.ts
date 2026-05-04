@@ -97,6 +97,50 @@ describe("bind", () => {
         expect(mixed.dispose).toBe(dispose);
     });
 
+    it("applies disposal before dependency provider bindings", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
+        const dependencies = { config: tokens.config };
+        const dispose = vi.fn();
+
+        const binding = bind(tokens.port)
+            .disposable(dispose)
+            .factory(dependencies, ({ config }) => config.port);
+
+        expect(binding.dispose).toBe(dispose);
+        expect(binding.factory({ config: { port: 3000 } })).toBe(3000);
+        expect(getBindingDependencies(binding)).toBe(dependencies);
+        expect(getBindingLifetime(binding)).toBe("singleton");
+    });
+
+    it("preserves dependency binding state when lifetime changes after provider methods", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            port: token("port").of<number>(),
+        };
+        const dependencies = { config: tokens.config };
+        const dispose = vi.fn();
+
+        const singletonBinding = bind(tokens.port)
+            .factory(dependencies, ({ config }) => config.port)
+            .singleton();
+        const scopedBinding = bind(tokens.port)
+            .factory(dependencies, ({ config }) => config.port)
+            .disposable(dispose)
+            .scoped();
+
+        expect(getBindingLifetime(singletonBinding)).toBe("singleton");
+        expect(singletonBinding.factory({ config: { port: 3000 } })).toBe(3000);
+        expect(getBindingDependencies(singletonBinding)).toBe(dependencies);
+
+        expect(getBindingLifetime(scopedBinding)).toBe("scoped");
+        expect(scopedBinding.factory({ config: { port: 4000 } })).toBe(4000);
+        expect(getBindingDependencies(scopedBinding)).toBe(dependencies);
+        expect(scopedBinding.dispose).toBe(dispose);
+    });
+
     it("creates factory provider bindings", () => {
         const tokens = {
             config: token("config").of<{ readonly port: number }>(),

@@ -138,9 +138,10 @@ export const createRuntimeModuleGraph = (
         const visibleBindingIds = new Set<number>();
 
         for (const currentImport of currentModule.imports) {
-            const wiredProvider = wireProviderByTarget.get(wireTargetId(currentModule, currentImport));
+            const targetId = wireTargetId(currentModule, currentImport);
 
-            if (wiredProvider) {
+            if (wireProviderByTarget.has(targetId)) {
+                const wiredProvider = wireProviderByTarget.get(targetId) as AnySingleToken;
                 addVisibleProviders(visibleBindingIds, wiredProvider, undefined);
                 addVisibleProviders(visibleBindingIds, currentImport, currentModule.id);
                 continue;
