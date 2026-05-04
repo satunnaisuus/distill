@@ -42,3 +42,22 @@ Request handlers can read the request-scoped auth data from the Hono context:
 const user = c.var.requestContainer.resolve(CurrentUser);
 const session = c.var.requestContainer.resolve(CurrentSession);
 ```
+
+Run the override-based route tests:
+
+```sh
+pnpm nx run @satunnaisuus/distill-example-hono-backend:test
+```
+
+The test example in `test/app.test.ts` creates the Hono app without starting the server and replaces exported container
+bindings:
+
+```ts
+const container = AppModule.createContainer(
+    override(bind(AuthToken).value(createAuthStub())),
+    override(bind(GreetingServiceToken).value(service)),
+);
+
+const app = createApp(container);
+const response = await app.request("/?name=Vitest");
+```
