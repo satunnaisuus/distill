@@ -1,7 +1,12 @@
 import { createRuntimeModuleContainer } from "../container/index";
 import type { AnyBindingOverride } from "../override/index";
 import { composedModuleDefinitionBrand, moduleDefinitionBrand, moduleImportWireBrand } from "./brands";
-import type { ComposeModules } from "./compose-validation-types";
+import type {
+    ValidateComposeExports,
+    ValidateComposeModules,
+    ValidateComposeOptions,
+    ValidateComposeWire,
+} from "./compose-validation-types";
 import type { ValidateModuleBindingInputTuple, ValidateModuleImports } from "./definition-validation-types";
 import type {
     CompositionExportedTokenArray,
@@ -133,11 +138,31 @@ export function defineModule(options: {
     };
 }
 
-const composeModulesImplementation = (options: {
+export function composeModules<
+    const TModules extends readonly AnyModuleDefinition[],
+    const TWire extends readonly AnyModuleImportWire[] = readonly [],
+>(
+    options: {
+        readonly modules: TModules & ValidateComposeModules<TModules>;
+        readonly wire?: TWire & ValidateComposeWire<TWire>;
+    } & ValidateComposeOptions<TModules, CompositionExportedTokenArray<TModules>, TWire>,
+): ComposedModuleDefinition<TModules, CompositionExportedTokenArray<TModules>, TWire>;
+export function composeModules<
+    const TModules extends readonly AnyModuleDefinition[],
+    const TExports extends readonly AnyToken[],
+    const TWire extends readonly AnyModuleImportWire[] = readonly [],
+>(
+    options: {
+        readonly modules: TModules & ValidateComposeModules<TModules>;
+        readonly exports: TExports & ValidateComposeExports<TExports>;
+        readonly wire?: TWire & ValidateComposeWire<TWire>;
+    } & ValidateComposeOptions<TModules, TExports, TWire>,
+): ComposedModuleDefinition<TModules, TExports, TWire>;
+export function composeModules(options: {
     readonly modules: readonly AnyModuleDefinition[];
     readonly exports?: readonly AnyToken[];
     readonly wire?: readonly AnyModuleImportWire[];
-}) => {
+}) {
     const compositionExports =
         options.exports === undefined ? collectModuleExportTokens(options.modules) : options.exports;
     const wire = options.wire ?? [];
@@ -157,6 +182,4 @@ const composeModulesImplementation = (options: {
             return createRuntimeModuleContainer(composition, overrides);
         },
     };
-};
-
-export const composeModules = composeModulesImplementation as unknown as ComposeModules;
+}

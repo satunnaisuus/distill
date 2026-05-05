@@ -136,8 +136,6 @@ interface FluentBindingMethods<
     readonly transient: () => FluentBinding<TToken, TDependencies, "transient">;
 }
 
-type Bind = <TToken extends AnyToken>(currentToken: TToken) => FluentBindBuilder<TToken>;
-
 const createBindingWithoutDependencies = <TToken extends AnyToken, const TLifetime extends BindingLifetime>(
     lifetime: TLifetime,
     currentToken: TToken,
@@ -395,10 +393,11 @@ const createFluentBuilder = <TToken extends AnyToken, TLifetime extends BindingL
     } as FluentBindBuilder<TToken, TLifetime>;
 };
 
-export const bind = (<TToken extends AnyToken>(...args: [currentToken: TToken]): FluentBindBuilder<TToken> => {
+export function bind<TToken extends AnyToken>(currentToken: TToken): FluentBindBuilder<TToken>;
+export function bind<TToken extends AnyToken>(...args: [currentToken: TToken]): FluentBindBuilder<TToken> {
     const [currentToken] = args;
 
     assertNoExtraArguments(args.length, 1, "bind(...) now returns a fluent builder; use bind(token).factory(...)");
 
     return createFluentBuilder({ currentToken });
-}) as Bind;
+}

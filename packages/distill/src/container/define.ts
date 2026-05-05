@@ -17,10 +17,10 @@ export type DefineContainer = <const TTokenArray extends AnyTokenArray, const TB
     ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
 ) => ContainerDefinition<TBindings, TTokenArray>;
 
-const defineContainerFlat = <const TTokenArray extends AnyTokenArray, const TBindings extends readonly AnyBinding[]>(
+export function defineContainer<const TTokenArray extends AnyTokenArray, const TBindings extends readonly AnyBinding[]>(
     tokens: TTokenArray & ValidateTokenList<TTokenArray>,
     ...bindings: TBindings & ValidateBindings<TBindings, TTokenArray>
-): ContainerDefinition<TBindings, TTokenArray> => {
+): ContainerDefinition<TBindings, TTokenArray> {
     const tokenListContext = createTokenListContext(tokens);
     validateRuntimeContainerBindings(tokenListContext, bindings);
 
@@ -29,6 +29,4 @@ const defineContainerFlat = <const TTokenArray extends AnyTokenArray, const TBin
             return createRuntimeContainer(tokenListContext, bindings, overrides);
         },
     } as unknown as ContainerDefinition<TBindings, TTokenArray>;
-};
-
-export const defineContainer = defineContainerFlat as DefineContainer;
+}
