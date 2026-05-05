@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { type DefaultTheme, defineConfig } from "vitepress";
+import llmstxt from "vitepress-plugin-llms";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
 
@@ -57,6 +58,10 @@ export default defineConfig({
     outDir: "../dist",
     lastUpdated: true,
     cleanUrls: true,
+
+    vite: {
+        plugins: [llmstxt()],
+    },
 
     head: [
         ["meta", { name: "theme-color", content: "#0f766e" }],
