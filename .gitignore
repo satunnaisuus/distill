@@ -103,6 +103,10 @@ dist
 
 # vitepress cache directory
 **/.vitepress/cache
+**/.vitepress/.temp
+
+# TypeDoc markdown output
+apps/docs/docs/api/*/
 
 # Docusaurus cache and generated files
 .docusaurus

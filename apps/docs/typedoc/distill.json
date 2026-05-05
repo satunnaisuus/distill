@@ -1,0 +1,27 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "name": "Distill",
+  "entryPoints": ["../../../packages/distill/src/index.ts"],
+  "tsconfig": "../../../packages/distill/tsconfig.json",
+  "out": "../docs/api/distill",
+  "plugin": ["typedoc-plugin-markdown", "typedoc-vitepress-theme"],
+  "docsRoot": "../docs",
+  "readme": "none",
+  "githubPages": false,
+  "hideGenerator": true,
+  "excludeInternal": true,
+  "sourceLinkExternal": true,
+  "validation": {
+    "notExported": false,
+    "invalidLink": true,
+    "rewrittenLink": true,
+    "notDocumented": false,
+    "unusedMergeModuleWith": true
+  },
+  "sidebar": {
+    "autoConfiguration": true,
+    "format": "vitepress",
+    "collapsed": true,
+    "pretty": false
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "name": "@satunnaisuus/distill-docs",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "docs:api": "pnpm run docs:api:distill",
+    "docs:api:distill": "typedoc --options typedoc/distill.json",
+    "docs:build": "pnpm run docs:api && vitepress build docs",
+    "docs:dev": "pnpm run docs:api && vitepress dev docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.13",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.11.0",
+    "typedoc-vitepress-theme": "^1.1.2",
+    "typescript": "^6.0.3",
+    "vitepress": "^1.6.4"
+  }
+}
