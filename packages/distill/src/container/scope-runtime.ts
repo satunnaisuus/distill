@@ -19,6 +19,7 @@ import { disposeScope } from "./disposal";
 
 export type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
+    resolveOptional<TToken extends AnyToken>(token: TToken): TokenValue<TToken> | undefined;
     resolveAll<TToken extends AnyToken>(token: TToken): Array<TokenValue<TToken>>;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
     runScoped<TResult>(
@@ -55,8 +56,16 @@ type ResolveAllActual = <TToken extends AnyToken>(
 type RuntimeContainerScopeOptions = {
     readonly registerBindings: RegisterBindingsForScope;
     readonly resolveActual: ResolveActual;
+    readonly resolveOptionalActual: ResolveOptionalActual;
     readonly resolveAllActual: ResolveAllActual;
 };
+
+type ResolveOptionalActual = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+    moduleContextId?: number,
+) => TokenValue<TToken> | undefined;
 
 const extendRuntimePublicAccess = (
     scope: RuntimeScope,
@@ -188,6 +197,14 @@ export const createRuntimeContainerForScope = (
             assertSingleTokenKey(currentTokenDetails.key, currentToken);
             assertPublicSingleTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
             return options.resolveActual(scope, currentToken, undefined, moduleContextId);
+        },
+        resolveOptional(currentToken) {
+            scope.context.assertTokenIsInTokenList(currentToken);
+            const currentTokenDetails = getRuntimeTokenDetails(currentToken);
+            assertSingleTokenKey(currentTokenDetails.key, currentToken);
+            assertPublicSingleTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
+            assertScopeIsActive(scope);
+            return options.resolveOptionalActual(scope, currentToken, undefined, moduleContextId);
         },
         resolveAll(currentToken) {
             scope.context.assertTokenIsInTokenList(currentToken);

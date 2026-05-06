@@ -1,6 +1,7 @@
 import type { AnyBindingOverride } from "../override/index";
 import type {
     MissingDependencyKeysFromAllTokenBindings,
+    MissingDependencyKeysFromOptionalToken,
     MissingDependencyKeysFromToken,
     ValidateGraphBindings,
 } from "../runtime/index";
@@ -56,6 +57,28 @@ type ModuleResolveFn<
     TResolvableTokens,
     (token: never) => never,
     <TToken extends TResolvableTokens>(token: TToken) => TokenValue<TokenByKey<TToken, TResolvableTokens>>
+>;
+
+type ModuleResolveOptionalTokenValidation<TModuleScopes extends BindingScopes, TToken extends AnySingleToken> = IfNever<
+    MissingDependencyKeysFromOptionalToken<TModuleScopes, TToken>,
+    unknown,
+    never
+>;
+
+type ModuleResolveOptionalFn<
+    TModuleScopes extends BindingScopes,
+    TPublicBindings extends readonly AnyBinding[],
+    TScopeBindings extends BindingScopes,
+    TTokens extends AnySingleToken = Extract<
+        ModuleVisiblePublicBindings<TPublicBindings, TScopeBindings>,
+        AnySingleToken
+    >,
+> = IfNever<
+    TTokens,
+    (token: never) => undefined,
+    <TToken extends TTokens>(
+        token: TToken & ModuleResolveOptionalTokenValidation<TModuleScopes, TToken>,
+    ) => TokenValue<TokenByKey<TToken, TTokens>> | undefined
 >;
 
 type ModulePublicMultiTokens<TPublicTokenArray extends AnyTokenArray, TScopeBindings extends BindingScopes> = Extract<
@@ -160,6 +183,7 @@ export type ModuleContainer<
     TPublicScopes extends BindingScopes = ModulePublicScopes<TPublicBindings, TScopeBindings>,
 > = {
     resolve: ModuleResolveFn<TPublicScopes, TPublicTokenArray, TPublicBindings, TScopeBindings>;
+    resolveOptional: ModuleResolveOptionalFn<TPublicScopes, TPublicBindings, TScopeBindings>;
     resolveAll: ModuleResolveAllFn<TPublicScopes, TPublicTokenArray, TScopeBindings>;
     createScope: CreateModuleScopeFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;
     runScoped: RunModuleScopedFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;

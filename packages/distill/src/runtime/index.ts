@@ -4,6 +4,7 @@ export type {
     BindingSingleDependencyTokens,
     BindingTokens,
     MissingDependencyKeysFromAllTokenBindings,
+    MissingDependencyKeysFromOptionalToken,
     MissingDependencyKeysFromToken,
     ResolveBindingContextInScopes,
     ValidateBindings,

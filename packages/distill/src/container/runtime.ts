@@ -12,7 +12,7 @@ import { createTokenListContext, type TokenListContext } from "../token/index";
 import { assertNoCircularDependencies } from "./circular-runtime";
 import { type AnyBindingOverride, applyBindingOverrides } from "./overrides-runtime";
 import { registerBindings } from "./registration-runtime";
-import { resolveActual, resolveAllActual } from "./resolution-runtime";
+import { resolveActual, resolveAllActual, resolveOptionalActual } from "./resolution-runtime";
 import { createRuntimeContainerForScope, type RuntimeContainer } from "./scope-runtime";
 
 const createRootScope = (tokenListContext: TokenListContext): RuntimeScope => {
@@ -26,6 +26,7 @@ const createRootScope = (tokenListContext: TokenListContext): RuntimeScope => {
 const runtimeContainerScopeOptions = {
     registerBindings,
     resolveActual,
+    resolveOptionalActual,
     resolveAllActual,
 };
 

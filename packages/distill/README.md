@@ -509,6 +509,7 @@ definition.create(override(binding))
 definition.create(overrideAll(multibindToken, bindings))
 definition.create(unbind(token))
 container.resolve(token)
+container.resolveOptional(token)
 container.resolveAll(multibindToken)
 container.createScope(...bindings)
 container.runScoped(bindings, callback)
@@ -928,6 +929,18 @@ first === second; // true
 ```
 
 Calling `resolve` after the container or scope has been disposed throws an error.
+
+### `container.resolveOptional(token)`
+
+Resolves a single service when a visible binding exists, otherwise returns `undefined`.
+
+```ts
+const logger = container.resolveOptional(Logger);
+//    ^? Logger | undefined
+```
+
+The token must still belong to the container token list or module public surface. If a binding exists, its dependencies and
+factory are resolved normally, so required dependency errors are not hidden.
 
 ### `container.resolveAll(multibindToken)`
 

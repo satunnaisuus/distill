@@ -209,6 +209,30 @@ export const resolveActualWithOwnership = <TToken extends AnyToken>(
     return resolveBindingWithOwnership(scope, currentTokenDetails.key, resolvedBinding, options, moduleContextId);
 };
 
+export const resolveOptionalActualWithOwnership = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+    moduleContextId = defaultModuleContextId,
+): RuntimeResolutionResult<TokenValue<TToken>> | undefined => {
+    scope.context.assertTokenIsInTokenList(currentToken);
+    const currentTokenDetails = getRuntimeTokenDetails(currentToken);
+    assertSingleTokenKey(currentTokenDetails.key, currentToken);
+    const resolvedBinding = findBinding(
+        scope,
+        currentTokenDetails.keyId,
+        moduleContextId,
+        false,
+        currentTokenDetails.id,
+    );
+
+    if (!resolvedBinding) {
+        return undefined;
+    }
+
+    return resolveBindingWithOwnership(scope, currentTokenDetails.key, resolvedBinding, options, moduleContextId);
+};
+
 export const resolveAllActual = <TToken extends AnyToken>(
     scope: RuntimeScope,
     currentToken: TToken,
@@ -250,6 +274,15 @@ export const resolveActual = <TToken extends AnyToken>(
     moduleContextId = defaultModuleContextId,
 ): TokenValue<TToken> => {
     return resolveActualWithOwnership(scope, currentToken, options, moduleContextId).value;
+};
+
+export const resolveOptionalActual = <TToken extends AnyToken>(
+    scope: RuntimeScope,
+    currentToken: TToken,
+    options?: ResolveOptions,
+    moduleContextId = defaultModuleContextId,
+): TokenValue<TToken> | undefined => {
+    return resolveOptionalActualWithOwnership(scope, currentToken, options, moduleContextId)?.value;
 };
 
 export const getOrCreateRefInstance = <TToken extends AnyToken>(

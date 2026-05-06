@@ -428,6 +428,12 @@ export type MissingDependencyKeysFromToken<
     TPath extends ResolutionNode = never,
 > = MissingDependencyKeysFromTokens<TScopes, TToken, TPath>;
 
+export type MissingDependencyKeysFromOptionalToken<
+    TScopes extends BindingScopes,
+    TToken extends AnyToken,
+    TPath extends ResolutionNode = never,
+> = MissingDependencyKeysFromTokens<TScopes, TToken, TPath, never>;
+
 export type MissingDependencyKeysFromAllTokenBindings<
     TScopes extends BindingScopes,
     TToken extends AnyToken,

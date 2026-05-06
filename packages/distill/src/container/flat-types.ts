@@ -3,6 +3,7 @@ import type {
     BindingScopes,
     BindingTokens,
     MissingDependencyKeysFromAllTokenBindings,
+    MissingDependencyKeysFromOptionalToken,
     MissingDependencyKeysFromToken,
     ResolveBindingContextInScopes,
     ValidateBindings,
@@ -34,6 +35,8 @@ export type { AnyBinding, AnyBindingOverride, AnyTokenArray, ValidateBindings, V
 
 type VisibleTokensInScopes<TScopes extends BindingScopes> = Extract<BindingTokens<TScopes[number]>, AnySingleToken>;
 
+type SingleTokensInTokenList<TTokenArray extends AnyTokenArray> = Extract<TTokenArray[number], AnySingleToken>;
+
 type MultiTokensInTokenList<TTokenArray extends AnyTokenArray> = Extract<TTokenArray[number], AnyMultiToken>;
 
 type ResolvableTokenInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TToken extends AnyToken
@@ -52,6 +55,24 @@ type ResolveFn<
     TResolvableTokens,
     (token: never) => never,
     <TToken extends TResolvableTokens>(token: TToken) => TokenValue<TokenByKey<TToken, TResolvableTokens>>
+>;
+
+type ResolveOptionalTokenValidation<TScopes extends BindingScopes, TToken extends AnySingleToken> = IfNever<
+    MissingDependencyKeysFromOptionalToken<TScopes, TToken>,
+    unknown,
+    never
+>;
+
+type ResolveOptionalFn<
+    TScopes extends BindingScopes,
+    TTokenArray extends AnyTokenArray,
+    TTokens extends AnySingleToken = SingleTokensInTokenList<TTokenArray>,
+> = IfNever<
+    TTokens,
+    (token: never) => undefined,
+    <TToken extends TTokens>(
+        token: TToken & ResolveOptionalTokenValidation<TScopes, TToken>,
+    ) => TokenValue<TokenByKey<TToken, TTokens>> | undefined
 >;
 
 type ResolvableMultiTokenInScopes<
@@ -176,6 +197,7 @@ export type Container<
     TScopes extends BindingScopes = InferBindingScopes<TBindings>,
 > = {
     resolve: ResolveFn<TScopes>;
+    resolveOptional: ResolveOptionalFn<TScopes, TTokenArray>;
     resolveAll: ResolveAllFn<TScopes, TTokenArray>;
     createScope: CreateScopeFn<TBindings, TTokenArray, TScopes>;
     runScoped: RunScopedFn<TBindings, TTokenArray, TScopes>;
