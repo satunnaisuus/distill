@@ -29,7 +29,6 @@ import type {
     Binding,
     BindingDependencies,
     BindingLifetimeOf,
-    ExportedBinding,
     HasExactToken,
     IfNever,
     ModuleBindingInput,
@@ -76,42 +75,36 @@ type ModuleResolvedPublicInterfaceBindings<
 
 type ModuleRemainingLocalBindingInput<
     TInput extends ModuleBindingInput,
+    TExports extends readonly AnyToken[],
     TOverrides extends readonly AnyBindingOverride[],
 > =
-    TInput extends ExportedBinding<infer TBinding>
-        ? BindingIsOverridden<TBinding, TOverrides> extends true
+    HasExactToken<TExports[number], TInput["token"]> extends true
+        ? BindingIsOverridden<TInput, TOverrides> extends true
             ? never
-            : TBinding
-        : TInput extends AnyBinding
-          ? TInput
-          : never;
+            : TInput
+        : TInput;
 
 type ModuleRemainingLocalBindings<
     TInputs extends readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[],
     TOverrides extends readonly AnyBindingOverride[],
 > = number extends TInputs["length"]
-    ? readonly ModuleRemainingLocalBindingInput<TInputs[number], TOverrides>[]
+    ? readonly ModuleRemainingLocalBindingInput<TInputs[number], TExports, TOverrides>[]
     : TInputs extends readonly [
             infer TCurrentInput extends ModuleBindingInput,
             ...infer TRemainingInputs extends readonly ModuleBindingInput[],
         ]
-      ? ModuleRemainingLocalBindingInput<TCurrentInput, TOverrides> extends infer TCurrentBinding
+      ? ModuleRemainingLocalBindingInput<TCurrentInput, TExports, TOverrides> extends infer TCurrentBinding
           ? IfNever<
                 TCurrentBinding,
-                ModuleRemainingLocalBindings<TRemainingInputs, TOverrides>,
+                ModuleRemainingLocalBindings<TRemainingInputs, TExports, TOverrides>,
                 readonly [
                     Extract<TCurrentBinding, AnyBinding>,
-                    ...ModuleRemainingLocalBindings<TRemainingInputs, TOverrides>,
+                    ...ModuleRemainingLocalBindings<TRemainingInputs, TExports, TOverrides>,
                 ]
             >
           : never
       : readonly [];
-
-type ModuleExportedInputTokens<TInputs extends readonly ModuleBindingInput[]> = TInputs[number] extends infer TInput
-    ? TInput extends ExportedBinding<infer TBinding>
-        ? TBinding["token"]
-        : never
-    : never;
 
 type ModuleOverrideInterfaceBindingForToken<
     TOverrides extends readonly AnyBindingOverride[],
@@ -181,13 +174,13 @@ type ModuleImportedOverrideAwareBindings<
 type ModuleProviderOverrideInterfaceBindings<
     TModule extends AnyModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
-> = readonly ModuleOverrideInterfaceBindingForToken<TOverrides, ModuleExportedInputTokens<TModule["bindings"]>>[];
+> = readonly ModuleOverrideInterfaceBindingForToken<TOverrides, TModule["exports"][number]>[];
 
 type ModuleResolvedLocalScope<
     TModule extends AnyModuleDefinition,
     TOverrides extends readonly AnyBindingOverride[],
 > = readonly (
-    | ModuleRemainingLocalBindings<TModule["bindings"], TOverrides>[number]
+    | ModuleRemainingLocalBindings<TModule["bindings"], TModule["exports"], TOverrides>[number]
     | ModuleProviderOverrideInterfaceBindings<TModule, TOverrides>[number]
 )[];
 
@@ -221,8 +214,12 @@ type InvalidResolvedCompositionModuleBindings<
     TResolvedPublicBindings extends readonly AnyBinding[],
 > = TComposition["modules"][number] extends infer TCurrentModule
     ? TCurrentModule extends AnyModuleDefinition
-        ? ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides> extends ValidateGraphBindings<
-              ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides>,
+        ? ModuleRemainingLocalBindings<
+              TCurrentModule["bindings"],
+              TCurrentModule["exports"],
+              TOverrides
+          > extends ValidateGraphBindings<
+              ModuleRemainingLocalBindings<TCurrentModule["bindings"], TCurrentModule["exports"], TOverrides>,
               ModuleResolvedGraphScopes<
                   TCurrentModule,
                   TComposition["modules"],
@@ -240,7 +237,7 @@ type InvalidResolvedCompositionModuleBindings<
           >
             ? never
             : ValidateGraphBindings<
-                  ModuleRemainingLocalBindings<TCurrentModule["bindings"], TOverrides>,
+                  ModuleRemainingLocalBindings<TCurrentModule["bindings"], TCurrentModule["exports"], TOverrides>,
                   ModuleResolvedGraphScopes<
                       TCurrentModule,
                       TComposition["modules"],

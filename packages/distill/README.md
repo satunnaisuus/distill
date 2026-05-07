@@ -105,7 +105,7 @@ The `server` factory receives `{ config, logger }` with the correct inferred typ
 ### Compose modules with private bindings
 
 ```ts
-import { bind, composeModules, defineModule, exported, token } from "@satunnaisuus/distill";
+import { bind, composeModules, defineModule, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly url: string;
@@ -124,14 +124,16 @@ const Pool = token("Pool").of<Pool>();
 const Db = token("Db").of<Db>();
 
 const ConfigModule = defineModule({
-    bindings: [exported(bind(Config).factory(() => ({ url: "postgres://localhost" })))],
+    exports: [Config],
+    bindings: [bind(Config).factory(() => ({ url: "postgres://localhost" }))],
 } as const);
 
 const DbModule = defineModule({
     imports: [Config],
+    exports: [Db],
     bindings: [
         bind(Pool).factory({ config: Config }, ({ config }) => ({ url: config.url })),
-        exported(bind(Db).factory({ pool: Pool }, ({ pool }) => createDb(pool))),
+        bind(Db).factory({ pool: Pool }, ({ pool }) => createDb(pool)),
     ],
 } as const);
 
@@ -149,16 +151,16 @@ app.resolve(Pool);
 // TypeScript error: Pool is internal to DbModule.
 ```
 
-Module `imports` are tokens, not other modules. A module binding can depend on local bindings and on imported tokens; `composeModules(...)` then wires those imports to exported providers from the listed modules. If `exports` is omitted, every `exported(...)` token from the listed modules is public; pass `exports` to expose only selected exported tokens.
+Module `imports` are tokens, not other modules. A module binding can depend on local bindings and on imported tokens; `composeModules(...)` then wires those imports to providers from listed modules that declare the requested token in `exports`. If composition `exports` is omitted, every token from module `exports` is public; pass composition `exports` to expose only selected exported tokens.
 
-Only bindings wrapped with `exported(...)` can satisfy another module's token import or a composition public export. Local bindings stay private to their module.
+Every local binding whose token appears in the module `exports` array can satisfy another module's token import or a composition public export. Local bindings for other tokens stay private to their module. Exported `multiToken`s may have no local bindings; resolving them returns an empty array until another module contributes bindings or an override supplies them.
 
 Modules are visibility boundaries, not disposal scopes. Singleton, scoped, transient, `ref`, `optional`, `all`, `createScope`, overrides, and disposal keep the same lifetime behavior as regular containers.
 
-### Export selected multibind contributions
+### Export multibind tokens
 
 ```ts
-import { all, bind, composeModules, defineModule, exported, multiToken, token } from "@satunnaisuus/distill";
+import { all, bind, composeModules, defineModule, multiToken, token } from "@satunnaisuus/distill";
 
 type Hook = {
     readonly name: string;
@@ -168,14 +170,12 @@ const Hooks = multiToken("Hooks").of<Hook>();
 const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
 const AppModule = defineModule({
+    exports: [Hooks, Registry],
     bindings: [
-        bind(Hooks).factory(() => ({ name: "internal" })),
-        exported(bind(Hooks).factory(() => ({ name: "public" }))),
-        exported(
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
-                names: hooks.map((hook) => hook.name),
-            })),
-        ),
+        bind(Hooks).factory(() => ({ name: "public" })),
+        bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            names: hooks.map((hook) => hook.name),
+        })),
     ],
 } as const);
 
@@ -190,7 +190,7 @@ app.resolveAll(Hooks);
 // [{ name: "public" }]
 
 app.resolve(Registry).names;
-// ["internal", "public"]
+// ["public"]
 ```
 
 Exports apply to concrete bindings, not whole tokens. This lets a module keep some multibind contributions private while exposing selected contributions to importers and public `resolveAll`.
@@ -494,8 +494,7 @@ optional(dependency)
 optional(() => dependency)
 ref(token)
 ref(() => token)
-exported(binding)
-defineModule({ imports?, bindings })
+defineModule({ imports?, exports?, bindings })
 composeModules({ modules })
 composeModules({ modules, wire })
 composeModules({ modules, exports })
@@ -804,7 +803,7 @@ const container = defineContainer([Config, Port], ...bindings).create();
 
 Avoid spreading a plain `Binding[]`; TypeScript cannot validate individual bindings after the tuple has been widened.
 
-### `defineModule(...)`, `exported(...)`, `composeModules(...)`, and `provideImport(...)`
+### `defineModule(...)`, `composeModules(...)`, and `provideImport(...)`
 
 Modules group local bindings behind an explicit exported interface.
 
@@ -814,15 +813,17 @@ const JsonLogger = qualified(Logger, Json);
 
 const ConsumerModule = defineModule({
     imports: [Logger],
+    exports: [Consumer],
     bindings: [
-        exported(bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
+        bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
             loggerName: logger.name,
-        }))),
+        })),
     ],
 } as const);
 
 const LoggerModule = defineModule({
-    bindings: [exported(bind(qualified(Logger, Json)).factory(() => ({ name: "json" })))],
+    exports: [qualified(Logger, Json)],
+    bindings: [bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))],
 } as const);
 
 const App = composeModules({
@@ -834,9 +835,9 @@ const App = composeModules({
 const app = App.createContainer();
 ```
 
-`defineModule({ imports?, bindings })` creates a visibility boundary. Local bindings can depend on local tokens and imported tokens. Only `exported(bind(...))` bindings can satisfy another module's imports or a composition public export.
+`defineModule({ imports?, exports?, bindings })` creates a visibility boundary. Local bindings can depend on local tokens and imported tokens. Bindings whose token appears in module `exports` can satisfy another module's imports or a composition public export.
 
-`composeModules({ modules })` wires module imports to exported providers with the same token and exposes all `exported(...)` tokens publicly. Use `exports` to narrow the public container surface, and use `wire` when a specific module import should be satisfied by a different exported provider token.
+`composeModules({ modules })` wires module imports to exported providers with the same token and exposes all module `exports` publicly. Use composition `exports` to narrow the public container surface, and use `wire` when a specific module import should be satisfied by a different exported provider token.
 
 `provideImport(module, importToken).with(providerToken)` creates a wire entry for one imported regular token. The module must be included in the composition, the import token must appear in that module's `imports`, and the provider token's value type must be assignable to the import token's value type. Multibind imports are collected by token and are not wired with `provideImport`.
 
@@ -994,7 +995,6 @@ import type {
     ContainerDefinition,
     DependencyMap,
     Disposer,
-    ExportedBinding,
     ModuleDefinition,
     ModuleImportWire,
     MultiToken,

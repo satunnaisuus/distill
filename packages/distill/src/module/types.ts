@@ -1,4 +1,5 @@
 import type { AnyBinding, Binding, BindingDependencies, BindingLifetimeOf } from "../binding/index";
+import type { IfNever } from "../shared/index";
 import type {
     AnyMultiToken,
     AnySingleToken,
@@ -17,12 +18,7 @@ import type {
     TokensNotIn,
     TokenValue,
 } from "../token/index";
-import type {
-    composedModuleDefinitionBrand,
-    exportedBindingBrand,
-    moduleDefinitionBrand,
-    moduleImportWireBrand,
-} from "./brands";
+import type { composedModuleDefinitionBrand, moduleDefinitionBrand, moduleImportWireBrand } from "./brands";
 import type { CreateModuleContainerFn } from "./container-definition-types";
 
 export type {
@@ -56,13 +52,7 @@ export type {
     TokenValue,
 };
 
-export type ExportedBinding<TBinding extends AnyBinding = AnyBinding> = {
-    readonly [TBrand in typeof exportedBindingBrand]: true;
-} & {
-    readonly binding: TBinding;
-};
-
-export type ModuleBindingInput = AnyBinding | ExportedBinding<AnyBinding>;
+export type ModuleBindingInput = AnyBinding;
 
 export type AnyModuleDefinition = {
     readonly [TBrand in typeof moduleDefinitionBrand]: true;
@@ -70,17 +60,20 @@ export type AnyModuleDefinition = {
     readonly id: number;
     readonly imports: readonly AnyToken[];
     readonly bindings: readonly ModuleBindingInput[];
+    readonly exports: readonly AnyToken[];
 };
 
 export type ModuleDefinition<
     TImports extends readonly AnyToken[] = readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[] = readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[] = readonly AnyToken[],
 > = {
     readonly [TBrand in typeof moduleDefinitionBrand]: true;
 } & {
     readonly id: number;
     readonly imports: TImports;
     readonly bindings: TBindings;
+    readonly exports: TExports;
 };
 
 export type ModuleImportWire<
@@ -125,36 +118,33 @@ export type ComposedModuleDefinition<
     readonly createContainer: CreateModuleContainerFn<ComposedModuleDefinitionShape<TModules, TExports, TWire>>;
 };
 
-export type UnwrapModuleBinding<TBinding extends ModuleBindingInput> =
-    TBinding extends ExportedBinding<infer TExportedBinding>
-        ? TExportedBinding
-        : TBinding extends AnyBinding
-          ? TBinding
-          : never;
+export type ModuleLocalBindings<TModule extends AnyModuleDefinition> = TModule["bindings"];
 
-export type UnwrapModuleBindings<TBindings extends readonly ModuleBindingInput[]> = number extends TBindings["length"]
-    ? readonly UnwrapModuleBinding<TBindings[number]>[]
+type ModuleExportedBindingFromInput<TBinding extends ModuleBindingInput, TExports extends readonly AnyToken[]> =
+    HasExactToken<TExports[number], TBinding["token"]> extends true ? TBinding : never;
+
+export type ModuleExportedBindingsFromInputs<
+    TBindings extends readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[],
+> = number extends TBindings["length"]
+    ? readonly ModuleExportedBindingFromInput<TBindings[number], TExports>[]
     : TBindings extends readonly [
             infer TCurrentBinding extends ModuleBindingInput,
             ...infer TRemainingBindings extends readonly ModuleBindingInput[],
         ]
-      ? readonly [UnwrapModuleBinding<TCurrentBinding>, ...UnwrapModuleBindings<TRemainingBindings>]
+      ? ModuleExportedBindingFromInput<TCurrentBinding, TExports> extends infer TCurrentExportedBinding
+          ? IfNever<
+                TCurrentExportedBinding,
+                ModuleExportedBindingsFromInputs<TRemainingBindings, TExports>,
+                readonly [
+                    Extract<TCurrentExportedBinding, AnyBinding>,
+                    ...ModuleExportedBindingsFromInputs<TRemainingBindings, TExports>,
+                ]
+            >
+          : never
       : readonly [];
 
-export type ModuleLocalBindings<TModule extends AnyModuleDefinition> = UnwrapModuleBindings<TModule["bindings"]>;
-
-export type ModuleExportedBindingsFromInputs<TBindings extends readonly ModuleBindingInput[]> =
-    number extends TBindings["length"]
-        ? readonly AnyBinding[]
-        : TBindings extends readonly [
-                infer TCurrentBinding extends ModuleBindingInput,
-                ...infer TRemainingBindings extends readonly ModuleBindingInput[],
-            ]
-          ? TCurrentBinding extends ExportedBinding<infer TExportedBinding>
-              ? readonly [TExportedBinding, ...ModuleExportedBindingsFromInputs<TRemainingBindings>]
-              : ModuleExportedBindingsFromInputs<TRemainingBindings>
-          : readonly [];
-
 export type ModuleExportedBindings<TModule extends AnyModuleDefinition> = ModuleExportedBindingsFromInputs<
-    TModule["bindings"]
+    TModule["bindings"],
+    TModule["exports"]
 >;

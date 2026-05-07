@@ -7,7 +7,11 @@ import type {
     ValidateComposeOptions,
     ValidateComposeWire,
 } from "./compose-validation-types";
-import type { ValidateModuleBindingInputTuple, ValidateModuleImports } from "./definition-validation-types";
+import type {
+    ValidateModuleBindingInputTuple,
+    ValidateModuleExports,
+    ValidateModuleImports,
+} from "./definition-validation-types";
 import type {
     CompositionExportedTokenArray,
     CompositionLocalBindings,
@@ -32,18 +36,14 @@ import type {
     AnySingleToken,
     AnyToken,
     ComposedModuleDefinition,
-    ExportedBinding,
     ModuleBindingInput,
     ModuleDefinition,
     ModuleExportedBindings,
     ModuleExportedBindingsFromInputs,
     ModuleImportWire,
     ModuleLocalBindings,
-    UnwrapModuleBinding,
-    UnwrapModuleBindings,
 } from "./types";
 
-export { exported, isExportedBinding, unwrapModuleBinding } from "./binding-runtime";
 export type { CreateModuleContainerFn } from "./container-definition-types";
 export type { RuntimeRegisteredModuleEntry } from "./container-runtime";
 export {
@@ -63,7 +63,6 @@ export type {
     CompositionPublicBindings,
     CompositionPublicInterfaceBindings,
     CompositionPublicTokenArray,
-    ExportedBinding,
     ModuleBindingInput,
     ModuleDefinition,
     ModuleExportedBindings,
@@ -73,8 +72,6 @@ export type {
     ModuleImportedExportedBindings,
     ModuleImportWire,
     ModuleLocalBindings,
-    UnwrapModuleBinding,
-    UnwrapModuleBindings,
 };
 
 let nextModuleId = 1;
@@ -114,27 +111,46 @@ export const provideImport = <
 
 export function defineModule<const TBindings extends readonly ModuleBindingInput[]>(options: {
     readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
-}): ModuleDefinition<readonly [], TBindings>;
+}): ModuleDefinition<readonly [], TBindings, readonly []>;
+export function defineModule<
+    const TBindings extends readonly ModuleBindingInput[],
+    const TExports extends readonly AnyToken[],
+>(options: {
+    readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
+    readonly exports: TExports & ValidateModuleExports<readonly [], TBindings, TExports>;
+}): ModuleDefinition<readonly [], TBindings, TExports>;
 export function defineModule<
     const TImports extends readonly AnyToken[],
     const TBindings extends readonly ModuleBindingInput[],
 >(options: {
     readonly imports: TImports & ValidateModuleImports<TImports>;
     readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
-}): ModuleDefinition<TImports, TBindings>;
+}): ModuleDefinition<TImports, TBindings, readonly []>;
+export function defineModule<
+    const TImports extends readonly AnyToken[],
+    const TBindings extends readonly ModuleBindingInput[],
+    const TExports extends readonly AnyToken[],
+>(options: {
+    readonly imports: TImports & ValidateModuleImports<TImports>;
+    readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
+    readonly exports: TExports & ValidateModuleExports<TImports, TBindings, TExports>;
+}): ModuleDefinition<TImports, TBindings, TExports>;
 export function defineModule(options: {
     readonly imports?: readonly AnyToken[];
     readonly bindings: readonly ModuleBindingInput[];
+    readonly exports?: readonly AnyToken[];
 }): AnyModuleDefinition {
     const imports = options.imports ?? [];
+    const exports = options.exports ?? [];
 
-    validateModuleDefinitionRuntime(imports, options.bindings);
+    validateModuleDefinitionRuntime(imports, options.bindings, exports);
 
     return {
         [moduleDefinitionBrand]: true,
         id: nextModuleId++,
         imports,
         bindings: options.bindings,
+        exports,
     };
 }
 
@@ -145,7 +161,7 @@ export function composeModules<
     options: {
         readonly modules: TModules & ValidateComposeModules<TModules>;
         readonly wire?: TWire & ValidateComposeWire<TWire>;
-    } & ValidateComposeOptions<TModules, CompositionExportedTokenArray<TModules>, TWire>,
+    } & ValidateComposeOptions<TModules, readonly [], TWire>,
 ): ComposedModuleDefinition<TModules, CompositionExportedTokenArray<TModules>, TWire>;
 export function composeModules<
     const TModules extends readonly AnyModuleDefinition[],

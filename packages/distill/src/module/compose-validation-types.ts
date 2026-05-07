@@ -138,10 +138,15 @@ type CompositionExportedBindingByExactToken<
     ? BindingByExactToken<ModuleExportedBindings<TCurrentModule>, TToken>
     : never;
 
-type CompositionExportedProviderTokens<TModules extends readonly AnyModuleDefinition[]> =
+type CompositionExportedTokens<TModules extends readonly AnyModuleDefinition[]> =
     TModules[number] extends infer TCurrentModule extends AnyModuleDefinition
-        ? ModuleExportedBindings<TCurrentModule>[number]["token"]
+        ? TCurrentModule["exports"][number]
         : never;
+
+type CompositionHasExportDeclaration<
+    TModules extends readonly AnyModuleDefinition[],
+    TToken extends AnyToken,
+> = HasExactToken<CompositionExportedTokens<TModules>, TToken>;
 
 type CompositionExportedBindings<TModules extends readonly AnyModuleDefinition[]> = number extends TModules["length"]
     ? readonly AnyBinding[]
@@ -155,9 +160,15 @@ type CompositionExportedBindings<TModules extends readonly AnyModuleDefinition[]
 type MissingProviderTokens<
     TModules extends readonly AnyModuleDefinition[],
     TTokens extends AnyToken,
-> = TTokens extends AnyToken
-    ? IfNever<CompositionExportedBindingByExactToken<TModules, TTokens>, TTokens, never>
-    : never;
+> = number extends TModules["length"]
+    ? never
+    : TTokens extends AnyToken
+      ? IsMultiToken<TTokens> extends true
+          ? CompositionHasExportDeclaration<TModules, TTokens> extends true
+              ? never
+              : TTokens
+          : IfNever<CompositionExportedBindingByExactToken<TModules, TTokens>, TTokens, never>
+      : never;
 
 type DuplicateExportedSingleProviderKeys<
     TBindings extends readonly AnyBinding[],
@@ -181,12 +192,14 @@ type AmbiguousSingleProviderKeys<TModules extends readonly AnyModuleDefinition[]
 
 type IncompatibleExportedMultibindProviderKeys<
     TModules extends readonly AnyModuleDefinition[],
-    TProviderTokens extends AnyToken = CompositionExportedProviderTokens<TModules>,
-> = TProviderTokens extends AnyMultiToken
-    ? HasSameKeyIncompatibleToken<CompositionExportedProviderTokens<TModules>, TProviderTokens> extends true
-        ? TokenKey<TProviderTokens>
-        : never
-    : never;
+    TProviderTokens extends AnyToken = CompositionExportedTokens<TModules>,
+> = number extends TModules["length"]
+    ? never
+    : TProviderTokens extends AnyMultiToken
+      ? HasSameKeyIncompatibleToken<CompositionExportedTokens<TModules>, TProviderTokens> extends true
+          ? TokenKey<TProviderTokens>
+          : never
+      : never;
 
 type InvalidComposedModuleBindingsForModule<
     TCurrentModule extends AnyModuleDefinition,
@@ -338,7 +351,7 @@ type WiredScopedDependencyInSingletonModules<
         ? true
         : never;
 
-export type ValidateComposeOptions<
+type ValidateComposeTupleOptions<
     TModules extends readonly AnyModuleDefinition[],
     TExports extends readonly AnyToken[],
     TWire extends readonly AnyModuleImportWire[],
@@ -405,6 +418,18 @@ export type ValidateComposeOptions<
         }
     >;
 
+export type ValidateComposeOptions<
+    TModules extends readonly AnyModuleDefinition[],
+    TExports extends readonly AnyToken[],
+    TWire extends readonly AnyModuleImportWire[],
+> = number extends TModules["length"]
+    ? {}
+    : number extends TExports["length"]
+      ? {}
+      : number extends TWire["length"]
+        ? {}
+        : ValidateComposeTupleOptions<TModules, TExports, TWire>;
+
 export type ValidateComposeModules<TModules extends readonly AnyModuleDefinition[]> = TupleModulesError<TModules> & {
     [TIndex in keyof TModules]: TModules[TIndex] extends AnyModuleDefinition ? TModules[TIndex] : never;
 };
@@ -426,7 +451,7 @@ export type ComposeModules = {
         options: {
             readonly modules: TModules & ValidateComposeModules<TModules>;
             readonly wire?: TWire & ValidateComposeWire<TWire>;
-        } & ValidateComposeOptions<TModules, CompositionExportedTokenArray<TModules>, TWire>,
+        } & ValidateComposeOptions<TModules, readonly [], TWire>,
     ): ComposedModuleDefinition<TModules, CompositionExportedTokenArray<TModules>, TWire>;
 
     <

@@ -7,14 +7,16 @@ Call shapes:
 
 ```ts
 defineModule({ bindings })
+defineModule({ exports, bindings })
 defineModule({ imports, bindings })
+defineModule({ imports, exports, bindings })
 composeModules({ modules })
 composeModules({ modules, exports })
 composedModule.createContainer()
 ```
 
 ```ts
-import { bind, composeModules, defineModule, exported, token } from "@satunnaisuus/distill";
+import { bind, composeModules, defineModule, token } from "@satunnaisuus/distill";
 
 type Config = {
     readonly url: string;
@@ -33,14 +35,16 @@ const Pool = token("Pool").of<Pool>();
 const Db = token("Db").of<Db>();
 
 const ConfigModule = defineModule({
-    bindings: [exported(bind(Config).value({ url: "postgres://localhost" }))],
+    exports: [Config],
+    bindings: [bind(Config).value({ url: "postgres://localhost" })],
 } as const);
 
 const DbModule = defineModule({
     imports: [Config],
+    exports: [Db],
     bindings: [
         bind(Pool).factory({ config: Config }, ({ config }) => ({ url: config.url })),
-        exported(bind(Db).factory({ pool: Pool }, ({ pool }) => createDb(pool))),
+        bind(Db).factory({ pool: Pool }, ({ pool }) => createDb(pool)),
     ],
 } as const);
 
@@ -61,13 +65,14 @@ Module `imports` are tokens, not other modules. A module binding can depend on l
 Call shape:
 
 ```ts
-defineModule({ imports, bindings })
+defineModule({ imports, exports, bindings })
 ```
 
 ```ts
 const JobsModule = defineModule({
     imports: [Db],
-    bindings: [exported(bind(JobRunner).factory({ db: Db }, ({ db }) => createJobRunner(db)))],
+    exports: [JobRunner],
+    bindings: [bind(JobRunner).factory({ db: Db }, ({ db }) => createJobRunner(db))],
 } as const);
 ```
 
@@ -75,22 +80,23 @@ The composition wires imported tokens to exported providers from the modules lis
 
 ## Exports
 
-Only bindings wrapped with `exported(...)` can satisfy another module's import or become visible from the composed
+Bindings whose token appears in module `exports` can satisfy another module's import or become visible from the composed
 container.
 
 Call shapes:
 
 ```ts
-exported(binding)
+defineModule({ exports, bindings })
 composeModules({ modules })
 composeModules({ modules, exports })
 ```
 
 ```ts
 const MetricsModule = defineModule({
+    exports: [Metrics],
     bindings: [
         bind(MetricsClient).factory(() => createMetricsClient()),
-        exported(bind(Metrics).factory({ client: MetricsClient }, ({ client }) => createMetrics(client))),
+        bind(Metrics).factory({ client: MetricsClient }, ({ client }) => createMetrics(client)),
     ],
 } as const);
 ```
@@ -125,13 +131,14 @@ The import token is the token a module asks for. The provider token is the expor
 
 ## Multibind Exports
 
-Exports apply to concrete bindings, not whole tokens. A module can keep some multibind contributions private while
-exporting others.
+Exports apply to tokens. When a module exports a multibind token, all local bindings for that token are exported. A
+multibind token can also be exported without local bindings, which makes `resolveAll(...)` return an empty array until
+another module or override contributes bindings.
 
 Call shapes:
 
 ```ts
-exported(bind(multibindToken).factory(factory))
+defineModule({ exports: [multibindToken], bindings })
 all(multibindToken)
 ```
 
@@ -146,19 +153,17 @@ const Hooks = multiToken("Hooks").of<Hook>();
 const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
 const AppModule = defineModule({
+    exports: [Hooks, Registry],
     bindings: [
-        bind(Hooks).factory(() => ({ name: "internal" })),
-        exported(bind(Hooks).factory(() => ({ name: "public" }))),
-        exported(
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
-                names: hooks.map((hook) => hook.name),
-            })),
-        ),
+        bind(Hooks).factory(() => ({ name: "public" })),
+        bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            names: hooks.map((hook) => hook.name),
+        })),
     ],
 } as const);
 ```
 
-The module's own `Registry` sees both hooks. Importers and the composed container see only the exported hook.
+Importers and the composed container see the exported hook.
 
 ## Overrides
 

@@ -15,8 +15,6 @@ export {
     type ComposedModuleDefinition,
     composeModules,
     defineModule,
-    type ExportedBinding,
-    exported,
     type ModuleDefinition,
     type ModuleImportWire,
     provideImport,

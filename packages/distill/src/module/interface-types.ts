@@ -354,7 +354,7 @@ type ModuleImportedExportedBindingsFromTokens<
     TAdditionalScopes extends BindingScopes = readonly [],
     TWire extends readonly AnyModuleImportWire[] = readonly [],
 > = number extends TImports["length"]
-    ? readonly ModuleImportedExportedBindingForToken<TModules, TImports[number], TAdditionalScopes, TModule, TWire>[]
+    ? readonly AnyBinding[]
     : TImports extends readonly [
             infer TCurrentImport extends AnyToken,
             ...infer TRemainingImports extends readonly AnyToken[],
@@ -417,7 +417,7 @@ export type CompositionPublicInterfaceBindings<
     TAdditionalScopes extends BindingScopes = readonly [],
     TWire extends readonly AnyModuleImportWire[] = readonly [],
 > = number extends TExports["length"]
-    ? readonly ModuleImportedExportedBindingForToken<TModules, TExports[number], TAdditionalScopes, never, TWire>[]
+    ? readonly AnyBinding[]
     : TExports extends readonly [
             infer TCurrentExport extends AnyToken,
             ...infer TRemainingExports extends readonly AnyToken[],
@@ -449,19 +449,19 @@ export type CompositionPublicBindings<TComposition extends AnyComposedModuleDefi
 type AppendUniqueToken<TTokens extends readonly AnyToken[], TToken extends AnyToken> =
     HasTokenWithSameKey<TTokens[number], TToken> extends true ? TTokens : readonly [...TTokens, TToken];
 
-type ExportedTokenArrayFromBindings<
-    TBindings extends readonly AnyBinding[],
+type ExportedTokenArrayFromTokens<
+    TExports extends readonly AnyToken[],
     TTokens extends readonly AnyToken[],
-> = number extends TBindings["length"]
-    ? readonly (TTokens[number] | TBindings[number]["token"])[]
-    : TBindings extends readonly [
-            infer TCurrentBinding extends AnyBinding,
-            ...infer TRemainingBindings extends readonly AnyBinding[],
+> = number extends TExports["length"]
+    ? readonly (TTokens[number] | TExports[number])[]
+    : TExports extends readonly [
+            infer TCurrentExport extends AnyToken,
+            ...infer TRemainingExports extends readonly AnyToken[],
         ]
-      ? ExportedTokenArrayFromBindings<TRemainingBindings, AppendUniqueToken<TTokens, TCurrentBinding["token"]>>
+      ? ExportedTokenArrayFromTokens<TRemainingExports, AppendUniqueToken<TTokens, TCurrentExport>>
       : TTokens;
 
-type ModuleExportedToken<TModule extends AnyModuleDefinition> = ModuleExportedBindings<TModule>[number]["token"];
+type ModuleExportedToken<TModule extends AnyModuleDefinition> = TModule["exports"][number];
 
 type CompositionExportedTokenArrayFromModules<
     TModules extends readonly AnyModuleDefinition[],
@@ -474,7 +474,7 @@ type CompositionExportedTokenArrayFromModules<
         ]
       ? CompositionExportedTokenArrayFromModules<
             TRemainingModules,
-            ExportedTokenArrayFromBindings<ModuleExportedBindings<TCurrentModule>, TTokens>
+            ExportedTokenArrayFromTokens<TCurrentModule["exports"], TTokens>
         >
       : TTokens;
 

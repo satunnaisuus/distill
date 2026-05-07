@@ -14,7 +14,6 @@ import {
     tokenDisplayKey,
     tokenRuntimeId,
 } from "../token/index";
-import { isExportedBinding, unwrapModuleBinding } from "./binding-runtime";
 import type { AnyBinding, AnyComposedModuleDefinition, AnyModuleDefinition } from "./types";
 
 export type { AnyComposedModuleDefinition };
@@ -48,6 +47,12 @@ type RuntimeModuleOverrideResult = {
     readonly overrideModuleContextIdsByTokenId: ReadonlyMap<string, ReadonlySet<number>>;
 };
 
+const hasExactToken = (tokens: readonly AnyToken[], currentToken: AnyToken): boolean => {
+    const currentTokenId = tokenRuntimeId(currentToken);
+
+    return tokens.some((candidate) => tokenRuntimeId(candidate) === currentTokenId);
+};
+
 export const createRuntimeModuleEntries = (modules: readonly AnyModuleDefinition[]): readonly RuntimeModuleEntry[] => {
     const entries: RuntimeModuleEntry[] = [];
 
@@ -55,8 +60,8 @@ export const createRuntimeModuleEntries = (modules: readonly AnyModuleDefinition
         for (const moduleBinding of currentModule.bindings) {
             entries.push({
                 moduleId: currentModule.id,
-                binding: unwrapModuleBinding(moduleBinding),
-                exported: isExportedBinding(moduleBinding),
+                binding: moduleBinding,
+                exported: hasExactToken(currentModule.exports, moduleBinding.token),
             });
         }
     }

@@ -8,7 +8,6 @@ import {
     tokenKeyRuntimeId,
     tokenRuntimeId,
 } from "../token/index";
-import { isExportedBinding, unwrapModuleBinding } from "./binding-runtime";
 import { moduleDefinitionBrand, moduleImportWireBrand } from "./brands";
 import type { AnyModuleDefinition, AnyModuleImportWire, ModuleBindingInput } from "./types";
 
@@ -49,6 +48,12 @@ export const assertNoDuplicateTokenKeys = (
     }
 };
 
+const hasExactToken = (tokens: readonly AnyToken[], currentToken: AnyToken): boolean => {
+    const currentTokenId = tokenRuntimeId(currentToken);
+
+    return tokens.some((candidate) => tokenRuntimeId(candidate) === currentTokenId);
+};
+
 export const assertNoImportedLocalSingleBindings = (
     imports: readonly AnyToken[],
     bindings: readonly ModuleBindingInput[],
@@ -74,10 +79,9 @@ export const assertNoImportedLocalSingleBindings = (
     }
 
     for (const binding of bindings) {
-        const unwrappedBinding = unwrapModuleBinding(binding);
-        const bindingTokenKey = tokenDisplayKey(unwrappedBinding.token);
-        const bindingTokenKeyId = tokenKeyRuntimeId(unwrappedBinding.token);
-        const bindingIsMulti = isMultiToken(unwrappedBinding.token);
+        const bindingTokenKey = tokenDisplayKey(binding.token);
+        const bindingTokenKeyId = tokenKeyRuntimeId(binding.token);
+        const bindingIsMulti = isMultiToken(binding.token);
         const importedKind = importedTokenKinds.get(bindingTokenKeyId);
 
         if (importedKind !== undefined && importedKind !== bindingIsMulti) {
@@ -97,11 +101,10 @@ export const assertNoDuplicateLocalSingleBindings = (bindings: readonly ModuleBi
     const seenTokenKinds = new Map<string, boolean>();
 
     for (const binding of bindings) {
-        const unwrappedBinding = unwrapModuleBinding(binding);
-        const bindingTokenKey = tokenDisplayKey(unwrappedBinding.token);
-        const bindingTokenKeyId = tokenKeyRuntimeId(unwrappedBinding.token);
-        const bindingTokenId = tokenRuntimeId(unwrappedBinding.token);
-        const bindingIsMulti = isMultiToken(unwrappedBinding.token);
+        const bindingTokenKey = tokenDisplayKey(binding.token);
+        const bindingTokenKeyId = tokenKeyRuntimeId(binding.token);
+        const bindingTokenId = tokenRuntimeId(binding.token);
+        const bindingIsMulti = isMultiToken(binding.token);
         const previousKind = seenTokenKinds.get(bindingTokenKeyId);
 
         if (previousKind !== undefined && previousKind !== bindingIsMulti) {
@@ -122,10 +125,72 @@ export const assertNoDuplicateLocalSingleBindings = (bindings: readonly ModuleBi
     }
 };
 
+const assertExportsAreCompatibleWithVisibleTokens = (
+    imports: readonly AnyToken[],
+    bindings: readonly ModuleBindingInput[],
+    exports: readonly AnyToken[],
+): void => {
+    const visibleTokens = [...imports, ...bindings.map((binding) => binding.token)];
+
+    for (const currentExport of exports) {
+        const exportTokenKey = tokenDisplayKey(currentExport);
+        const exportTokenKeyId = tokenKeyRuntimeId(currentExport);
+        const exportTokenId = tokenRuntimeId(currentExport);
+        const exportIsMulti = isMultiToken(currentExport);
+
+        for (const visibleToken of visibleTokens) {
+            if (tokenKeyRuntimeId(visibleToken) !== exportTokenKeyId) {
+                continue;
+            }
+
+            if (tokenRuntimeId(visibleToken) !== exportTokenId || isMultiToken(visibleToken) !== exportIsMulti) {
+                throw new Error(`Token "${exportTokenKey}" has an incompatible module export`);
+            }
+        }
+    }
+};
+
+const assertSingleExportsHaveLocalBindings = (
+    bindings: readonly ModuleBindingInput[],
+    exports: readonly AnyToken[],
+): void => {
+    for (const currentExport of exports) {
+        if (isMultiToken(currentExport)) {
+            continue;
+        }
+
+        if (
+            hasExactToken(
+                bindings.map((binding) => binding.token),
+                currentExport,
+            )
+        ) {
+            continue;
+        }
+
+        throw new Error(
+            `Service "${tokenDisplayKey(currentExport)}" is exported by the module, but no local provider exists`,
+        );
+    }
+};
+
 export const validateModuleDefinitionRuntime = (
     imports: readonly AnyToken[],
     bindings: readonly ModuleBindingInput[],
+    exports: readonly AnyToken[],
 ): void => {
+    if (!Array.isArray(imports)) {
+        throw new Error("Module imports must be an array");
+    }
+
+    if (!Array.isArray(bindings)) {
+        throw new Error("Module bindings must be an array");
+    }
+
+    if (!Array.isArray(exports)) {
+        throw new Error("Module exports must be an array");
+    }
+
     for (const currentImport of imports) {
         if (isModuleDefinitionRuntime(currentImport)) {
             throw new Error("Module imports must be tokens; compose modules with composeModules(...)");
@@ -137,15 +202,25 @@ export const validateModuleDefinitionRuntime = (
     assertNoDuplicateTokenKeys(imports, (currentTokenKey) => `Token "${currentTokenKey}" is already imported`);
 
     for (const binding of bindings) {
-        const unwrappedBinding = unwrapModuleBinding(binding);
-
-        if (!isBinding(unwrappedBinding)) {
-            throw new Error("Module bindings must be created with bind or exported(bind(...))");
+        if (!isBinding(binding)) {
+            throw new Error("Module bindings must be created with bind");
         }
     }
 
+    for (const currentExport of exports) {
+        assertTokenInput(currentExport, "Module exports must be tokens");
+    }
+
+    assertNoDuplicateTokenKeys(exports, (currentTokenKey) => `Token "${currentTokenKey}" is already exported`);
+
     assertNoImportedLocalSingleBindings(imports, bindings);
     assertNoDuplicateLocalSingleBindings(bindings);
+    assertExportsAreCompatibleWithVisibleTokens(imports, bindings, exports);
+    assertSingleExportsHaveLocalBindings(bindings, exports);
+};
+
+const isModuleExportedBinding = (module: AnyModuleDefinition, binding: AnyBinding): boolean => {
+    return hasExactToken(module.exports, binding.token);
 };
 
 const collectExportedEntries = (modules: readonly AnyModuleDefinition[]): readonly RuntimeExportedEntry[] => {
@@ -153,8 +228,8 @@ const collectExportedEntries = (modules: readonly AnyModuleDefinition[]): readon
 
     for (const currentModule of modules) {
         for (const moduleBinding of currentModule.bindings) {
-            if (isExportedBinding(moduleBinding)) {
-                entries.push({ module: currentModule, binding: moduleBinding.binding });
+            if (isModuleExportedBinding(currentModule, moduleBinding)) {
+                entries.push({ module: currentModule, binding: moduleBinding });
             }
         }
     }
@@ -167,12 +242,7 @@ export const collectModuleExportTokens = (modules: readonly AnyModuleDefinition[
     const seenTokenKeyIds = new Set<string>();
 
     for (const currentModule of modules) {
-        for (const moduleBinding of currentModule.bindings) {
-            if (!isExportedBinding(moduleBinding)) {
-                continue;
-            }
-
-            const currentToken = moduleBinding.binding.token;
+        for (const currentToken of currentModule.exports) {
             const currentTokenKeyId = tokenKeyRuntimeId(currentToken);
 
             if (seenTokenKeyIds.has(currentTokenKeyId)) {
@@ -196,6 +266,16 @@ const findExportedProviders = (
 
     return entries.filter(
         (entry) => entry.module !== excludedModule && tokenRuntimeId(entry.binding.token) === currentTokenId,
+    );
+};
+
+const hasExportDeclaration = (
+    modules: readonly AnyModuleDefinition[],
+    currentToken: AnyToken,
+    excludedModule?: AnyModuleDefinition,
+): boolean => {
+    return modules.some(
+        (currentModule) => currentModule !== excludedModule && hasExactToken(currentModule.exports, currentToken),
     );
 };
 
@@ -285,21 +365,28 @@ export const validateComposedModuleRuntime = (
     }
 
     const exportedEntries = collectExportedEntries(modules);
-    const exportedProviderKinds = new Map<string, boolean>();
+    const exportedTokenKinds = new Map<string, boolean>();
     const exportedSingleProviders = new Map<string, string>();
+
+    for (const currentModule of modules) {
+        for (const currentExport of currentModule.exports) {
+            const exportTokenKey = tokenDisplayKey(currentExport);
+            const exportTokenKeyId = tokenKeyRuntimeId(currentExport);
+            const exportIsMultiToken = isMultiToken(currentExport);
+            const previousKind = exportedTokenKinds.get(exportTokenKeyId);
+
+            if (previousKind !== undefined && previousKind !== exportIsMultiToken) {
+                throw new Error(`Token "${exportTokenKey}" has incompatible exported providers`);
+            }
+
+            exportedTokenKinds.set(exportTokenKeyId, exportIsMultiToken);
+        }
+    }
 
     for (const entry of exportedEntries) {
         const entryToken = entry.binding.token;
         const entryTokenKey = tokenDisplayKey(entryToken);
-        const entryTokenKeyId = tokenKeyRuntimeId(entryToken);
         const entryIsMultiToken = isMultiToken(entryToken);
-        const previousKind = exportedProviderKinds.get(entryTokenKeyId);
-
-        if (previousKind !== undefined && previousKind !== entryIsMultiToken) {
-            throw new Error(`Token "${entryTokenKey}" has incompatible exported providers`);
-        }
-
-        exportedProviderKinds.set(entryTokenKeyId, entryIsMultiToken);
 
         if (entryIsMultiToken) {
             continue;
@@ -314,12 +401,17 @@ export const validateComposedModuleRuntime = (
         exportedSingleProviders.set(entryTokenId, entryTokenKey);
     }
 
-    const assertProviders = (currentToken: AnyToken, providers: readonly RuntimeExportedEntry[], action: string) => {
+    const assertProviders = (
+        currentToken: AnyToken,
+        providers: readonly RuntimeExportedEntry[],
+        action: string,
+        excludedModule?: AnyModuleDefinition,
+    ) => {
         const currentTokenKey = tokenDisplayKey(currentToken);
 
         if (isMultiToken(currentToken)) {
-            if (providers.length === 0) {
-                throw new Error(`Multibind token "${currentTokenKey}" ${action}, but no exported contributions exist`);
+            if (!hasExportDeclaration(modules, currentToken, excludedModule)) {
+                throw new Error(`Multibind token "${currentTokenKey}" ${action}, but no module exports it`);
             }
 
             return;
@@ -354,6 +446,7 @@ export const validateComposedModuleRuntime = (
                 currentImport,
                 findExportedProviders(exportedEntries, currentImport, excludedProviderModule),
                 "is imported by a module",
+                excludedProviderModule,
             );
         }
     }

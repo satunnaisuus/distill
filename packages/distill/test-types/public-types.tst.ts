@@ -16,8 +16,6 @@ import {
     type Disposer,
     defineContainer,
     defineModule,
-    type ExportedBinding,
-    exported,
     type ModuleDefinition,
     type ModuleImportWire,
     type MultiToken,
@@ -54,9 +52,9 @@ test("public helper types preserve their documented type relationships", () => {
     const jsonConfig = qualified(tokens.config, json);
     const configBinding = bind(tokens.config).factory(() => ({ port: 3000 }));
     const jsonConfigBinding = bind(qualified(tokens.config, json)).factory(() => ({ port: 3001 }));
-    const exportedConfigBinding = exported(configBinding);
     const configModule = defineModule({
-        bindings: [exportedConfigBinding],
+        exports: [tokens.config],
+        bindings: [configBinding],
     });
     const configComposition = composeModules({
         modules: [configModule],
@@ -72,7 +70,6 @@ test("public helper types preserve their documented type relationships", () => {
         tokenList,
         configBinding,
     );
-
     expect(token("config")).type.toBe<TokenBuilder<"config">>();
     expect(token("config").of<Config>()).type.toBe<Token<"config", Config>>();
     expect(handlers).type.toBe<MultiToken<"handlers", (message: string) => number>>();
@@ -86,8 +83,9 @@ test("public helper types preserve their documented type relationships", () => {
     expect<Dependencies>().type.toBeAssignableTo<DependencyMap>();
     expect<BindingLifetime>().type.toBe<"singleton" | "scoped" | "transient">();
     expect<Disposer<number>>().type.toBe<(value: number) => void | Promise<void>>();
-    expect(exportedConfigBinding).type.toBe<ExportedBinding<typeof configBinding>>();
-    expect(configModule).type.toBe<ModuleDefinition<readonly [], readonly [typeof exportedConfigBinding]>>();
+    expect(configModule).type.toBe<
+        ModuleDefinition<readonly [], readonly [typeof configBinding], readonly [typeof tokens.config]>
+    >();
     expect(configComposition).type.toBe<
         ComposedModuleDefinition<readonly [typeof configModule], readonly [typeof tokens.config]>
     >();
@@ -97,24 +95,39 @@ test("public helper types preserve their documented type relationships", () => {
     expect(configComposition.createContainer().resolve(tokens.config)).type.toBe<Config>();
     expect(provideImport).type.toBeAssignableTo<
         (
-            module: ModuleDefinition<readonly [typeof tokens.config], readonly []>,
+            module: ModuleDefinition<readonly [typeof tokens.config], readonly [], readonly []>,
             importToken: typeof tokens.config,
-        ) => { readonly with: (providerToken: typeof tokens.config) => ModuleImportWire }
+        ) => {
+            readonly with: (providerToken: typeof tokens.config) => ModuleImportWire;
+        }
     >();
     expect<ResolvedDependencies<Dependencies>>().type.toBe<{
         readonly config: Config;
         readonly logger: Ref<Logger>;
     }>();
-    expect<ResolvedDependencies<{ readonly handlers: AllToken<typeof handlers> }>>().type.toBe<{
+    expect<
+        ResolvedDependencies<{
+            readonly handlers: AllToken<typeof handlers>;
+        }>
+    >().type.toBe<{
         readonly handlers: Array<(message: string) => number>;
     }>();
-    expect<ResolvedDependencies<{ readonly config: OptionalToken<typeof tokens.config> }>>().type.toBe<{
+    expect<
+        ResolvedDependencies<{
+            readonly config: OptionalToken<typeof tokens.config>;
+        }>
+    >().type.toBe<{
         readonly config: Config | undefined;
     }>();
     expect<Binding<typeof tokens.port>["factory"]>().type.toBe<() => number>();
-    expect<Binding<typeof tokens.port, { readonly config: typeof tokens.config }>["factory"]>().type.toBe<
-        (dependencies: { readonly config: Config }) => number
-    >();
+    expect<
+        Binding<
+            typeof tokens.port,
+            {
+                readonly config: typeof tokens.config;
+            }
+        >["factory"]
+    >().type.toBe<(dependencies: { readonly config: Config }) => number>();
     expect(configOverride).type.toBe<BindingOverride<typeof configBinding>>();
     expect(configUnbind).type.toBe<BindingUnbind<typeof tokens.config>>();
     expect(handlersOverride).type.toBe<BindingOverrideAll<typeof handlers, readonly []>>();
@@ -130,15 +143,12 @@ test("public helper types preserve their documented type relationships", () => {
     expect<ReturnType<Container["dispose"]>>().type.toBe<Promise<void>>();
     expect<Container["disposed"]>().type.toBe<boolean>();
 });
-
 test("token arrays and defineContainer preserve empty token arrays", () => {
     const emptyTokenList = [] as const;
     const container = defineContainer(emptyTokenList).create();
-
     expect(container.resolve).type.toBe<(token: never) => never>();
     expect<Parameters<typeof container.resolve>[0]>().type.toBe<never>();
 });
-
 test("public Container helper type exposes createScope relationships", () => {
     const configBinding = bind(tokens.config).factory(() => ({ port: 3000 }));
     const typedContainer: Container<readonly [typeof configBinding], typeof tokenList> = defineContainer(
@@ -149,7 +159,6 @@ test("public Container helper type exposes createScope relationships", () => {
     const runResult = typedContainer.runScoped([bind(tokens.port).factory(() => 3000)] as const, (scope) =>
         scope.resolve(tokens.port),
     );
-
     expect(typedScope.resolve(tokens.config)).type.toBe<Config>();
     expect(typedScope.resolve(tokens.port)).type.toBe<number>();
     expect(runResult).type.toBe<Promise<number>>();
@@ -161,7 +170,6 @@ test("public Container helper type exposes createScope relationships", () => {
         );
     }).type.toRaiseError("__missing_dependencies__");
 });
-
 test("public Container helper type preserves nested createScope relationships", () => {
     const configBinding = bind(tokens.config).factory(() => ({ port: 3000 }));
     const typedContainer: Container<readonly [typeof configBinding], typeof tokenList> = defineContainer(
@@ -174,7 +182,6 @@ test("public Container helper type preserves nested createScope relationships", 
             log: () => {},
         })),
     );
-
     expect(typedNestedScope.resolve(tokens.config)).type.toBe<Config>();
     expect(typedNestedScope.resolve(tokens.port)).type.toBe<number>();
     expect(typedNestedScope.resolve(tokens.logger)).type.toBe<Logger>();
@@ -189,7 +196,6 @@ test("public Container helper type preserves nested createScope relationships", 
         );
     }).type.toRaiseError("__missing_dependencies__");
 });
-
 test("public Container helper type exposes descendant-supplied dependencies through createScope", () => {
     type Request = {
         readonly id: string;
@@ -215,13 +221,11 @@ test("public Container helper type exposes descendant-supplied dependencies thro
         serviceBinding,
     ).create();
     const typedScope = typedContainer.createScope(requestBinding);
-
     expect(() => {
         typedContainer.resolve(scopedTokens.service);
     }).type.toRaiseError();
     expect(typedScope.resolve(scopedTokens.service)).type.toBe<Service>();
 });
-
 test("public Container helper type infers scope boundaries from flattened overrides", () => {
     type ServiceA = {
         readonly serviceB: ServiceB;
@@ -256,7 +260,6 @@ test("public Container helper type infers scope boundaries from flattened overri
         readonly [typeof serviceABinding, typeof rootServiceBBinding, typeof childServiceBBinding],
         ReadonlyArray<(typeof scopedTokens)[keyof typeof scopedTokens]>
     > = child;
-
     const grandchild = typedChild.createScope(
         bind(scopedTokens.serviceC)
             .singleton()
@@ -264,10 +267,8 @@ test("public Container helper type infers scope boundaries from flattened overri
                 serviceA,
             })),
     );
-
     expect(grandchild.resolve(scopedTokens.serviceC)).type.toBe<ServiceC>();
 });
-
 test("public Container helper type requires explicit scope boundaries for child bindings before overrides", () => {
     type Config = {
         readonly name: string;
@@ -298,7 +299,6 @@ test("public Container helper type requires explicit scope boundaries for child 
     const child = defineContainer(scopedTokenList, rootConfigBinding)
         .create()
         .createScope(childServiceBinding, childConfigBinding);
-
     expect(() => {
         const _flattenedChild: Container<
             readonly [typeof rootConfigBinding, typeof childServiceBinding, typeof childConfigBinding],
@@ -306,13 +306,11 @@ test("public Container helper type requires explicit scope boundaries for child 
         > = child;
         _flattenedChild;
     }).type.toRaiseError();
-
     const typedChild: Container<
         readonly [typeof rootConfigBinding, typeof childServiceBinding, typeof childConfigBinding],
         ReadonlyArray<(typeof scopedTokens)[keyof typeof scopedTokens]>,
         readonly [readonly [typeof rootConfigBinding], readonly [typeof childServiceBinding, typeof childConfigBinding]]
     > = child;
-
     const grandchild = typedChild.createScope(
         bind(scopedTokens.consumer)
             .singleton()
@@ -320,10 +318,8 @@ test("public Container helper type requires explicit scope boundaries for child 
                 service,
             })),
     );
-
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
-
 test("public Container helper type accepts explicit transitive child scope boundaries before overrides", () => {
     type Config = {
         readonly name: string;
@@ -381,7 +377,6 @@ test("public Container helper type accepts explicit transitive child scope bound
             readonly [typeof childPortBinding, typeof childServiceBinding, typeof childConfigBinding],
         ]
     > = child;
-
     const grandchild = typedChild.createScope(
         bind(scopedTokens.consumer)
             .singleton()
@@ -389,10 +384,8 @@ test("public Container helper type accepts explicit transitive child scope bound
                 service,
             })),
     );
-
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
-
 test("public Container helper type preserves parent singleton owners before child overrides", () => {
     type Config = {
         readonly name: string;
@@ -427,7 +420,6 @@ test("public Container helper type preserves parent singleton owners before chil
         readonly [typeof rootConfigBinding, typeof rootServiceBinding, typeof childConfigBinding],
         ReadonlyArray<(typeof scopedTokens)[keyof typeof scopedTokens]>
     > = child;
-
     const grandchild = typedChild.createScope(
         bind(scopedTokens.consumer)
             .singleton()
@@ -435,10 +427,8 @@ test("public Container helper type preserves parent singleton owners before chil
                 service,
             })),
     );
-
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
-
 test("public Container helper type accepts explicit child scope boundaries with union dependencies before overrides", () => {
     type Config = {
         readonly name: string;
@@ -495,7 +485,6 @@ test("public Container helper type accepts explicit child scope boundaries with 
             readonly [typeof childServiceBinding, typeof childConfigBinding],
         ]
     > = child;
-
     const grandchild = typedChild.createScope(
         bind(scopedTokens.consumer)
             .singleton()
@@ -503,10 +492,8 @@ test("public Container helper type accepts explicit child scope boundaries with 
                 service,
             })),
     );
-
     expect(grandchild.resolve(scopedTokens.consumer)).type.toBe<Consumer>();
 });
-
 test("public Container helper type accepts explicit child scope boundaries without overrides", () => {
     const scopedTokens = {
         config: token("config").of<Config>(),
@@ -525,7 +512,6 @@ test("public Container helper type accepts explicit child scope boundaries witho
         ReadonlyArray<(typeof scopedTokens)[keyof typeof scopedTokens]>,
         readonly [readonly [typeof configBinding], readonly [typeof portBinding]]
     > = child;
-
     expect(typedChild.resolve(scopedTokens.config)).type.toBe<Config>();
     expect(typedChild.resolve(scopedTokens.port)).type.toBe<number>();
 });
