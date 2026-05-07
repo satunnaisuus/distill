@@ -238,9 +238,9 @@ export const applyModuleBindingOverrides = (
         const currentTokenId = tokenRuntimeId(currentToken);
         const moduleContextIds = overrideModuleContextIdsByTokenId.get(currentTokenId) ?? new Set<number>();
 
-        for (const entry of entries) {
-            if (entry.exported && tokenRuntimeId(entry.binding.token) === currentTokenId) {
-                moduleContextIds.add(entry.moduleId);
+        for (const currentModule of composition.modules) {
+            if (hasExactToken(currentModule.exports, currentToken)) {
+                moduleContextIds.add(currentModule.id);
             }
         }
 

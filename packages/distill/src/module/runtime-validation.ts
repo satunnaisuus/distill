@@ -1,4 +1,5 @@
-import { type AnyBinding, isBinding } from "../binding/index";
+import { type AnyBinding, getBindingDependencies, isBinding } from "../binding/index";
+import { type DependencyReference, isAllDependency, isOptionalDependency } from "../dependency/index";
 import {
     type AnySingleToken,
     type AnyToken,
@@ -174,6 +175,55 @@ const assertSingleExportsHaveLocalBindings = (
     }
 };
 
+const resolveAllDependencyToken = (dependency: DependencyReference): AnyToken | undefined => {
+    if (isOptionalDependency(dependency)) {
+        return resolveAllDependencyToken(dependency.resolveDependency());
+    }
+
+    if (isAllDependency(dependency)) {
+        return dependency.resolveToken();
+    }
+
+    return undefined;
+};
+
+const assertAllDependenciesHaveVisibleTokens = (
+    imports: readonly AnyToken[],
+    bindings: readonly ModuleBindingInput[],
+    exports: readonly AnyToken[],
+): void => {
+    const visibleTokens = [...imports, ...exports, ...bindings.map((binding) => binding.token)];
+
+    for (const binding of bindings) {
+        const dependencies = getBindingDependencies(binding);
+
+        if (!dependencies) {
+            continue;
+        }
+
+        for (const dependency of Object.values(dependencies) as DependencyReference[]) {
+            const dependencyToken = resolveAllDependencyToken(dependency);
+
+            if (!dependencyToken) {
+                continue;
+            }
+
+            assertTokenInput(dependencyToken, "Module dependencies must be tokens");
+            const dependencyTokenKey = tokenDisplayKey(dependencyToken);
+
+            if (!isMultiToken(dependencyToken)) {
+                throw new Error(`Token "${dependencyTokenKey}" is not a multibind token`);
+            }
+
+            if (!hasExactToken(visibleTokens, dependencyToken)) {
+                throw new Error(
+                    `Multibind token "${dependencyTokenKey}" is not imported, exported, or locally bound by the module`,
+                );
+            }
+        }
+    }
+};
+
 export const validateModuleDefinitionRuntime = (
     imports: readonly AnyToken[],
     bindings: readonly ModuleBindingInput[],
@@ -217,6 +267,7 @@ export const validateModuleDefinitionRuntime = (
     assertNoDuplicateLocalSingleBindings(bindings);
     assertExportsAreCompatibleWithVisibleTokens(imports, bindings, exports);
     assertSingleExportsHaveLocalBindings(bindings, exports);
+    assertAllDependenciesHaveVisibleTokens(imports, bindings, exports);
 };
 
 const isModuleExportedBinding = (module: AnyModuleDefinition, binding: AnyBinding): boolean => {

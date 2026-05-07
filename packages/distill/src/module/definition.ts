@@ -8,8 +8,9 @@ import type {
     ValidateComposeWire,
 } from "./compose-validation-types";
 import type {
+    ValidateModuleAllDependencies,
     ValidateModuleBindingInputTuple,
-    ValidateModuleExports,
+    ValidateModuleExportDeclarations,
     ValidateModuleImports,
 } from "./definition-validation-types";
 import type {
@@ -109,32 +110,37 @@ export const provideImport = <
     return builder as ModuleImportWireBuilder<TModule, TImportToken>;
 };
 
-export function defineModule<const TBindings extends readonly ModuleBindingInput[]>(options: {
-    readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
-}): ModuleDefinition<readonly [], TBindings, readonly []>;
+export function defineModule<const TBindings extends readonly ModuleBindingInput[]>(
+    options: {
+        readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
+    } & ValidateModuleAllDependencies<readonly [], NoInfer<TBindings>, readonly []>,
+): ModuleDefinition<readonly [], TBindings, readonly []>;
 export function defineModule<
     const TBindings extends readonly ModuleBindingInput[],
     const TExports extends readonly AnyToken[],
->(options: {
-    readonly bindings: TBindings & ValidateModuleBindingInputTuple<readonly [], TBindings>;
-    readonly exports: TExports & ValidateModuleExports<readonly [], TBindings, TExports>;
-}): ModuleDefinition<readonly [], TBindings, TExports>;
+>(
+    options: {
+        readonly imports?: never;
+        readonly bindings: TBindings;
+        readonly exports: TExports;
+    } & {
+        readonly imports?: never;
+        readonly bindings: ValidateModuleBindingInputTuple<readonly [], NoInfer<TBindings>>;
+    } & ValidateModuleExportDeclarations<readonly [], NoInfer<TBindings>, NoInfer<TExports>> &
+        ValidateModuleAllDependencies<readonly [], NoInfer<TBindings>, NoInfer<TExports>>,
+): ModuleDefinition<readonly [], TBindings, TExports>;
 export function defineModule<
     const TImports extends readonly AnyToken[],
     const TBindings extends readonly ModuleBindingInput[],
->(options: {
-    readonly imports: TImports & ValidateModuleImports<TImports>;
-    readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
-}): ModuleDefinition<TImports, TBindings, readonly []>;
-export function defineModule<
-    const TImports extends readonly AnyToken[],
-    const TBindings extends readonly ModuleBindingInput[],
-    const TExports extends readonly AnyToken[],
->(options: {
-    readonly imports: TImports & ValidateModuleImports<TImports>;
-    readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
-    readonly exports: TExports & ValidateModuleExports<TImports, TBindings, TExports>;
-}): ModuleDefinition<TImports, TBindings, TExports>;
+    const TExports extends readonly AnyToken[] = readonly [],
+>(
+    options: {
+        readonly imports: TImports & ValidateModuleImports<TImports>;
+        readonly bindings: TBindings & ValidateModuleBindingInputTuple<TImports, TBindings>;
+        readonly exports?: TExports;
+    } & ValidateModuleExportDeclarations<NoInfer<TImports>, NoInfer<TBindings>, NoInfer<TExports>> &
+        ValidateModuleAllDependencies<NoInfer<TImports>, NoInfer<TBindings>, NoInfer<TExports>>,
+): ModuleDefinition<TImports, TBindings, TExports>;
 export function defineModule(options: {
     readonly imports?: readonly AnyToken[];
     readonly bindings: readonly ModuleBindingInput[];

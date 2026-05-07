@@ -36,6 +36,18 @@ describe("module createContainer", () => {
             } as never),
         ).toThrowError('Service "Config" is exported by the module, but no local provider exists');
     });
+    it("rejects re-exporting imported single tokens without local providers", () => {
+        const Config = token("Config").of<{
+            readonly port: number;
+        }>();
+        expect(() =>
+            defineModule({
+                imports: [Config],
+                exports: [Config],
+                bindings: [],
+            } as never),
+        ).toThrowError('Service "Config" is exported by the module, but no local provider exists');
+    });
     it("identifies module runtime definitions and import wires", () => {
         const Config = token("Config").of<{
             readonly port: number;
@@ -399,6 +411,41 @@ describe("module createContainer", () => {
             'Service "Secret" is not exported by the module',
         );
     });
+    it("allows modules to keep separate private single-token bindings with the same token", () => {
+        const Shared = token("Shared").of<{
+            readonly owner: string;
+        }>();
+        const First = token("First").of<{
+            readonly owner: string;
+        }>();
+        const Second = token("Second").of<{
+            readonly owner: string;
+        }>();
+        const FirstModule = defineModule({
+            exports: [First],
+            bindings: [
+                bind(Shared).factory(() => ({ owner: "first" })),
+                bind(First).factory({ shared: Shared }, ({ shared }) => ({ owner: shared.owner })),
+            ],
+        });
+        const SecondModule = defineModule({
+            exports: [Second],
+            bindings: [
+                bind(Shared).factory(() => ({ owner: "second" })),
+                bind(Second).factory({ shared: Shared }, ({ shared }) => ({ owner: shared.owner })),
+            ],
+        });
+        const App = composeModules({
+            modules: [FirstModule, SecondModule],
+            exports: [First, Second],
+        });
+        const app = App.createContainer();
+        expect(app.resolve(First)).toEqual({ owner: "first" });
+        expect(app.resolve(Second)).toEqual({ owner: "second" });
+        expect(() => (app as RuntimeContainerForTest).resolve(Shared)).toThrowError(
+            'Service "Shared" is not exported by the module',
+        );
+    });
     it("uses composition exports as the only public resolve and override surface", () => {
         const Config = token("Config").of<{
             readonly port: number;
@@ -610,6 +657,16 @@ describe("module createContainer", () => {
                 ],
             } as never),
         ).toThrowError('Token "Hooks" is already included in module bindings');
+        expect(() =>
+            defineModule({
+                exports: [Config],
+                bindings: [
+                    bind(Config).factory({ hooks: all(ManyHooks) }, () => ({
+                        port: 3000,
+                    })),
+                ],
+            } as never),
+        ).toThrowError('Multibind token "Hooks" is not imported, exported, or locally bound by the module');
         expect(() =>
             defineModule({
                 bindings: [{}],
@@ -955,6 +1012,102 @@ describe("module createContainer", () => {
         expect(app.resolve(Registry)).toEqual({ names: ["local-private", "public"] });
         expect(app.resolveAll(Hooks)).toEqual([{ name: "public" }]);
     });
+    it("keeps non-imported private multibind contributions isolated from exported providers", () => {
+        const Hooks = multiToken("Hooks").of<{
+            readonly name: string;
+        }>();
+        const Registry = token("Registry").of<{
+            readonly names: readonly string[];
+        }>();
+        const PluginModule = defineModule({
+            exports: [Hooks],
+            bindings: [bind(Hooks).factory(() => ({ name: "first" })), bind(Hooks).factory(() => ({ name: "second" }))],
+        });
+        const RegistryModule = defineModule({
+            exports: [Registry],
+            bindings: [
+                bind(Hooks).factory(() => ({ name: "local-private" })),
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+            ],
+        });
+        const App = composeModules({
+            modules: [PluginModule, RegistryModule],
+            exports: [Hooks, Registry],
+        });
+        const app = App.createContainer();
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(app.resolve(Registry)).toEqual({ names: ["local-private"] });
+    });
+    it("does not expose multibind tokens that are absent from module exports", () => {
+        const InternalHooks = multiToken("InternalHooks").of<{
+            readonly name: string;
+        }>();
+        const Registry = token("Registry").of<{
+            readonly names: readonly string[];
+        }>();
+        const AppModule = defineModule({
+            exports: [Registry],
+            bindings: [
+                bind(InternalHooks).factory(() => ({ name: "internal" })),
+                bind(Registry).factory({ hooks: all(InternalHooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+            ],
+        });
+        const App = composeModules({
+            modules: [AppModule],
+        });
+        const app = App.createContainer();
+        expect(app.resolve(Registry)).toEqual({ names: ["internal"] });
+        expect(() => (app as RuntimeContainerForTest).resolveAll(InternalHooks)).toThrowError(
+            'Multibind token "InternalHooks" is not exported by the module',
+        );
+        expect(() => App.createContainer(overrideAll(InternalHooks, []))).toThrowError(
+            'Multibind token "InternalHooks" is not exported by the module',
+        );
+    });
+    it("injects imported and owner-local multibind contributions into private module bindings", () => {
+        const Hooks = multiToken("Hooks").of<{
+            readonly name: string;
+        }>();
+        const Snapshot = token("Snapshot").of<{
+            readonly names: readonly string[];
+        }>();
+        const Registry = token("Registry").of<{
+            readonly names: readonly string[];
+        }>();
+        const FirstPluginModule = defineModule({
+            exports: [Hooks],
+            bindings: [bind(Hooks).factory(() => ({ name: "first" }))],
+        });
+        const RegistryModule = defineModule({
+            exports: [Registry],
+            imports: [Hooks],
+            bindings: [
+                bind(Hooks).factory(() => ({ name: "local-private" })),
+                bind(Snapshot).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+                bind(Registry).factory({ snapshot: Snapshot }, ({ snapshot }) => snapshot),
+            ],
+        });
+        const SecondPluginModule = defineModule({
+            exports: [Hooks],
+            bindings: [bind(Hooks).factory(() => ({ name: "second" }))],
+        });
+        const App = composeModules({
+            modules: [FirstPluginModule, RegistryModule, SecondPluginModule],
+            exports: [Registry, Hooks],
+        });
+        const app = App.createContainer();
+        expect(app.resolve(Registry)).toEqual({ names: ["first", "local-private", "second"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(() => (app as RuntimeContainerForTest).resolve(Snapshot)).toThrowError(
+            'Service "Snapshot" is not exported by the module',
+        );
+    });
     it("allows multibind modules to consume their own exported contributions", () => {
         const Hooks = multiToken("Hooks").of<{
             readonly name: string;
@@ -979,6 +1132,34 @@ describe("module createContainer", () => {
         const app = App.createContainer();
         expect(app.resolve(Registry)).toEqual({ names: ["self"] });
         expect(app.resolveAll(Hooks)).toEqual([{ name: "self" }]);
+    });
+    it("allows modules to re-export imported multibind tokens without local contributions", () => {
+        const Hooks = multiToken("Hooks").of<{
+            readonly name: string;
+        }>();
+        const Registry = token("Registry").of<{
+            readonly names: readonly string[];
+        }>();
+        const PluginModule = defineModule({
+            exports: [Hooks],
+            bindings: [bind(Hooks).factory(() => ({ name: "first" })), bind(Hooks).factory(() => ({ name: "second" }))],
+        });
+        const ReExportModule = defineModule({
+            imports: [Hooks],
+            exports: [Hooks, Registry],
+            bindings: [
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+            ],
+        });
+        const App = composeModules({
+            modules: [ReExportModule, PluginModule],
+            exports: [Hooks, Registry],
+        });
+        const app = App.createContainer();
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(app.resolve(Registry)).toEqual({ names: ["first", "second"] });
     });
     it("allows exported multibind tokens without contributions", () => {
         const Hooks = multiToken("Hooks").of<{
@@ -1013,6 +1194,29 @@ describe("module createContainer", () => {
         const app = App.createContainer();
         expect(app.resolve(Registry)).toEqual({ names: [] });
         expect(app.resolveAll(Hooks)).toEqual([]);
+    });
+    it("applies public overrideAll to exported multibind dependencies without local contributions", () => {
+        const Hooks = multiToken("Hooks").of<{
+            readonly name: string;
+        }>();
+        const Registry = token("Registry").of<{
+            readonly names: readonly string[];
+        }>();
+        const RegistryModule = defineModule({
+            exports: [Hooks, Registry],
+            bindings: [
+                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                    names: hooks.map((hook) => hook.name),
+                })),
+            ],
+        });
+        const App = composeModules({
+            modules: [RegistryModule],
+            exports: [Registry, Hooks],
+        });
+        const app = App.createContainer(overrideAll(Hooks, [bind(Hooks).factory(() => ({ name: "override" }))]));
+        expect(app.resolve(Registry)).toEqual({ names: ["override"] });
+        expect(app.resolveAll(Hooks)).toEqual([{ name: "override" }]);
     });
     it("allows imported multibind contributions to be replaced through public overrideAll", () => {
         const Hooks = multiToken("Hooks").of<{

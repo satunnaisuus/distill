@@ -1,8 +1,10 @@
+import type { AllDependencyToken, DependencyMap } from "../dependency/index";
 import type { ValidateGraphBindings } from "../runtime/index";
 import type { ModuleImportInterfaceBindingsFromTokens } from "./interface-types";
 import type {
     AnyBinding,
     AnyToken,
+    BindingDependencies,
     DuplicateTokenKeys,
     HasExactToken,
     HasSameKeyIncompatibleToken,
@@ -20,13 +22,22 @@ type BindingScopes = readonly (readonly AnyBinding[])[];
 type ModuleVisibleBindingsFromParts<
     TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
-> = readonly [...ModuleImportInterfaceBindingsFromTokens<TImports>, ...TBindings];
+> = readonly [
+    ...ModuleImportInterfaceBindingsFromTokens<TImports>,
+    ...ModuleAllDependencyInterfaceBindingsFromBindings<TBindings>,
+    ...TBindings,
+];
 
 type ModuleBindingScopesFromParts<
     TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
     TAdditionalScopes extends BindingScopes = readonly [],
-> = readonly [ModuleImportInterfaceBindingsFromTokens<TImports>, TBindings, ...TAdditionalScopes];
+> = readonly [
+    ModuleImportInterfaceBindingsFromTokens<TImports>,
+    ModuleAllDependencyInterfaceBindingsFromBindings<TBindings>,
+    TBindings,
+    ...TAdditionalScopes,
+];
 
 type TupleBindingsError<TBindings extends readonly ModuleBindingInput[]> = TupleError<
     TBindings,
@@ -50,6 +61,16 @@ type TupleExportsError<TExports extends readonly AnyToken[]> = TupleError<
 >;
 
 type BindingTokens<TBindings extends readonly AnyBinding[]> = TBindings[number]["token"];
+
+type BindingDependencyValues<
+    TBinding extends AnyBinding,
+    TDependencies = BindingDependencies<TBinding>,
+> = TDependencies extends DependencyMap ? TDependencies[keyof TDependencies] : never;
+
+type BindingAllDependencyTokens<TBinding extends AnyBinding> = AllDependencyToken<BindingDependencyValues<TBinding>>;
+
+type ModuleAllDependencyInterfaceBindingsFromBindings<TBindings extends readonly ModuleBindingInput[]> =
+    ModuleImportInterfaceBindingsFromTokens<readonly BindingAllDependencyTokens<TBindings[number]>[]>;
 
 type DuplicateVisibleSingleTokenKeys<
     TBindings extends readonly AnyBinding[],
@@ -120,6 +141,49 @@ type ValidatedModuleLocalBindings<
     ModuleVisibleBindingsFromParts<TImports, TBindings>
 >;
 
+type MissingAllDependencyDeclarations<
+    TBindings extends readonly ModuleBindingInput[],
+    TVisibleTokens extends AnyToken,
+> = number extends TBindings["length"]
+    ? never
+    : TBindings extends readonly [
+            infer TCurrentBinding extends ModuleBindingInput,
+            ...infer TRemainingBindings extends readonly ModuleBindingInput[],
+        ]
+      ?
+            | MissingAllDependencyDeclarationsFromBinding<TCurrentBinding, TVisibleTokens>
+            | MissingAllDependencyDeclarations<TRemainingBindings, TVisibleTokens>
+      : never;
+
+type MissingAllDependencyDeclarationsFromBinding<TBinding extends ModuleBindingInput, TVisibleTokens extends AnyToken> =
+    BindingAllDependencyTokens<TBinding> extends infer TCurrentToken
+        ? TCurrentToken extends AnyToken
+            ? HasExactToken<TVisibleTokens, TCurrentToken> extends true
+                ? never
+                : TCurrentToken
+            : never
+        : never;
+
+type MissingAllDependencyDeclarationsError<
+    TImports extends readonly AnyToken[],
+    TBindings extends readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[],
+> = IfNever<
+    MissingAllDependencyDeclarations<TBindings, TImports[number] | TExports[number] | BindingTokens<TBindings>>,
+    {},
+    {
+        readonly __missing_dependencies__: TokenKey<
+            MissingAllDependencyDeclarations<TBindings, TImports[number] | TExports[number] | BindingTokens<TBindings>>
+        >;
+    }
+>;
+
+export type ValidateModuleAllDependencies<
+    TImports extends readonly AnyToken[],
+    TBindings extends readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[],
+> = MissingAllDependencyDeclarationsError<TImports, TBindings, TExports>;
+
 export type ValidateModuleBindingInputTuple<
     TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
@@ -142,12 +206,14 @@ export type ValidateModuleImports<TImports extends readonly AnyToken[]> = TupleI
 type SingleExportTokensWithoutLocalBinding<
     TExports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
-> = TExports[number] extends infer TCurrentExport extends AnyToken
-    ? IsMultiToken<TCurrentExport> extends true
-        ? never
-        : HasExactToken<BindingTokens<TBindings>, TCurrentExport> extends true
-          ? never
-          : TCurrentExport
+> = TExports[number] extends infer TCurrentExport
+    ? TCurrentExport extends AnyToken
+        ? IsMultiToken<TCurrentExport> extends true
+            ? never
+            : HasExactToken<BindingTokens<TBindings>, TCurrentExport> extends true
+              ? never
+              : TCurrentExport
+        : never
     : never;
 
 type IncompatibleExportTokenKeys<
@@ -155,9 +221,11 @@ type IncompatibleExportTokenKeys<
     TBindings extends readonly ModuleBindingInput[],
     TExports extends readonly AnyToken[],
     TVisibleTokens extends AnyToken = TImports[number] | BindingTokens<TBindings>,
-> = TExports[number] extends infer TCurrentExport extends AnyToken
-    ? HasSameKeyIncompatibleToken<TVisibleTokens, TCurrentExport> extends true
-        ? TokenKey<TCurrentExport>
+> = TExports[number] extends infer TCurrentExport
+    ? TCurrentExport extends AnyToken
+        ? HasSameKeyIncompatibleToken<TVisibleTokens, TCurrentExport> extends true
+            ? TokenKey<TCurrentExport>
+            : never
         : never
     : never;
 
@@ -184,13 +252,19 @@ type IncompatibleExportTokenError<
     }
 >;
 
-export type ValidateModuleExports<
+export type ValidateModuleExportDeclarations<
     TImports extends readonly AnyToken[],
     TBindings extends readonly ModuleBindingInput[],
     TExports extends readonly AnyToken[],
 > = TupleExportsError<TExports> &
     DuplicateTokenListError<TExports, "exports"> &
     MissingSingleExportBindingError<TExports, TBindings> &
-    IncompatibleExportTokenError<TImports, TBindings, TExports> & {
-        [TIndex in keyof TExports]: TExports[TIndex] extends AnyToken ? TExports[TIndex] : never;
-    };
+    IncompatibleExportTokenError<TImports, TBindings, TExports>;
+
+export type ValidateModuleExports<
+    TImports extends readonly AnyToken[],
+    TBindings extends readonly ModuleBindingInput[],
+    TExports extends readonly AnyToken[],
+> = ValidateModuleExportDeclarations<TImports, TBindings, TExports> & {
+    [TIndex in keyof TExports]: TExports[TIndex] extends AnyToken ? TExports[TIndex] : never;
+};
