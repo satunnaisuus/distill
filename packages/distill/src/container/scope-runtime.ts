@@ -9,8 +9,8 @@ import {
     type RuntimeScope,
 } from "../runtime/index";
 import {
+    type AnyMultiToken,
     type AnyToken,
-    assertMultiTokenKey,
     assertSingleTokenKey,
     getRuntimeTokenDetails,
     type TokenValue,
@@ -18,9 +18,8 @@ import {
 import { disposeScope } from "./disposal";
 
 export type RuntimeContainer = {
-    resolve<TToken extends AnyToken>(token: TToken): TokenValue<TToken>;
+    resolve<TToken extends AnyToken>(token: TToken): ResolvedRuntimeTokenValue<TToken>;
     resolveOptional<TToken extends AnyToken>(token: TToken): TokenValue<TToken> | undefined;
-    resolveAll<TToken extends AnyToken>(token: TToken): Array<TokenValue<TToken>>;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
     runScoped<TResult>(
         bindings: readonly AnyBinding[],
@@ -29,6 +28,10 @@ export type RuntimeContainer = {
     dispose(): Promise<void>;
     readonly disposed: boolean;
 };
+
+type ResolvedRuntimeTokenValue<TToken extends AnyToken> = TToken extends AnyMultiToken
+    ? Array<TokenValue<TToken>>
+    : TokenValue<TToken>;
 
 type RegisterBindingsOptions = {
     readonly moduleContextId?: number;
@@ -194,9 +197,14 @@ export const createRuntimeContainerForScope = (
         resolve(currentToken) {
             scope.context.assertTokenIsInTokenList(currentToken);
             const currentTokenDetails = getRuntimeTokenDetails(currentToken);
-            assertSingleTokenKey(currentTokenDetails.key, currentToken);
+
+            if (currentTokenDetails.isMulti) {
+                assertPublicMultiTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
+                return options.resolveAllActual(scope, currentToken, moduleContextId) as never;
+            }
+
             assertPublicSingleTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
-            return options.resolveActual(scope, currentToken, undefined, moduleContextId);
+            return options.resolveActual(scope, currentToken, undefined, moduleContextId) as never;
         },
         resolveOptional(currentToken) {
             scope.context.assertTokenIsInTokenList(currentToken);
@@ -205,13 +213,6 @@ export const createRuntimeContainerForScope = (
             assertPublicSingleTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
             assertScopeIsActive(scope);
             return options.resolveOptionalActual(scope, currentToken, undefined, moduleContextId);
-        },
-        resolveAll(currentToken) {
-            scope.context.assertTokenIsInTokenList(currentToken);
-            const currentTokenDetails = getRuntimeTokenDetails(currentToken);
-            assertMultiTokenKey(currentTokenDetails.key, currentToken);
-            assertPublicMultiTokenId(publicAccess, currentTokenDetails.id, currentTokenDetails.key);
-            return options.resolveAllActual(scope, currentToken, moduleContextId);
         },
         createScope(...bindings) {
             return createChildContainer(bindings);

@@ -1,7 +1,5 @@
 import {
-    type AllToken,
     type AnyBindingOverride,
-    all,
     type Binding,
     type BindingLifetime,
     type BindingOverride,
@@ -77,7 +75,6 @@ test("public helper types preserve their documented type relationships", () => {
     expect(jsonConfig).type.toBe<QualifiedToken<typeof tokens.config, typeof json>>();
     expect<TokenValue<typeof jsonConfig>>().type.toBe<Config>();
     expect(jsonConfigBinding.token).type.toBe<QualifiedToken<typeof tokens.config, typeof json>>();
-    expect(all(handlers)).type.toBe<AllToken<typeof handlers>>();
     expect(optional(tokens.config)).type.toBe<OptionalToken<typeof tokens.config>>();
     expect(token("unknown").of()).type.toBe<Token<"unknown", unknown>>();
     expect<Dependencies>().type.toBeAssignableTo<DependencyMap>();
@@ -107,7 +104,7 @@ test("public helper types preserve their documented type relationships", () => {
     }>();
     expect<
         ResolvedDependencies<{
-            readonly handlers: AllToken<typeof handlers>;
+            readonly handlers: typeof handlers;
         }>
     >().type.toBe<{
         readonly handlers: Array<(message: string) => number>;

@@ -132,18 +132,18 @@ The import token is the token a module asks for. The provider token is the expor
 ## Multibind Exports
 
 Exports apply to tokens. When a module exports a multibind token, all local bindings for that token are exported. A
-multibind token can also be exported without local bindings, which makes `resolveAll(...)` return an empty array until
+multibind token can also be exported without local bindings, which makes `resolve(...)` return an empty array until
 another module or override contributes bindings.
 
 Call shapes:
 
 ```ts
 defineModule({ exports: [multibindToken], bindings })
-all(multibindToken)
+container.resolve(multibindToken)
 ```
 
 ```ts
-import { all, multiToken } from "@satunnaisuus/distill";
+import { bind, defineModule, multiToken, token } from "@satunnaisuus/distill";
 
 type Hook = {
     readonly name: string;
@@ -156,7 +156,7 @@ const AppModule = defineModule({
     exports: [Hooks, Registry],
     bindings: [
         bind(Hooks).factory(() => ({ name: "public" })),
-        bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+        bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
             names: hooks.map((hook) => hook.name),
         })),
     ],

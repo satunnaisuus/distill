@@ -1,4 +1,4 @@
-import { all, bind, type Disposer, defineContainer, multiToken, ref, token } from "@satunnaisuus/distill";
+import { bind, type Disposer, defineContainer, ref, token } from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Handler, Logger } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -48,25 +48,6 @@ test("ref rejects direct union dependency values that include non-tokens", () =>
 
     expect(() => {
         ref(dependency);
-    }).type.toRaiseError();
-});
-
-test("all rejects lazy union dependency values that include non-multibind tokens", () => {
-    const handlers = multiToken("handlers").of<Handler>();
-    const condition = true as boolean;
-
-    expect(() => {
-        all(() => (condition ? handlers : "handlers"));
-    }).type.toRaiseError();
-});
-
-test("all rejects direct union dependency values that include non-multibind tokens", () => {
-    const handlers = multiToken("handlers").of<Handler>();
-    const condition = true as boolean;
-    const dependency = (condition ? handlers : "handlers") as typeof handlers | "handlers";
-
-    expect(() => {
-        all(dependency);
     }).type.toRaiseError();
 });
 

@@ -21,7 +21,6 @@ import { createTokenListContext } from "../src/token/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
-    readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
     readonly runScoped: (
         bindings: readonly unknown[],
@@ -278,9 +277,9 @@ describe("defineContainer", () => {
         );
         const emptyContainer = definition.create(overrideAll(Hooks, []));
 
-        expect(production.resolveAll(Hooks)).toEqual([{ name: "audit" }, { name: "metrics" }]);
-        expect(testContainer.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
-        expect(emptyContainer.resolveAll(Hooks)).toEqual([]);
+        expect(production.resolve(Hooks)).toEqual([{ name: "audit" }, { name: "metrics" }]);
+        expect(testContainer.resolve(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(emptyContainer.resolve(Hooks)).toEqual([]);
     });
 
     it("removes single bindings with unbind", () => {

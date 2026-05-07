@@ -4,7 +4,6 @@ import { bind, composeModules, defineContainer, defineModule, multiToken, option
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
     readonly resolveOptional: (token: unknown) => unknown;
-    readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
     readonly dispose: () => Promise<void>;
     readonly disposed: boolean;
@@ -120,7 +119,7 @@ describe("resolveOptional", () => {
         }>();
         const container = defineRuntimeContainer([Hooks]).create();
         expect(() => container.resolveOptional(Hooks)).toThrowError(
-            'Multibind token "Hooks" must be resolved with resolveAll',
+            'Multibind token "Hooks" cannot be used as a single-service token',
         );
     });
     it("throws after disposal even when the token has no binding", async () => {

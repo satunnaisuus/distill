@@ -1,6 +1,5 @@
 import type {
     AllDependencyToken,
-    AllToken,
     AnyOptionalToken,
     DependencyMap,
     DependencyToken,
@@ -11,7 +10,6 @@ import type {
     AnyComposedModuleDefinition,
     AnyModuleDefinition,
     AnyModuleImportWire,
-    AnyMultiToken,
     AnySingleToken,
     AnyToken,
     Binding,
@@ -100,7 +98,7 @@ type TokenByDependencyKey<TTokens extends AnyToken, TKey extends string> = TToke
         : never
     : never;
 
-type DependencyReferenceFromToken<TToken extends AnyToken> = TToken extends AnyMultiToken ? AllToken<TToken> : TToken;
+type DependencyReferenceFromToken<TToken extends AnyToken> = TToken;
 
 type StringTokenKeys<TTokens extends AnyToken> = Extract<TokenKey<TTokens>, string>;
 type NonStringKeyTokens<TTokens extends AnyToken> = TTokens extends AnyToken

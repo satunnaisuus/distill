@@ -15,7 +15,7 @@ npm install @satunnaisuus/distill
 - Lazy service creation with singleton, scoped, and transient lifetimes.
 - Child scopes for request-local overrides and per-scope service instances.
 - Modules with internal bindings, explicit token imports, inline provider exports, and explicit composition roots.
-- Multibind tokens for collecting multiple services with `resolveAll`.
+- Multibind tokens for collecting multiple services with `resolve`.
 - Async resource disposal for containers and scopes.
 - Explicit dependency maps instead of decorators, reflection, or global state.
 - Optional factory dependencies with `optional`.
@@ -61,11 +61,11 @@ const container = defineContainer(
     bind(Handlers).factory(() => ({ handle: (message) => console.log("metrics", message) })),
 ).create();
 
-const handlers = container.resolveAll(Handlers);
+const handlers = container.resolve(Handlers);
 //    ^? Handler[]
 ```
 
-Use `multiToken` for tokens that can have several bindings. Multibind tokens are resolved with `resolveAll`; regular `resolve` stays for single-service tokens.
+Use `multiToken` for tokens that can have several bindings. `resolve` returns a single value for regular tokens and an array for multibind tokens.
 
 ### Wire dependencies explicitly
 
@@ -155,12 +155,12 @@ Module `imports` are tokens, not other modules. A module binding can depend on l
 
 Every local binding whose token appears in the module `exports` array can satisfy another module's token import or a composition public export. Local bindings for other tokens stay private to their module. Exported `multiToken`s may have no local bindings; resolving them returns an empty array until another module contributes bindings or an override supplies them.
 
-Modules are visibility boundaries, not disposal scopes. Singleton, scoped, transient, `ref`, `optional`, `all`, `createScope`, overrides, and disposal keep the same lifetime behavior as regular containers.
+Modules are visibility boundaries, not disposal scopes. Singleton, scoped, transient, `ref`, `optional`, multibind dependencies, `createScope`, overrides, and disposal keep the same lifetime behavior as regular containers.
 
 ### Export multibind tokens
 
 ```ts
-import { all, bind, composeModules, defineModule, multiToken, token } from "@satunnaisuus/distill";
+import { bind, composeModules, defineModule, multiToken, token } from "@satunnaisuus/distill";
 
 type Hook = {
     readonly name: string;
@@ -173,7 +173,7 @@ const AppModule = defineModule({
     exports: [Hooks, Registry],
     bindings: [
         bind(Hooks).factory(() => ({ name: "public" })),
-        bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+        bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
             names: hooks.map((hook) => hook.name),
         })),
     ],
@@ -186,14 +186,14 @@ const App = composeModules({
 
 const app = App.createContainer();
 
-app.resolveAll(Hooks);
+app.resolve(Hooks);
 // [{ name: "public" }]
 
 app.resolve(Registry).names;
 // ["public"]
 ```
 
-Exports apply to concrete bindings, not whole tokens. This lets a module keep some multibind contributions private while exposing selected contributions to importers and public `resolveAll`.
+Exports apply to concrete bindings, not whole tokens. This lets a module keep some multibind contributions private while exposing selected contributions to importers and public `resolve`.
 
 ### Use provider helpers
 
@@ -488,8 +488,6 @@ bind(token).singleton()
 bind(token).scoped()
 bind(token).transient()
 bind(token).disposable(disposer)
-all(multibindToken)
-all(() => multibindToken)
 optional(dependency)
 optional(() => dependency)
 ref(token)
@@ -509,7 +507,6 @@ definition.create(overrideAll(multibindToken, bindings))
 definition.create(unbind(token))
 container.resolve(token)
 container.resolveOptional(token)
-container.resolveAll(multibindToken)
 container.createScope(...bindings)
 container.runScoped(bindings, callback)
 container.dispose()
@@ -545,7 +542,7 @@ Each token keeps its literal key and declared value type. Token keys can be stri
 
 ### `multiToken(key).of<T>()`
 
-Creates a token that can have several bindings and resolves to an array through `resolveAll` or `all`.
+Creates a token that can have several bindings and resolves to an array through `resolve`.
 
 ```ts
 import { multiToken } from "@satunnaisuus/distill";
@@ -623,7 +620,7 @@ Dependency map keys become properties on the factory parameter. Dependency value
 
 - tokens, which are resolved eagerly before the factory runs;
 - `ref(...)` dependencies, which pass a lazy `Ref<T>` object to the factory;
-- `all(...)` dependencies, which pass all visible contributions for a multibind token;
+- multibind token dependencies, which pass all visible contributions for that token;
 - `optional(...)` dependencies, which pass `undefined` when the wrapped dependency is not currently visible.
 
 The factory parameter is inferred from the dependency map:
@@ -635,7 +632,7 @@ bind(Server).factory({ config: Config }, ({ config }) => {
 });
 ```
 
-Dependency keys must be string keys, and dependency values must be defined tokens, refs, all-dependencies, or optional wrappers. Possibly `undefined` dependency map values are rejected by TypeScript; use `optional(...)` when absence is intentional.
+Dependency keys must be string keys, and dependency values must be defined tokens, refs, or optional wrappers. Possibly `undefined` dependency map values are rejected by TypeScript; use `optional(...)` when absence is intentional.
 
 Binding order does not matter:
 
@@ -647,17 +644,17 @@ const container = defineContainer(
 ).create();
 ```
 
-### `all(multibindToken)` and `all(() => multibindToken)`
+### Multibind dependencies
 
-Creates a dependency reference for every visible binding of a multibind token.
+Use a multibind token directly in a dependency map to inject every visible binding for that token.
 
 ```ts
-const registryBinding = bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+const registryBinding = bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
     names: hooks.map((hook) => hook.name),
 }));
 ```
 
-The factory parameter is inferred as `Array<TokenValue<typeof Hooks>>`. `all(() => token)` defers token selection until the dependent service is initialized.
+The factory parameter is inferred as `Array<TokenValue<typeof Hooks>>`.
 
 ### `optional(dependency)` and `optional(() => dependency)`
 
@@ -669,7 +666,7 @@ const serverBinding = bind(Server).factory({ config: optional(Config) }, ({ conf
 }));
 ```
 
-The wrapped dependency can be a regular token, `ref(...)`, or `all(...)`. The factory receives `undefined` when the dependency is not visible in the current container or scope. If the dependency is visible, its own graph is still validated and resolved normally.
+The wrapped dependency can be a regular token, a multibind token, or `ref(...)`. The factory receives `undefined` when the dependency is not visible in the current container or scope. If the dependency is visible, its own graph is still validated and resolved normally.
 
 ### Provider methods
 
@@ -916,9 +913,12 @@ Resolves a bound service.
 ```ts
 const config = container.resolve(Config);
 //    ^? { readonly port: number }
+
+const hooks = container.resolve(Hooks);
+//    ^? Hook[]
 ```
 
-Only tokens with bindings and currently visible dependencies can be resolved at compile time. The return type is inferred from the token.
+Regular tokens resolve to their service value. Multibind tokens resolve to an array in visible binding order, and a listed multibind token with no contributions resolves to `[]`. Only tokens with currently visible dependencies can be resolved at compile time. The return type is inferred from the token.
 
 Resolution is lazy. Singleton and scoped bindings are cached according to their lifetime, while transient bindings create a new value on every resolution:
 
@@ -942,17 +942,6 @@ const logger = container.resolveOptional(Logger);
 
 The token must still belong to the container token list or module public surface. If a binding exists, its dependencies and
 factory are resolved normally, so required dependency errors are not hidden.
-
-### `container.resolveAll(multibindToken)`
-
-Resolves every visible contribution for a multibind token.
-
-```ts
-const hooks = container.resolveAll(Hooks);
-//    ^? Hook[]
-```
-
-The returned array follows binding order within the visible container or module interface. Only multibind tokens with currently visible bindings can be resolved at compile time.
 
 ### `container.dispose()`
 
@@ -983,7 +972,6 @@ Distill also exports helper types for advanced typing:
 
 ```ts
 import type {
-    AllToken,
     AnyBindingOverride,
     Binding,
     BindingOverride,

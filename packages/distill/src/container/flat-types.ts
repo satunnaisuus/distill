@@ -39,22 +39,41 @@ type SingleTokensInTokenList<TTokenArray extends AnyTokenArray> = Extract<TToken
 
 type MultiTokensInTokenList<TTokenArray extends AnyTokenArray> = Extract<TTokenArray[number], AnyMultiToken>;
 
-type ResolvableTokenInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TToken extends AnyToken
+type ResolvedTokenValue<TToken extends AnyToken> = TToken extends AnyMultiToken
+    ? Array<TokenValue<TToken>>
+    : TokenValue<TToken>;
+
+type ResolvableSingleTokenInScopes<TScopes extends BindingScopes, TToken extends AnyToken> = TToken extends AnyToken
     ? IfNever<MissingDependencyKeysFromToken<TScopes, TToken>, TToken, never>
     : never;
 
-type ResolvableTokensInScopes<TScopes extends BindingScopes> = ResolvableTokenInScopes<
+type ResolvableSingleTokensInScopes<TScopes extends BindingScopes> = ResolvableSingleTokenInScopes<
     TScopes,
     VisibleTokensInScopes<TScopes>
 >;
 
+type ResolvableMultiTokenInScopes<
+    TScopes extends BindingScopes,
+    TToken extends AnyMultiToken,
+> = TToken extends AnyMultiToken
+    ? IfNever<MissingDependencyKeysFromAllTokenBindings<TScopes, TToken>, TToken, never>
+    : never;
+
+type ResolvableMultiTokensInScopes<
+    TScopes extends BindingScopes,
+    TTokenArray extends AnyTokenArray,
+> = ResolvableMultiTokenInScopes<TScopes, MultiTokensInTokenList<TTokenArray>>;
+
 type ResolveFn<
     TScopes extends BindingScopes,
-    TResolvableTokens extends AnyToken = ResolvableTokensInScopes<TScopes>,
+    TTokenArray extends AnyTokenArray,
+    TResolvableTokens extends AnyToken =
+        | ResolvableSingleTokensInScopes<TScopes>
+        | ResolvableMultiTokensInScopes<TScopes, TTokenArray>,
 > = IfNever<
     TResolvableTokens,
     (token: never) => never,
-    <TToken extends TResolvableTokens>(token: TToken) => TokenValue<TokenByKey<TToken, TResolvableTokens>>
+    <TToken extends TResolvableTokens>(token: TToken) => ResolvedTokenValue<TokenByKey<TToken, TResolvableTokens>>
 >;
 
 type ResolveOptionalTokenValidation<TScopes extends BindingScopes, TToken extends AnySingleToken> = IfNever<
@@ -73,28 +92,6 @@ type ResolveOptionalFn<
     <TToken extends TTokens>(
         token: TToken & ResolveOptionalTokenValidation<TScopes, TToken>,
     ) => TokenValue<TokenByKey<TToken, TTokens>> | undefined
->;
-
-type ResolvableMultiTokenInScopes<
-    TScopes extends BindingScopes,
-    TToken extends AnyMultiToken,
-> = TToken extends AnyMultiToken
-    ? IfNever<MissingDependencyKeysFromAllTokenBindings<TScopes, TToken>, TToken, never>
-    : never;
-
-type ResolvableMultiTokensInScopes<
-    TScopes extends BindingScopes,
-    TTokenArray extends AnyTokenArray,
-> = ResolvableMultiTokenInScopes<TScopes, MultiTokensInTokenList<TTokenArray>>;
-
-type ResolveAllFn<
-    TScopes extends BindingScopes,
-    TTokenArray extends AnyTokenArray,
-    TResolvableTokens extends AnyMultiToken = ResolvableMultiTokensInScopes<TScopes, TTokenArray>,
-> = IfNever<
-    TResolvableTokens,
-    (token: never) => never[],
-    <TToken extends TResolvableTokens>(token: TToken) => Array<TokenValue<TokenByKey<TToken, TResolvableTokens>>>
 >;
 
 type AppendBindingToLastScope<TScopes extends BindingScopes, TBinding extends AnyBinding> = TScopes extends readonly [
@@ -196,9 +193,8 @@ export type Container<
     TTokenArray extends AnyTokenArray = BindingTokenArray<TBindings>,
     TScopes extends BindingScopes = InferBindingScopes<TBindings>,
 > = {
-    resolve: ResolveFn<TScopes>;
+    resolve: ResolveFn<TScopes, TTokenArray>;
     resolveOptional: ResolveOptionalFn<TScopes, TTokenArray>;
-    resolveAll: ResolveAllFn<TScopes, TTokenArray>;
     createScope: CreateScopeFn<TBindings, TTokenArray, TScopes>;
     runScoped: RunScopedFn<TBindings, TTokenArray, TScopes>;
     dispose(): Promise<void>;

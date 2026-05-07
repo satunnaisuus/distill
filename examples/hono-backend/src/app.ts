@@ -20,8 +20,10 @@ export const AppModule = composeModules({
 export const createAppContainer = () => AppModule.createContainer();
 
 export type AppContainer = {
-    readonly resolve: (token: typeof AuthToken) => Auth;
-    readonly resolveAll: (token: typeof HttpSubRouterToken) => HttpSubRouter[];
+    readonly resolve: {
+        (token: typeof AuthToken): Auth;
+        (token: typeof HttpSubRouterToken): HttpSubRouter[];
+    };
     readonly runScoped: (...args: any[]) => Promise<unknown>;
 };
 
@@ -53,7 +55,7 @@ export const createApp = (container: AppContainer): Hono<HttpBindings> => {
         );
     });
 
-    for (const subRouter of container.resolveAll(HttpSubRouterToken)) {
+    for (const subRouter of container.resolve(HttpSubRouterToken)) {
         app.route(subRouter.path, subRouter.router);
     }
 

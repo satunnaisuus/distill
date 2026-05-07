@@ -36,27 +36,45 @@ type ModuleVisiblePublicBindings<
     TScopeBindings extends BindingScopes,
 > = BindingTokens<TPublicBindings | TScopeBindings[number]>;
 
-type ModuleResolvableTokenInScopes<
+type ResolvedModuleTokenValue<TToken extends AnyToken> = TToken extends AnyMultiToken
+    ? Array<TokenValue<TToken>>
+    : TokenValue<TToken>;
+
+type ModuleResolvableSingleTokenInScopes<
     TModuleScopes extends BindingScopes,
     TToken extends AnyToken,
 > = TToken extends AnyToken ? IfNever<MissingDependencyKeysFromToken<TModuleScopes, TToken>, TToken, never> : never;
+
+type ModulePublicMultiTokens<TPublicTokenArray extends AnyTokenArray, TScopeBindings extends BindingScopes> = Extract<
+    TPublicTokenArray[number] | BindingTokens<TScopeBindings[number]>,
+    AnyMultiToken
+>;
+
+type ModuleResolvableMultiTokenInScopes<
+    TModuleScopes extends BindingScopes,
+    TToken extends AnyMultiToken,
+> = TToken extends AnyMultiToken
+    ? IfNever<MissingDependencyKeysFromAllTokenBindings<TModuleScopes, TToken>, TToken, never>
+    : never;
 
 type ModuleResolveFn<
     TModuleScopes extends BindingScopes,
     TPublicTokenArray extends AnyTokenArray,
     TPublicBindings extends readonly AnyBinding[],
     TScopeBindings extends BindingScopes,
-    TResolvableTokens extends AnyToken = ModuleResolvableTokenInScopes<
-        TModuleScopes,
-        Extract<
-            TPublicTokenArray[number] | ModuleVisiblePublicBindings<TPublicBindings, TScopeBindings>,
-            AnySingleToken
-        >
-    >,
+    TResolvableTokens extends AnyToken =
+        | ModuleResolvableSingleTokenInScopes<
+              TModuleScopes,
+              Extract<
+                  TPublicTokenArray[number] | ModuleVisiblePublicBindings<TPublicBindings, TScopeBindings>,
+                  AnySingleToken
+              >
+          >
+        | ModuleResolvableMultiTokenInScopes<TModuleScopes, ModulePublicMultiTokens<TPublicTokenArray, TScopeBindings>>,
 > = IfNever<
     TResolvableTokens,
     (token: never) => never,
-    <TToken extends TResolvableTokens>(token: TToken) => TokenValue<TokenByKey<TToken, TResolvableTokens>>
+    <TToken extends TResolvableTokens>(token: TToken) => ResolvedModuleTokenValue<TokenByKey<TToken, TResolvableTokens>>
 >;
 
 type ModuleResolveOptionalTokenValidation<TModuleScopes extends BindingScopes, TToken extends AnySingleToken> = IfNever<
@@ -79,32 +97,6 @@ type ModuleResolveOptionalFn<
     <TToken extends TTokens>(
         token: TToken & ModuleResolveOptionalTokenValidation<TModuleScopes, TToken>,
     ) => TokenValue<TokenByKey<TToken, TTokens>> | undefined
->;
-
-type ModulePublicMultiTokens<TPublicTokenArray extends AnyTokenArray, TScopeBindings extends BindingScopes> = Extract<
-    TPublicTokenArray[number] | BindingTokens<TScopeBindings[number]>,
-    AnyMultiToken
->;
-
-type ModuleResolvableMultiTokenInScopes<
-    TModuleScopes extends BindingScopes,
-    TToken extends AnyMultiToken,
-> = TToken extends AnyMultiToken
-    ? IfNever<MissingDependencyKeysFromAllTokenBindings<TModuleScopes, TToken>, TToken, never>
-    : never;
-
-type ModuleResolveAllFn<
-    TModuleScopes extends BindingScopes,
-    TPublicTokenArray extends AnyTokenArray,
-    TScopeBindings extends BindingScopes,
-    TResolvableTokens extends AnyMultiToken = ModuleResolvableMultiTokenInScopes<
-        TModuleScopes,
-        ModulePublicMultiTokens<TPublicTokenArray, TScopeBindings>
-    >,
-> = IfNever<
-    TResolvableTokens,
-    (token: never) => never[],
-    <TToken extends TResolvableTokens>(token: TToken) => Array<TokenValue<TokenByKey<TToken, TResolvableTokens>>>
 >;
 
 type ModuleScopeCompatibilityTokens<
@@ -184,7 +176,6 @@ export type ModuleContainer<
 > = {
     resolve: ModuleResolveFn<TPublicScopes, TPublicTokenArray, TPublicBindings, TScopeBindings>;
     resolveOptional: ModuleResolveOptionalFn<TPublicScopes, TPublicBindings, TScopeBindings>;
-    resolveAll: ModuleResolveAllFn<TPublicScopes, TPublicTokenArray, TScopeBindings>;
     createScope: CreateModuleScopeFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;
     runScoped: RunModuleScopedFn<TComposition, TPublicBindings, TPublicTokenArray, TScopeBindings, TOverrides>;
     dispose(): Promise<void>;

@@ -1,5 +1,4 @@
 import {
-    all,
     bind,
     defineContainer,
     multiToken,
@@ -16,14 +15,13 @@ import type { Config, Handler, Logger, ServiceA, ServiceB } from "./fixtures/ser
 import { cycleTokenList, cycleTokens, tokenList, tokens } from "./fixtures/tokens.js";
 import { externalToken } from "./fixtures/unsafe-tokens.js";
 
-test("optional preserves direct, lazy, ref, and all dependency types", () => {
+test("optional preserves direct, lazy, ref, and multibind dependency types", () => {
     const handlers = multiToken("handlers").of<Handler>();
-    const allHandlers = all(handlers);
 
     expect(optional(tokens.config)).type.toBe<OptionalToken<typeof tokens.config>>();
     expect(optional(() => tokens.config)).type.toBe<OptionalToken<typeof tokens.config>>();
     expect(optional(ref(tokens.logger))).type.toBe<OptionalToken<RefToken<typeof tokens.logger>>>();
-    expect(optional(allHandlers)).type.toBe<OptionalToken<typeof allHandlers>>();
+    expect(optional(handlers)).type.toBe<OptionalToken<typeof handlers>>();
 });
 
 test("optional dependencies infer undefined factory parameters", () => {
@@ -31,7 +29,7 @@ test("optional dependencies infer undefined factory parameters", () => {
     const binding = bind(tokens.server).factory(
         {
             config: optional(tokens.config),
-            handlers: optional(all(handlers)),
+            handlers: optional(handlers),
             logger: optional(ref(tokens.logger)),
             port: tokens.port,
         },
@@ -48,12 +46,11 @@ test("optional dependencies infer undefined factory parameters", () => {
 
 test("ResolvedDependencies exposes optional dependency values as undefined unions", () => {
     const handlers = multiToken("handlers").of<Handler>();
-    const allHandlers = all(handlers);
 
     expect<
         ResolvedDependencies<{
             readonly config: OptionalToken<typeof tokens.config>;
-            readonly handlers: OptionalToken<typeof allHandlers>;
+            readonly handlers: OptionalToken<typeof handlers>;
             readonly logger: OptionalToken<RefToken<typeof tokens.logger>>;
         }>
     >().type.toBe<{
@@ -94,14 +91,14 @@ test("optional ref dependency tokens must still belong to the token list", () =>
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });
 
-test("optional all dependency tokens must still belong to the token list", () => {
+test("optional multibind dependency tokens must still belong to the token list", () => {
     const handlers = multiToken("handlers").of<Handler>();
     const registry = token("registry").of<{ readonly handlers: Handler[] | undefined }>();
 
     expect(() => {
         defineContainer(
             [registry],
-            bind(registry).factory({ handlers: optional(all(handlers)) }, ({ handlers }) => ({ handlers })),
+            bind(registry).factory({ handlers: optional(handlers) }, ({ handlers }) => ({ handlers })),
         ).create();
     }).type.toRaiseError("__dependencies_not_in_tokens__");
 });

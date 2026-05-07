@@ -39,16 +39,15 @@ separately.
 
 ## Resolution
 
-Use `resolve(token)` for required single tokens, `resolveOptional(token)` for listed single tokens whose binding may be
-absent, and `resolveAll(token)` for multibind tokens. Services are lazy: factory and class providers run only when a
-visible service is requested.
+Use `resolve(token)` for required tokens, including multibind tokens, and `resolveOptional(token)` for listed single
+tokens whose binding may be absent. Services are lazy: factory and class providers run only when a visible service is
+requested.
 
 Call shapes:
 
 ```ts
 container.resolve(token)
 container.resolveOptional(token)
-container.resolveAll(multibindToken)
 ```
 
 ```ts
@@ -57,14 +56,17 @@ const config = container.resolve(Config);
 
 const logger = container.resolveOptional(Logger);
 //    ^? Logger | undefined
+
+const hooks = container.resolve(Hooks);
+//    ^? Hook[]
 ```
 
 Distill validates dependency maps against the token list and checks the graph where TypeScript can see tuple types. A
 service is resolvable only when its eager dependencies are visible in the current container or scope.
 
 `resolveOptional(...)` returns `undefined` when no binding is visible for that token. If a binding exists, its dependencies
-and factory are still resolved normally, so missing required dependencies and factory errors are not hidden. Multibind
-tokens should continue to use `resolveAll(...)`; an empty contribution list resolves to `[]`.
+and factory are still resolved normally, so missing required dependencies and factory errors are not hidden. A listed
+multibind token with an empty contribution list resolves to `[]`.
 
 ## Scopes
 

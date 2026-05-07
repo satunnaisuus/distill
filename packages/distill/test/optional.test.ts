@@ -1,11 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import { isOptionalDependency } from "../src/dependency/optional";
 import { optionalDependencyBrand } from "../src/dependency/reference-brands";
-import { all, bind, defineContainer, multiToken, optional, ref, type Token, token } from "../src/index";
+import { bind, defineContainer, multiToken, optional, ref, type Token, token } from "../src/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
-    readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
     readonly dispose: () => Promise<void>;
     readonly disposed: boolean;
@@ -239,13 +238,13 @@ describe("optional dependencies", () => {
         expect(loggerFactory).toHaveBeenCalledTimes(1);
     });
 
-    it("injects undefined for an optional all dependency without registered contributions", () => {
+    it("injects undefined for an optional multibind dependency without registered contributions", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Registry).factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: optional(Hooks) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
         ).create();
@@ -253,7 +252,7 @@ describe("optional dependencies", () => {
         expect(container.resolve(Registry)).toEqual({ names: undefined });
     });
 
-    it("resolves an optional all dependency when contributions are registered", () => {
+    it("resolves an optional multibind dependency when contributions are registered", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
 
@@ -261,7 +260,7 @@ describe("optional dependencies", () => {
             [Hooks, Registry],
             bind(Hooks).factory(() => ({ name: "first" })),
             bind(Hooks).factory(() => ({ name: "second" })),
-            bind(Registry).factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: optional(Hooks) }, ({ hooks }) => ({
                 names: hooks?.map((hook) => hook.name),
             })),
         ).create();
@@ -269,7 +268,7 @@ describe("optional dependencies", () => {
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
     });
 
-    it("injects registered optional all dependencies into transient factories", () => {
+    it("injects registered optional multibind dependencies into transient factories", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] | undefined }>();
 
@@ -279,7 +278,7 @@ describe("optional dependencies", () => {
             bind(Hooks).factory(() => ({ name: "second" })),
             bind(Registry)
                 .transient()
-                .factory({ hooks: optional(all(Hooks)) }, ({ hooks }) => ({
+                .factory({ hooks: optional(Hooks) }, ({ hooks }) => ({
                     names: hooks?.map((hook) => hook.name),
                 })),
         ).create();

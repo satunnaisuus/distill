@@ -1,5 +1,4 @@
 import {
-    all,
     bind,
     defineContainer,
     multiToken,
@@ -196,11 +195,11 @@ test("overrideAll replaces all multibind contributions", () => {
         [handlers, registry],
         bind(handlers).factory(() => () => 1),
         bind(handlers).factory(() => () => 2),
-        bind(registry).factory({ handlers: all(handlers) }, ({ handlers }) => ({ handlers })),
+        bind(registry).factory({ handlers: handlers }, ({ handlers }) => ({ handlers })),
     );
     const container = definition.create(overrideAll(handlers, [bind(handlers).factory(() => () => 3)]));
 
-    expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
+    expect(container.resolve(handlers)).type.toBe<Handler[]>();
     expect(container.resolve(registry)).type.toBe<{ readonly handlers: Handler[] }>();
 });
 
@@ -213,7 +212,7 @@ test("overrideAll accepts empty multibind replacements", () => {
     );
     const container = definition.create(overrideAll(handlers, []));
 
-    expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
+    expect(container.resolve(handlers)).type.toBe<Handler[]>();
 });
 
 test("overrideAll can add bindings to an empty multibind token", () => {
@@ -221,7 +220,7 @@ test("overrideAll can add bindings to an empty multibind token", () => {
     const definition = defineContainer([handlers]);
     const container = definition.create(overrideAll(handlers, [bind(handlers).factory(() => () => 1)]));
 
-    expect(container.resolveAll(handlers)).type.toBe<Handler[]>();
+    expect(container.resolve(handlers)).type.toBe<Handler[]>();
 });
 
 test("overrideAll rejects tokens outside the token list", () => {

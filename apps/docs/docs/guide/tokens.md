@@ -58,7 +58,7 @@ Call shapes:
 
 ```ts
 multiToken(key).of<T>()
-container.resolveAll(multibindToken)
+container.resolve(multibindToken)
 ```
 
 ```ts
@@ -76,12 +76,12 @@ const container = defineContainer(
     bind(Hooks).factory(() => ({ run: () => console.log("metrics") })),
 ).create();
 
-const hooks = container.resolveAll(Hooks);
+const hooks = container.resolve(Hooks);
 //    ^? Hook[]
 ```
 
-Regular tokens resolve with `resolve(token)`. Multibind tokens resolve with `resolveAll(token)` and return all visible
-contributions in registration order.
+Regular tokens resolve with `resolve(token)` to one service value. Multibind tokens also use `resolve(token)` and return
+all visible contributions in registration order.
 
 ## Qualified Tokens
 
@@ -119,9 +119,9 @@ const logger = container.resolve(JsonLogger);
 //    ^? Logger
 ```
 
-Qualified tokens keep the value type of the base token. They are still single tokens, so they use `resolve(...)`, not
-`resolveAll(...)`. Use the qualified token value anywhere you would use a regular single token: token lists, bindings,
-dependency maps, overrides, and `resolve(...)`.
+Qualified tokens keep the value type of the base token. They are still single tokens, so they use `resolve(...)`. Use the
+qualified token value anywhere you would use a regular single token: token lists, bindings, dependency maps, overrides,
+and `resolve(...)`.
 
 ## Token Lists
 

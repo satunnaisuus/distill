@@ -1,10 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { all, bind, defineContainer, multiToken, token } from "../src/index";
+import { bind, defineContainer, multiToken, token } from "../src/index";
 import { tokenKey } from "../src/token/index";
 
 type RuntimeContainerForTest = {
     readonly resolve: (token: unknown) => unknown;
-    readonly resolveAll: (token: unknown) => unknown[];
     readonly createScope: (...bindings: readonly unknown[]) => RuntimeContainerForTest;
     readonly dispose: () => Promise<void>;
     readonly disposed: boolean;
@@ -39,7 +38,7 @@ describe("multiToken", () => {
     });
 });
 
-describe("resolveAll", () => {
+describe("resolve multibind tokens", () => {
     it("resolves all bindings for a multibind token in registration order", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
@@ -49,14 +48,14 @@ describe("resolveAll", () => {
             bind(Hooks).factory(() => ({ name: "second" })),
         ).create();
 
-        expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(container.resolve(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
     });
 
     it("returns an empty array when a multibind token has no bindings", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const container = defineContainer([Hooks]).create();
 
-        expect(container.resolveAll(Hooks)).toEqual([]);
+        expect(container.resolve(Hooks)).toEqual([]);
     });
 
     it("caches singleton multibind contributions independently", () => {
@@ -72,13 +71,13 @@ describe("resolveAll", () => {
             bind(Hooks).factory(secondFactory),
         ).create();
 
-        expect(container.resolveAll(Hooks)).toEqual([first, second]);
-        expect(container.resolveAll(Hooks)).toEqual([first, second]);
+        expect(container.resolve(Hooks)).toEqual([first, second]);
+        expect(container.resolve(Hooks)).toEqual([first, second]);
         expect(firstFactory).toHaveBeenCalledTimes(1);
         expect(secondFactory).toHaveBeenCalledTimes(1);
     });
 
-    it("creates transient multibind contributions for every resolveAll call", () => {
+    it("creates transient multibind contributions for every resolve call", () => {
         const Hooks = multiToken("Hooks").of<{ readonly id: number }>();
         let nextId = 1;
 
@@ -92,8 +91,8 @@ describe("resolveAll", () => {
                 .factory(() => ({ id: nextId++ })),
         ).create();
 
-        expect(container.resolveAll(Hooks)).toEqual([{ id: 1 }, { id: 2 }]);
-        expect(container.resolveAll(Hooks)).toEqual([{ id: 3 }, { id: 4 }]);
+        expect(container.resolve(Hooks)).toEqual([{ id: 1 }, { id: 2 }]);
+        expect(container.resolve(Hooks)).toEqual([{ id: 3 }, { id: 4 }]);
     });
 
     it("collects parent and child multibind contributions", () => {
@@ -105,8 +104,8 @@ describe("resolveAll", () => {
         ).create();
         const request = app.createScope(bind(Hooks).factory(() => ({ name: "request" })));
 
-        expect(app.resolveAll(Hooks)).toEqual([{ name: "root" }]);
-        expect(request.resolveAll(Hooks)).toEqual([{ name: "root" }, { name: "request" }]);
+        expect(app.resolve(Hooks)).toEqual([{ name: "root" }]);
+        expect(request.resolve(Hooks)).toEqual([{ name: "root" }, { name: "request" }]);
     });
 
     it("caches scoped multibind contributions in the resolution scope", () => {
@@ -122,13 +121,13 @@ describe("resolveAll", () => {
         const firstScope = app.createScope();
         const secondScope = app.createScope();
 
-        const rootHooks = app.resolveAll(Hooks);
-        const firstHooks = firstScope.resolveAll(Hooks);
-        const secondHooks = secondScope.resolveAll(Hooks);
+        const rootHooks = app.resolve(Hooks);
+        const firstHooks = firstScope.resolve(Hooks);
+        const secondHooks = secondScope.resolve(Hooks);
 
-        expect(app.resolveAll(Hooks)).toEqual(rootHooks);
-        expect(firstScope.resolveAll(Hooks)).toEqual(firstHooks);
-        expect(secondScope.resolveAll(Hooks)).toEqual(secondHooks);
+        expect(app.resolve(Hooks)).toEqual(rootHooks);
+        expect(firstScope.resolve(Hooks)).toEqual(firstHooks);
+        expect(secondScope.resolve(Hooks)).toEqual(secondHooks);
         expect(rootHooks).toEqual([{ id: 1 }]);
         expect(firstHooks).toEqual([{ id: 2 }]);
         expect(secondHooks).toEqual([{ id: 3 }]);
@@ -148,21 +147,11 @@ describe("resolveAll", () => {
                 .disposable(() => events.push("second")),
         ).create();
 
-        expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(container.resolve(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
 
         await container.dispose();
 
         expect(events).toEqual(["second", "first"]);
-    });
-
-    it("throws when resolve is used for a multibind token", () => {
-        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
-        const container = createRuntimeContainer(
-            [Hooks],
-            bind(Hooks).factory(() => ({ name: "hook" })),
-        );
-
-        expect(() => container.resolve(Hooks)).toThrowError('Multibind token "Hooks" must be resolved with resolveAll');
     });
 
     it("rejects regular tokens with the same key as listed multibind tokens at runtime", () => {
@@ -173,7 +162,7 @@ describe("resolveAll", () => {
             bind(Hooks).factory(() => ({ name: "hook" })),
         );
 
-        expect(() => container.resolveAll(Hook)).toThrowError('Token "Hook" is not included in the token list');
+        expect(() => container.resolve(Hook)).toThrowError('Token "Hook" is not included in the token list');
     });
 
     it("rejects multibind tokens with the same key as listed regular tokens at runtime", () => {
@@ -186,19 +175,9 @@ describe("resolveAll", () => {
 
         expect(() => container.resolve(Hooks)).toThrowError('Token "Hook" is not included in the token list');
     });
-
-    it("throws when resolveAll is used for a regular token", () => {
-        const Config = token("Config").of<{ readonly port: number }>();
-        const container = createRuntimeContainer(
-            [Config],
-            bind(Config).factory(() => ({ port: 3000 })),
-        );
-
-        expect(() => container.resolveAll(Config)).toThrowError('Token "Config" is not a multibind token');
-    });
 });
 
-describe("all dependencies", () => {
+describe("multibind dependencies", () => {
     it("injects all multibind values into a dependency factory in registration order", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
@@ -210,7 +189,7 @@ describe("all dependencies", () => {
             [Hooks, Registry],
             bind(Hooks).factory(() => ({ name: "first" })),
             bind(Hooks).factory(() => ({ name: "second" })),
-            bind(Registry).factory({ hooks: all(Hooks) }, factory),
+            bind(Registry).factory({ hooks: Hooks }, factory),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
@@ -224,13 +203,13 @@ describe("all dependencies", () => {
 
         const container = defineContainer(
             [Hooks, Registry],
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({ count: hooks.length })),
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({ count: hooks.length })),
         ).create();
 
         expect(container.resolve(Registry)).toEqual({ count: 0 });
     });
 
-    it("resolves all dependencies from the active resolution scope", () => {
+    it("resolves multibind dependencies from the active resolution scope", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
@@ -239,7 +218,7 @@ describe("all dependencies", () => {
             bind(Hooks).factory(() => ({ name: "root" })),
             bind(Registry)
                 .scoped()
-                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                .factory({ hooks: Hooks }, ({ hooks }) => ({
                     names: hooks.map((hook) => hook.name),
                 })),
         ).create();
@@ -249,7 +228,7 @@ describe("all dependencies", () => {
         expect(request.resolve(Registry)).toEqual({ names: ["root", "request"] });
     });
 
-    it("resolves all dependencies before calling the dependent factory", () => {
+    it("resolves multibind dependencies before calling the dependent factory", () => {
         const calls: string[] = [];
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
@@ -264,7 +243,7 @@ describe("all dependencies", () => {
                 calls.push("second");
                 return { name: "second" };
             }),
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => {
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => {
                 calls.push("registry");
                 return { names: hooks.map((hook) => hook.name) };
             }),
@@ -274,7 +253,7 @@ describe("all dependencies", () => {
         expect(calls).toEqual(["first", "second", "registry"]);
     });
 
-    it("injects all dependencies into transient factories", () => {
+    it("injects multibind dependencies into transient factories", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
 
@@ -284,7 +263,7 @@ describe("all dependencies", () => {
             bind(Hooks).factory(() => ({ name: "second" })),
             bind(Registry)
                 .transient()
-                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                .factory({ hooks: Hooks }, ({ hooks }) => ({
                     names: hooks.map((hook) => hook.name),
                 })),
         ).create();
@@ -292,7 +271,7 @@ describe("all dependencies", () => {
         expect(container.resolve(Registry)).toEqual({ names: ["first", "second"] });
     });
 
-    it("tracks all-injected dependencies for disposal ordering", async () => {
+    it("tracks multibind dependencies for disposal ordering", async () => {
         const events: string[] = [];
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly hooks: readonly { readonly name: string }[] }>();
@@ -306,7 +285,7 @@ describe("all dependencies", () => {
                 .factory(() => ({ name: "second" }))
                 .disposable(() => events.push("second")),
             bind(Registry)
-                .factory({ hooks: all(Hooks) }, ({ hooks }) => ({ hooks }))
+                .factory({ hooks: Hooks }, ({ hooks }) => ({ hooks }))
                 .disposable(() => events.push("registry")),
         ).create();
 
@@ -317,40 +296,14 @@ describe("all dependencies", () => {
         expect(events).toEqual(["registry", "second", "first"]);
     });
 
-    it("throws when all is used with a regular token at runtime", () => {
-        const Config = token("Config").of<{ readonly port: number }>();
-        const Server = token("Server").of<{ readonly port: number }>();
-        const allUnsafe = all as unknown as (dependency: unknown) => unknown;
-
-        expect(() =>
-            createRuntimeContainer(
-                [Config, Server],
-                bind(Config).factory(() => ({ port: 3000 })),
-                bind(Server).factory({ configs: allUnsafe(Config) as never }, () => ({ port: 3000 })),
-            ),
-        ).toThrowError('Token "Config" is not a multibind token');
-    });
-
-    it("throws when a multibind token is used as a direct dependency without all", () => {
-        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
-        const Registry = token("Registry").of<{ readonly names: readonly string[] }>();
-
-        expect(() =>
-            createRuntimeContainer(
-                [Hooks, Registry],
-                bind(Registry).factory({ hooks: Hooks as never }, () => ({ names: [] })),
-            ),
-        ).toThrowError('Multibind token "Hooks" must be resolved with resolveAll');
-    });
-
-    it("detects eager circular dependencies through all", () => {
+    it("detects eager circular dependencies through multibind dependencies", () => {
         const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
         const Registry = token("Registry").of<{ readonly hooks: readonly { readonly name: string }[] }>();
 
         expect(() =>
             createRuntimeContainer(
                 [Hooks, Registry],
-                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({ hooks })),
+                bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({ hooks })),
                 bind(Hooks).factory({ registry: Registry }, () => ({ name: "hook" })),
             ),
         ).toThrowError("Circular dependency detected while registering services: Registry -> Hooks -> Registry");

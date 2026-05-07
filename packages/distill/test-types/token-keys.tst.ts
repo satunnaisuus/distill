@@ -1,5 +1,4 @@
 import {
-    all,
     bind,
     composeModules,
     defineContainer,
@@ -87,8 +86,6 @@ test("symbol and class multibind tokens preserve key identity", () => {
     expect(ClassHooks).type.toBe<MultiToken<typeof Hook, Hook>>();
     expect<TokenKey<typeof SymbolHooks>>().type.toBe<typeof hookKey>();
     expect<TokenKey<typeof ClassHooks>>().type.toBe<typeof Hook>();
-    expect(all(SymbolHooks).resolveToken()).type.toBe<typeof SymbolHooks>();
-    expect(all(ClassHooks).resolveToken()).type.toBe<typeof ClassHooks>();
 });
 test("qualified class tokens preserve the base token value type", () => {
     class Logger {

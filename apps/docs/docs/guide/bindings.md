@@ -28,7 +28,7 @@ const serverBinding = bind(Server).factory({ config: Config, logger: Logger }, (
 }));
 ```
 
-Dependency map values can be tokens, `optional(...)`, `ref(...)`, or `all(...)`.
+Dependency map values can be tokens, `optional(...)`, or `ref(...)`.
 
 ## Value, Class, and Alias Providers
 
@@ -171,39 +171,30 @@ const selectedLogger = ref(() => (useJson ? JsonLogger : TextLogger));
 
 ## Multibind Dependencies
 
-Use `multiToken(...)` for a token with multiple contributions and `all(...)` to inject all visible contributions.
+Use `multiToken(...)` for a token with multiple contributions. In dependency maps, use the multibind token directly to
+inject all visible contributions.
 
 Call shapes:
 
 ```ts
 multiToken(key).of<T>()
-all(multibindToken)
-all(() => multibindToken)
-container.resolveAll(multibindToken)
+container.resolve(multibindToken)
 ```
 
 ```ts
-import { all, multiToken } from "@satunnaisuus/distill";
+import { bind, multiToken } from "@satunnaisuus/distill";
 
 const Hooks = multiToken("Hooks").of<{ readonly run: () => void }>();
 
-const registryBinding = bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+const registryBinding = bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
     run: () => hooks.forEach((hook) => hook.run()),
 }));
 ```
 
-Resolve multibind tokens with `resolveAll(...)`.
+Resolve multibind tokens with `resolve(...)`.
 
 ```ts
-const hooks = container.resolveAll(Hooks);
-```
-
-Use `all(() => token)` when the multibind token should be selected lazily.
-
-```ts
-const deferredRegistryBinding = bind(Registry).factory({ hooks: all(() => Hooks) }, ({ hooks }) => ({
-    run: () => hooks.forEach((hook) => hook.run()),
-}));
+const hooks = container.resolve(Hooks);
 ```
 
 ## Disposal

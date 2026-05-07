@@ -466,7 +466,7 @@ export const isMultiToken = (currentToken: AnyToken): boolean => {
 
 export const assertSingleTokenKey = (currentTokenKey: string, currentToken: AnyToken): void => {
     if (isMultiToken(currentToken)) {
-        throw new Error(`Multibind token "${currentTokenKey}" must be resolved with resolveAll`);
+        throw new Error(`Multibind token "${currentTokenKey}" cannot be used as a single-service token`);
     }
 };
 

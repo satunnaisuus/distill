@@ -235,7 +235,7 @@ test("alias providers can contribute existing single tokens to multibind tokens"
         bind(Handlers).alias(ExistingHandler),
     ).create();
 
-    expect(container.resolveAll(Handlers)).type.toBe<Handler[]>();
+    expect(container.resolve(Handlers)).type.toBe<Handler[]>();
 
     expect(() => {
         bind(tokens.handler).alias(Handlers);

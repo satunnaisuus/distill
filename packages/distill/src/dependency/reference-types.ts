@@ -1,16 +1,8 @@
-import type { AnyMultiToken, AnySingleToken, TokenValue } from "../token/index";
+import type { AnyMultiToken, AnySingleToken, AnyToken, TokenValue } from "../token/index";
 import type { Ref } from "./ref-types";
-import type { allDependencyBrand, optionalDependencyBrand, refDependencyBrand } from "./reference-brands";
+import type { optionalDependencyBrand, refDependencyBrand } from "./reference-brands";
 
 export type { Ref };
-
-export type AllToken<TToken extends AnyMultiToken> = {
-    readonly [key in typeof allDependencyBrand]: true;
-} & {
-    readonly resolveToken: () => TToken;
-};
-
-export type AnyAllToken = AllToken<AnyMultiToken>;
 
 export type RefToken<TToken extends AnySingleToken> = {
     readonly [key in typeof refDependencyBrand]: true;
@@ -19,7 +11,7 @@ export type RefToken<TToken extends AnySingleToken> = {
 };
 
 export type AnyRefToken = RefToken<AnySingleToken>;
-export type OptionalDependencyReference = AnySingleToken | AnyRefToken | AnyAllToken;
+export type OptionalDependencyReference = AnySingleToken | AnyMultiToken | AnyRefToken;
 
 export type OptionalToken<TDependency extends OptionalDependencyReference> = {
     readonly [key in typeof optionalDependencyBrand]: true;
@@ -28,15 +20,13 @@ export type OptionalToken<TDependency extends OptionalDependencyReference> = {
 };
 
 export type AnyOptionalToken = OptionalToken<OptionalDependencyReference>;
-export type DependencyReference = AnySingleToken | AnyRefToken | AnyAllToken | AnyOptionalToken;
+export type DependencyReference = AnySingleToken | AnyMultiToken | AnyRefToken | AnyOptionalToken;
 export type DependencyToken<TDependency extends DependencyReference> =
     TDependency extends OptionalToken<infer TOptionalDependency>
         ? DependencyToken<TOptionalDependency>
         : TDependency extends RefToken<infer TToken>
           ? TToken
-          : TDependency extends AllToken<infer TToken>
-            ? TToken
-            : TDependency;
+          : TDependency;
 export type SingleDependencyToken<TDependency extends DependencyReference> = Extract<
     DependencyToken<TDependency>,
     AnySingleToken
@@ -44,8 +34,8 @@ export type SingleDependencyToken<TDependency extends DependencyReference> = Ext
 export type AllDependencyToken<TDependency extends DependencyReference> =
     TDependency extends OptionalToken<infer TOptionalDependency>
         ? AllDependencyToken<TOptionalDependency>
-        : TDependency extends AllToken<infer TToken>
-          ? TToken
+        : TDependency extends AnyMultiToken
+          ? TDependency
           : never;
 export type EagerDependencyToken<TDependency extends DependencyReference> =
     TDependency extends OptionalToken<infer TOptionalDependency>
@@ -72,9 +62,11 @@ type ResolvedDependency<TDependency extends DependencyReference> =
         ? ResolvedDependency<TOptionalDependency> | undefined
         : TDependency extends RefToken<infer TToken>
           ? Ref<TokenValue<TToken>>
-          : TDependency extends AllToken<infer TToken>
-            ? Array<TokenValue<TToken>>
-            : TokenValue<DependencyToken<TDependency>>;
+          : TDependency extends AnyMultiToken
+            ? Array<TokenValue<TDependency>>
+            : TDependency extends AnyToken
+              ? TokenValue<TDependency>
+              : never;
 
 export type ResolvedDependencies<TDependencies extends DependencyMap> = {
     [TKey in keyof TDependencies]: ResolvedDependency<TDependencies[TKey]>;

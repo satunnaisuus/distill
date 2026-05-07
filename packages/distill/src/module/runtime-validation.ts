@@ -1,5 +1,5 @@
 import { type AnyBinding, getBindingDependencies, isBinding } from "../binding/index";
-import { type DependencyReference, isAllDependency, isOptionalDependency } from "../dependency/index";
+import { type DependencyReference, isOptionalDependency } from "../dependency/index";
 import {
     type AnySingleToken,
     type AnyToken,
@@ -180,8 +180,8 @@ const resolveAllDependencyToken = (dependency: DependencyReference): AnyToken | 
         return resolveAllDependencyToken(dependency.resolveDependency());
     }
 
-    if (isAllDependency(dependency)) {
-        return dependency.resolveToken();
+    if (isMultiToken(dependency as AnyToken)) {
+        return dependency as AnyToken;
     }
 
     return undefined;

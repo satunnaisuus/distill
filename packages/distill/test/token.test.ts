@@ -250,7 +250,7 @@ describe("symbol and class token keys", () => {
 
         expect(tokenKey(Hooks)).toBe(hookKey);
         expect(tokenKey(JsonLogger)).toBe("Logger:json");
-        expect(container.resolveAll(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(container.resolve(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
         expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
     });
 

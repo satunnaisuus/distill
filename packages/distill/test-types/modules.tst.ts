@@ -1,5 +1,4 @@
 import {
-    all,
     bind,
     composeModules,
     defineModule,
@@ -62,7 +61,7 @@ test("omitted composition exports expose all exported bindings", () => {
     expect(app.resolve(Public)).type.toBe<{
         readonly value: string;
     }>();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -217,7 +216,7 @@ test("composeModules rejects incompatible same-key exported multibind providers"
     const RegistryModule = defineModule({
         exports: [Registry],
         imports: [StringHooks],
-        bindings: [bind(Registry).factory({ hooks: all(StringHooks) }, ({ hooks }) => ({ names: hooks }))],
+        bindings: [bind(Registry).factory({ hooks: StringHooks }, ({ hooks }) => ({ names: hooks }))],
     });
     expect(() => {
         composeModules({
@@ -422,7 +421,7 @@ test("multibind imports aggregate exported contributions and owner-local contrib
         imports: [Hooks],
         bindings: [
             bind(Hooks).factory(() => ({ name: "local-private" })),
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ],
@@ -435,7 +434,7 @@ test("multibind imports aggregate exported contributions and owner-local contrib
     expect(app.resolve(Registry)).type.toBe<{
         readonly names: readonly string[];
     }>();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -456,7 +455,7 @@ test("non-imported private multibind contributions stay isolated from exported p
         exports: [Registry],
         bindings: [
             bind(Hooks).factory(() => ({ name: "local-private" })),
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ],
@@ -466,7 +465,7 @@ test("non-imported private multibind contributions stay isolated from exported p
         exports: [Hooks, Registry],
     });
     const app = App.createContainer();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -486,7 +485,7 @@ test("unexported multibind tokens stay off the module public surface", () => {
         exports: [Registry],
         bindings: [
             bind(InternalHooks).factory(() => ({ name: "internal" })),
-            bind(Registry).factory({ hooks: all(InternalHooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: InternalHooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ],
@@ -499,7 +498,7 @@ test("unexported multibind tokens stay off the module public surface", () => {
         readonly names: readonly string[];
     }>();
     expect(() => {
-        app.resolveAll(InternalHooks);
+        app.resolve(InternalHooks);
     }).type.toRaiseError();
 });
 test("module bindings reject undeclared multibind dependencies", () => {
@@ -513,7 +512,7 @@ test("module bindings reject undeclared multibind dependencies", () => {
         defineModule({
             exports: [Registry],
             bindings: [
-                bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+                bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
                     names: hooks.map((hook) => hook.name),
                 })),
             ],
@@ -530,7 +529,7 @@ test("exported multibind declarations are visible to module bindings", () => {
     const RegistryModule = defineModule({
         exports: [Hooks, Registry],
         bindings: [
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ],
@@ -543,7 +542,7 @@ test("exported multibind declarations are visible to module bindings", () => {
     expect(app.resolve(Registry)).type.toBe<{
         readonly names: readonly string[];
     }>();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -568,7 +567,7 @@ test("private module bindings receive imported and owner-local multibind contrib
         imports: [Hooks],
         bindings: [
             bind(Hooks).factory(() => ({ name: "local-private" })),
-            bind(Snapshot).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Snapshot).factory({ hooks: Hooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
             bind(Registry).factory({ snapshot: Snapshot }, ({ snapshot }) => snapshot),
@@ -586,7 +585,7 @@ test("private module bindings receive imported and owner-local multibind contrib
     expect(app.resolve(Registry)).type.toBe<{
         readonly names: readonly string[];
     }>();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -613,7 +612,7 @@ test("multibind imports can be re-exported without local contributions", () => {
         exports: [Hooks],
     });
     const app = App.createContainer();
-    expect(app.resolveAll(Hooks)).type.toBe<
+    expect(app.resolve(Hooks)).type.toBe<
         Array<{
             readonly name: string;
         }>
@@ -630,7 +629,7 @@ test("composeModules allows exported multibind tokens without contributions", ()
         exports: [Registry],
         imports: [Hooks],
         bindings: [
-            bind(Registry).factory({ hooks: all(Hooks) }, ({ hooks }) => ({
+            bind(Registry).factory({ hooks: Hooks }, ({ hooks }) => ({
                 names: hooks.map((hook) => hook.name),
             })),
         ],
@@ -651,7 +650,7 @@ test("composeModules allows exported multibind tokens without contributions", ()
     });
     const app = App.createContainer();
     expect(app.resolve(Registry)).type.toBe<{ readonly names: readonly string[] }>();
-    expect(app.resolveAll(Hooks)).type.toBe<Array<{ readonly name: string }>>();
+    expect(app.resolve(Hooks)).type.toBe<Array<{ readonly name: string }>>();
 });
 test("module overrides are limited to composition exports", () => {
     const Config = token("Config").of<{
