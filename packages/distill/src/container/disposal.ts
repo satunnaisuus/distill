@@ -14,9 +14,6 @@ type Deferred<TValue> = {
     readonly reject: (reason: unknown) => void;
 };
 
-const activeDisposerScopes: RuntimeScope[] = [];
-const runningDisposerScopes: RuntimeScope[] = [];
-
 const createDeferred = <TValue>(): Deferred<TValue> => {
     let resolveDeferred!: (value: TValue | PromiseLike<TValue>) => void;
     let rejectDeferred!: (reason: unknown) => void;
@@ -30,51 +27,6 @@ const createDeferred = <TValue>(): Deferred<TValue> => {
         resolve: resolveDeferred,
         reject: rejectDeferred,
     };
-};
-
-const isScopeOrAncestorOf = (scope: RuntimeScope, childScope: RuntimeScope): boolean => {
-    let currentScope: RuntimeScope | undefined = childScope;
-
-    while (currentScope) {
-        if (currentScope === scope) {
-            return true;
-        }
-
-        currentScope = currentScope.parent;
-    }
-
-    return false;
-};
-
-const isReentrantDisposeFromActiveDisposer = (scope: RuntimeScope): boolean => {
-    if (runningDisposerScopes.length > 0) {
-        return runningDisposerScopes.some((activeScope) => isScopeOrAncestorOf(scope, activeScope));
-    }
-
-    return activeDisposerScopes.some((activeScope) => isScopeOrAncestorOf(scope, activeScope));
-};
-
-const withRunningDisposerScope = <TValue>(scope: RuntimeScope, callback: () => TValue): TValue => {
-    runningDisposerScopes.push(scope);
-
-    try {
-        return callback();
-    } finally {
-        runningDisposerScopes.pop();
-    }
-};
-
-const withActiveDisposerScope = async <TValue>(
-    scope: RuntimeScope,
-    callback: () => TValue | Promise<TValue>,
-): Promise<TValue> => {
-    activeDisposerScopes.push(scope);
-
-    try {
-        return await callback();
-    } finally {
-        activeDisposerScopes.pop();
-    }
 };
 
 const collectDisposeError = (errors: unknown[], error: unknown): void => {
@@ -187,12 +139,12 @@ const createDependentInstanceMap = (scope: RuntimeScope): Map<RuntimeOwnedInstan
     return dependentInstanceMap;
 };
 
-const runOwnedInstanceDisposer = (scope: RuntimeScope, ownedInstance: RuntimeOwnedInstance): void | Promise<void> => {
-    return withRunningDisposerScope(scope, () => ownedInstance.dispose(ownedInstance.value));
+const runOwnedInstanceDisposer = (ownedInstance: RuntimeOwnedInstance): void | Promise<void> => {
+    return ownedInstance.dispose(ownedInstance.value);
 };
 
-const disposeOwnedInstanceActual = async (scope: RuntimeScope, ownedInstance: RuntimeOwnedInstance): Promise<void> => {
-    await withActiveDisposerScope(scope, () => runOwnedInstanceDisposer(scope, ownedInstance));
+const disposeOwnedInstanceActual = async (ownedInstance: RuntimeOwnedInstance): Promise<void> => {
+    await runOwnedInstanceDisposer(ownedInstance);
 };
 
 const disposeOwnedInstances = async (scope: RuntimeScope, errors: unknown[]): Promise<void> => {
@@ -221,7 +173,7 @@ const disposeOwnedInstances = async (scope: RuntimeScope, errors: unknown[]): Pr
         disposedInstances.add(ownedInstance);
 
         try {
-            await disposeOwnedInstanceActual(scope, ownedInstance);
+            await disposeOwnedInstanceActual(ownedInstance);
         } catch (error) {
             collectDisposeError(errors, error);
         }
@@ -274,10 +226,6 @@ const disposeScopeActual = async (scope: RuntimeScope): Promise<void> => {
 
 export const disposeScope = (scope: RuntimeScope): Promise<void> => {
     if (scope.disposePromise) {
-        if (isReentrantDisposeFromActiveDisposer(scope)) {
-            return Promise.resolve();
-        }
-
         return scope.disposePromise;
     }
 

@@ -2329,7 +2329,7 @@ describe("defineContainer", () => {
         expect(childScope.disposed).toBe(true);
     });
 
-    it("resolves repeated dispose calls as no-ops while a disposer is active", async () => {
+    it("returns the in-flight dispose promise for repeated external dispose calls", async () => {
         const disposeStarted = vi.fn();
         const disposeFinished = vi.fn();
         const disposeDeferred = createDeferred();
@@ -2351,16 +2351,23 @@ describe("defineContainer", () => {
 
         const firstDispose = container.dispose();
         const secondDispose = container.dispose();
+        let secondDisposeSettled = false;
 
-        expect(secondDispose).not.toBe(firstDispose);
+        void secondDispose.then(() => {
+            secondDisposeSettled = true;
+        });
+
+        expect(secondDispose).toBe(firstDispose);
         expect(disposeStarted).toHaveBeenCalledTimes(1);
         expect(disposeFinished).not.toHaveBeenCalled();
 
-        await expect(secondDispose).resolves.toBeUndefined();
+        await Promise.resolve();
+        expect(secondDisposeSettled).toBe(false);
 
         disposeDeferred.resolve();
 
         await expect(firstDispose).resolves.toBeUndefined();
+        expect(secondDisposeSettled).toBe(true);
         expect(disposeFinished).toHaveBeenCalledTimes(1);
     });
 
@@ -2391,215 +2398,6 @@ describe("defineContainer", () => {
 
         await expect(firstDisposePromise as Promise<void>).resolves.toBeUndefined();
         expect(events).toEqual(["factory", "service"]);
-    });
-
-    it("resolves synchronous reentrant dispose calls as no-ops", async () => {
-        let reentrantDisposePromise: Promise<void> | undefined;
-        const events: string[] = [];
-        const tokens = {
-            service: token("service").of<{ readonly name: "service" }>(),
-        };
-        let disposeContainer = () => Promise.resolve();
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.service)
-                .factory(() => ({ name: "service" }))
-                .disposable(() => {
-                    reentrantDisposePromise = disposeContainer();
-                    events.push("service");
-
-                    return reentrantDisposePromise;
-                }),
-        ).create();
-        disposeContainer = () => container.dispose();
-
-        container.resolve(tokens.service);
-
-        const disposePromise = container.dispose();
-
-        expect(reentrantDisposePromise).toBeDefined();
-        expect(reentrantDisposePromise).not.toBe(disposePromise);
-
-        await expect(reentrantDisposePromise as Promise<void>).resolves.toBeUndefined();
-        await expect(disposePromise).resolves.toBeUndefined();
-        expect(events).toEqual(["service"]);
-    });
-
-    it("resolves awaited same-scope reentrant dispose calls as no-ops", async () => {
-        const events: string[] = [];
-        const tokens = {
-            service: token("service").of<{ readonly name: "service" }>(),
-        };
-        let disposeContainer = () => Promise.resolve();
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.service)
-                .factory(() => ({ name: "service" }))
-                .disposable(async () => {
-                    events.push("before");
-                    await disposeContainer();
-                    events.push("after");
-                }),
-        ).create();
-        disposeContainer = () => container.dispose();
-
-        container.resolve(tokens.service);
-
-        await expect(container.dispose()).resolves.toBeUndefined();
-        expect(events).toEqual(["before", "after"]);
-    });
-
-    it("keeps same-scope reentrant disposal active after awaited disposer work", async () => {
-        let reentrantDisposePromise: Promise<void> | undefined;
-        const events: string[] = [];
-        const tokens = {
-            service: token("service").of<{ readonly name: "service" }>(),
-        };
-        let disposeContainer = () => Promise.resolve();
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.service)
-                .factory(() => ({ name: "service" }))
-                .disposable(async () => {
-                    events.push("before");
-                    await Promise.resolve();
-                    reentrantDisposePromise = disposeContainer();
-                    await reentrantDisposePromise;
-                    events.push("after");
-                }),
-        ).create();
-        disposeContainer = () => container.dispose();
-
-        container.resolve(tokens.service);
-
-        const disposeResult = await Promise.race([
-            container.dispose().then(() => "settled" as const),
-            new Promise<"timeout">((resolve) => {
-                setTimeout(() => resolve("timeout"), 50);
-            }),
-        ]);
-
-        expect(disposeResult).toBe("settled");
-        await expect(reentrantDisposePromise as Promise<void>).resolves.toBeUndefined();
-        expect(events).toEqual(["before", "after"]);
-    });
-
-    it("resolves reentrant parent dispose calls from child disposers during parent cascade", async () => {
-        let reentrantParentDisposePromise: Promise<void> | undefined;
-        const events: string[] = [];
-        const tokens = {
-            child: token("child").of<{ readonly name: "child" }>(),
-            root: token("root").of<{ readonly name: "root" }>(),
-        };
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.root)
-                .scoped()
-                .factory(() => ({ name: "root" }))
-                .disposable(() => events.push("root")),
-        ).create();
-        const childScope = container.createScope(
-            bind(tokens.child)
-                .scoped()
-                .factory(() => ({ name: "child" }))
-                .disposable(() => {
-                    events.push("child");
-                    reentrantParentDisposePromise = container.dispose();
-
-                    return reentrantParentDisposePromise;
-                }),
-        );
-
-        container.resolve(tokens.root);
-        childScope.resolve(tokens.child);
-
-        const disposePromise = container.dispose();
-
-        expect(reentrantParentDisposePromise).toBeDefined();
-        expect(reentrantParentDisposePromise).not.toBe(disposePromise);
-
-        await expect(disposePromise).resolves.toBeUndefined();
-        await expect(reentrantParentDisposePromise as Promise<void>).resolves.toBeUndefined();
-        expect(events).toEqual(["child", "root"]);
-        expect(container.disposed).toBe(true);
-        expect(childScope.disposed).toBe(true);
-    });
-
-    it("keeps ancestor reentrant disposal active after awaited child disposer work", async () => {
-        let reentrantParentDisposePromise: Promise<void> | undefined;
-        const events: string[] = [];
-        const tokens = {
-            child: token("child").of<{ readonly name: "child" }>(),
-            root: token("root").of<{ readonly name: "root" }>(),
-        };
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.root)
-                .scoped()
-                .factory(() => ({ name: "root" }))
-                .disposable(() => events.push("root")),
-        ).create();
-        const childScope = container.createScope(
-            bind(tokens.child)
-                .scoped()
-                .factory(() => ({ name: "child" }))
-                .disposable(async () => {
-                    events.push("child:before");
-                    await Promise.resolve();
-                    reentrantParentDisposePromise = container.dispose();
-                    await reentrantParentDisposePromise;
-                    events.push("child:after");
-                }),
-        );
-
-        container.resolve(tokens.root);
-        childScope.resolve(tokens.child);
-
-        const disposeResult = await Promise.race([
-            container.dispose().then(() => "settled" as const),
-            new Promise<"timeout">((resolve) => {
-                setTimeout(() => resolve("timeout"), 50);
-            }),
-        ]);
-
-        expect(disposeResult).toBe("settled");
-        await expect(reentrantParentDisposePromise as Promise<void>).resolves.toBeUndefined();
-        expect(events).toEqual(["child:before", "child:after", "root"]);
-        expect(container.disposed).toBe(true);
-        expect(childScope.disposed).toBe(true);
-    });
-
-    it("resolves parent disposal from child disposers that cascade back into the in-flight child", async () => {
-        const events: string[] = [];
-        const tokens = {
-            child: token("child").of<{ readonly name: "child" }>(),
-            root: token("root").of<{ readonly name: "root" }>(),
-        };
-        const container = defineContainer(
-            Object.values(tokens),
-            bind(tokens.root)
-                .scoped()
-                .factory(() => ({ name: "root" }))
-                .disposable(() => events.push("root")),
-        ).create();
-        const childScope = container.createScope(
-            bind(tokens.child)
-                .scoped()
-                .factory(() => ({ name: "child" }))
-                .disposable(() => {
-                    events.push("child");
-
-                    return container.dispose();
-                }),
-        );
-
-        container.resolve(tokens.root);
-        childScope.resolve(tokens.child);
-
-        await expect(childScope.dispose()).resolves.toBeUndefined();
-        expect(events).toEqual(["child", "root"]);
-        expect(container.disposed).toBe(true);
-        expect(childScope.disposed).toBe(true);
     });
 
     it("keeps unrelated in-flight dispose calls awaitable from active disposers", async () => {
