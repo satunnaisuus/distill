@@ -203,6 +203,7 @@ export const resolveActualWithOwnership = <TToken extends AnyToken>(
     );
 
     if (!resolvedBinding) {
+        assertScopeIsActive(scope);
         throw new Error(`Service "${currentTokenDetails.key}" is not registered in the container`);
     }
 

@@ -1218,6 +1218,17 @@ describe("defineContainer", () => {
         expect(container.disposed).toBe(true);
     });
 
+    it("throws after disposal even when the token has no binding", async () => {
+        const tokens = {
+            service: token("service").of<{ readonly id: "service" }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+
+        await container.dispose();
+
+        expect(() => container.resolve(tokens.service)).toThrowError("Container has been disposed");
+    });
+
     it("finishes tracking an in-flight resolution before a factory-requested dispose runs", async () => {
         const events: string[] = [];
         let factoryDisposePromise: Promise<void> | undefined;
