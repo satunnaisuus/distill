@@ -2,10 +2,11 @@ name: Quality Checks
 
 on:
   pull_request:
+  push:
+    branches: [main]
 
 permissions:
   contents: read
-  statuses: write
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -14,7 +15,8 @@ concurrency:
 jobs:
   checks:
     name: ${{ matrix.name }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
@@ -23,8 +25,10 @@ jobs:
             command: pnpm run lint
           - name: Typecheck
             command: pnpm run typecheck
-          - name: Unit tests with coverage
-            command: pnpm run coverage
+          - name: Unit tests
+            command: pnpm run test:unit
+          - name: Coverage
+            command: pnpm --filter @satunnaisuus/distill run coverage
           - name: Type tests
             command: pnpm run test:types
 
@@ -34,14 +38,13 @@ jobs:
 
       - name: Install pnpm
         uses: pnpm/action-setup@v4
-        with:
-          version: 10.24.0
-          cache: true
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: 22
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
