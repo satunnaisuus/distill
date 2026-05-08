@@ -52,6 +52,7 @@ const apiSidebar: DefaultTheme.SidebarItem[] = [
 ];
 
 export default defineConfig({
+    base: process.env.VITEPRESS_BASE ?? "/",
     lang: "en-US",
     title: "Distill",
     description: "A small, type-safe dependency injection container for TypeScript.",
