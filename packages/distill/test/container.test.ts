@@ -89,6 +89,35 @@ describe("defineContainer", () => {
         ).toThrowError('Token "Hook" is already included in the token list');
     });
 
+    it("rejects globally visible token kind collisions across module graph contexts", () => {
+        const Hook = token("Hook").of<{ readonly name: string }>();
+        const Hooks = multiToken("Hook").of<{ readonly name: string }>();
+        const tokenListContext = createTokenListContext([], { allowUnknownTokens: true });
+        const scope = createRuntimeScope({
+            assertTokenIsInTokenList: tokenListContext.assertTokenIsInTokenList,
+            registerToken: tokenListContext.registerToken,
+            moduleGraph: {
+                moduleIds: [1, 2],
+                visibleBindingIdsByModuleId: new Map(),
+            },
+            resolvingPath: [],
+        });
+
+        registerBindings(scope, [bind(Hook).factory(() => ({ name: "single" }))], {
+            moduleContextId: 2,
+            visibleInAllModuleContexts: false,
+            validateCircularDependencies: false,
+        });
+
+        expect(() =>
+            registerBindings(scope, [bind(Hooks).factory(() => ({ name: "multi" }))], {
+                moduleContextId: 1,
+                visibleInAllModuleContexts: true,
+                validateCircularDependencies: false,
+            }),
+        ).toThrowError('Token "Hook" is already included in the token list');
+    });
+
     it("rejects non-binding entries while applying runtime overrides", () => {
         const Port = token("Port").of<number>();
 

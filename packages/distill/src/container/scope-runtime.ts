@@ -170,19 +170,10 @@ const runScopedCallback = async <TResult>(
 };
 
 const isBindingVisibleToPublic = (scope: RuntimeScope, binding: RuntimeBinding): boolean => {
-    if (binding.visibleInAllModuleContexts) {
-        return true;
-    }
+    const moduleGraph = scope.context.moduleGraph as NonNullable<RuntimeScope["context"]["moduleGraph"]>;
+    const publicBindingIds = moduleGraph.visibleBindingIdsByModuleId.get(publicModuleContextId) as ReadonlySet<number>;
 
-    if (binding.visibleModuleContextIds?.includes(publicModuleContextId)) {
-        return true;
-    }
-
-    if (binding.dependencyModuleContextId === publicModuleContextId) {
-        return true;
-    }
-
-    return scope.context.moduleGraph?.visibleBindingIdsByModuleId.get(publicModuleContextId)?.has(binding.id) ?? false;
+    return publicBindingIds.has(binding.id);
 };
 
 const hasPrivateModuleBindingForToken = (
@@ -219,12 +210,7 @@ const createModuleScopeBindingOptions = (
     publicAccess: RuntimePublicAccess,
     binding: AnyBinding,
 ): RegisterBindingsOptions => {
-    const moduleGraph = scope.context.moduleGraph;
-
-    if (!moduleGraph) {
-        return { moduleContextId: publicAccess.moduleContextId };
-    }
-
+    const moduleGraph = scope.context.moduleGraph as NonNullable<RuntimeScope["context"]["moduleGraph"]>;
     const bindingTokenDetails = getRuntimeTokenDetails(binding.token);
     const visibleModuleContextIds = [publicAccess.moduleContextId];
 
