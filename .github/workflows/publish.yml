@@ -1,0 +1,148 @@
+name: Publish Package
+
+on:
+  push:
+    tags:
+      - "*-v*"
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package directory under packages/
+        required: true
+        default: distill
+        type: string
+      npm_tag:
+        description: npm dist-tag to publish
+        required: true
+        default: latest
+        type: choice
+        options:
+          - latest
+          - next
+          - beta
+      dry_run:
+        description: Build and pack without publishing
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish npm package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .node-version
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Resolve package
+        id: package
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          MANUAL_PACKAGE: ${{ inputs.package }}
+          MANUAL_NPM_TAG: ${{ inputs.npm_tag }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            if [ -z "$TAG_NAME" ]; then
+              echo "Tag name is empty."
+              exit 1
+            fi
+
+            PACKAGE_SLUG="${TAG_NAME%-v*}"
+            TAG_VERSION="${TAG_NAME##*-v}"
+            NPM_TAG="latest"
+
+            if [ "$PACKAGE_SLUG" = "$TAG_NAME" ] || [ -z "$PACKAGE_SLUG" ] || [ -z "$TAG_VERSION" ]; then
+              echo "Tag '$TAG_NAME' must use '<package>-v<version>' format, for example 'distill-v0.0.1'."
+              exit 1
+            fi
+          else
+            PACKAGE_SLUG="$MANUAL_PACKAGE"
+            TAG_NAME=""
+            TAG_VERSION=""
+            NPM_TAG="$MANUAL_NPM_TAG"
+          fi
+
+          if ! [[ "$PACKAGE_SLUG" =~ ^[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "Invalid package slug '$PACKAGE_SLUG'."
+            exit 1
+          fi
+
+          PACKAGE_DIR="packages/$PACKAGE_SLUG"
+
+          if [ ! -f "$PACKAGE_DIR/package.json" ]; then
+            echo "Package directory '$PACKAGE_DIR' does not contain package.json."
+            exit 1
+          fi
+
+          PACKAGE_NAME="$(node --print "require('./$PACKAGE_DIR/package.json').name")"
+          PACKAGE_VERSION="$(node --print "require('./$PACKAGE_DIR/package.json').version")"
+          EXPECTED_TAG="$PACKAGE_SLUG-v$PACKAGE_VERSION"
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$TAG_NAME" != "$EXPECTED_TAG" ]; then
+            echo "Tag '$TAG_NAME' does not match expected tag '$EXPECTED_TAG' for $PACKAGE_NAME@$PACKAGE_VERSION."
+            exit 1
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            TAG_NAME="$EXPECTED_TAG"
+            TAG_VERSION="$PACKAGE_VERSION"
+          fi
+
+          {
+            echo "dir=$PACKAGE_DIR"
+            echo "name=$PACKAGE_NAME"
+            echo "version=$PACKAGE_VERSION"
+            echo "tag=$TAG_NAME"
+            echo "npm_tag=$NPM_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Resolved $PACKAGE_NAME@$PACKAGE_VERSION from $PACKAGE_DIR using tag '$TAG_NAME'."
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run package checks
+        working-directory: ${{ steps.package.outputs.dir }}
+        run: |
+          pnpm run check
+          pnpm run typecheck
+          pnpm run test
+
+      - name: Build package
+        working-directory: ${{ steps.package.outputs.dir }}
+        run: pnpm run build
+
+      - name: Verify package contents
+        working-directory: ${{ steps.package.outputs.dir }}
+        run: npm pack --dry-run
+
+      - name: Publish package to npm
+        if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.dry_run != 'true' }}
+        working-directory: ${{ steps.package.outputs.dir }}
+        env:
+          NPM_CONFIG_PROVENANCE: true
+          NPM_TAG: ${{ steps.package.outputs.npm_tag }}
+        run: npm publish --access public --tag "$NPM_TAG"

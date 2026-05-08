@@ -27,7 +27,7 @@ the documentation site, and examples that show how to keep service graphs explic
 Install the core package in an application:
 
 ```sh
-pnpm add @satunnaisuus/distill
+npm i @satunnaisuus/distill
 ```
 
 ## License
