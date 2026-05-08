@@ -1,0 +1,33 @@
+import { Hono } from "hono";
+import type { HttpBindings, HttpSubRouter } from "../http/index.js";
+import type { GreetingService } from "./greeting-service.js";
+
+export const createGreetingsSubRouter = (greetingService: GreetingService): HttpSubRouter => {
+    const router = new Hono<HttpBindings>();
+
+    router.get("/", (c) => {
+        return c.json({
+            greeting: greetingService.greet(c.req.query("name") ?? "Hono"),
+        });
+    });
+
+    router.get("/greetings", async (c) => {
+        const greetings = await greetingService.listGreetings();
+
+        return c.json({
+            greetings,
+        });
+    });
+
+    router.post("/greetings", async (c) => {
+        const name = c.req.query("name") ?? "Hono";
+        const greeting = await greetingService.createGreeting(name);
+
+        return c.json({ greeting }, 201);
+    });
+
+    return {
+        path: "/",
+        router,
+    };
+};

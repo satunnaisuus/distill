@@ -1,0 +1,361 @@
+import {
+    bind,
+    composeModules,
+    defineContainer,
+    defineModule,
+    type ModuleImportWire,
+    override,
+    provideImport,
+    type QualifiedToken,
+    qualified,
+    qualifier,
+    type TokenKey,
+    type TokenValue,
+    token,
+    unbind,
+} from "@satunnaisuus/distill";
+import { expect, test } from "tstyche";
+
+test("qualified tokens preserve base token value type", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    expect(JsonLogger).type.toBe<QualifiedToken<typeof Logger, typeof Json>>();
+    expect(JsonLogger).type.not.toBe<"Logger:json">();
+    expect<TokenKey<typeof JsonLogger>>().type.toBe<"Logger:json">();
+    expect<TokenValue<typeof JsonLogger>>().type.toBe<{
+        readonly name: string;
+    }>();
+});
+test("bind(qualified(...)) requires the qualified token in flat container token lists", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const PlainJsonLogger = token("Logger:json").of<{
+        readonly name: string;
+    }>();
+    const container = defineContainer(
+        [JsonLogger],
+        bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+    ).create();
+    expect(container.resolve(JsonLogger)).type.toBe<{
+        readonly name: string;
+    }>();
+    expect(() => {
+        defineContainer(
+            [Logger],
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+        ).create();
+    }).type.toRaiseError("__token_not_in_tokens__");
+    expect(() => {
+        defineContainer(
+            [PlainJsonLogger],
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+        ).create();
+    }).type.toRaiseError("__token_not_in_tokens__");
+    expect(() => {
+        defineContainer(
+            [JsonLogger],
+            bind(PlainJsonLogger).factory(() => ({ name: "plain" })),
+        ).create();
+    }).type.toRaiseError("__token_not_in_tokens__");
+});
+test("same-key plain and qualified module providers are not ambiguous", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const PlainJsonLogger = token("Logger:json").of<{
+        readonly name: string;
+    }>();
+    const PlainLoggerModule = defineModule({
+        exports: [PlainJsonLogger],
+        bindings: [bind(PlainJsonLogger).factory(() => ({ name: "plain" }))],
+    });
+    const QualifiedLoggerModule = defineModule({
+        exports: [qualified(Logger, Json)],
+        bindings: [bind(qualified(Logger, Json)).factory(() => ({ name: "qualified" }))],
+    });
+    const PlainApp = composeModules({
+        modules: [PlainLoggerModule, QualifiedLoggerModule],
+        exports: [PlainJsonLogger],
+    });
+    const QualifiedApp = composeModules({
+        modules: [PlainLoggerModule, QualifiedLoggerModule],
+        exports: [JsonLogger],
+    });
+    expect(PlainApp.createContainer().resolve(PlainJsonLogger)).type.toBe<{
+        readonly name: string;
+    }>();
+    expect(QualifiedApp.createContainer().resolve(JsonLogger)).type.toBe<{
+        readonly name: string;
+    }>();
+});
+test("module imports do not satisfy same-key qualified dependencies", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const PlainJsonLogger = token("Logger:json").of<{
+        readonly name: string;
+    }>();
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    expect(() => {
+        defineModule({
+            exports: [Consumer],
+            imports: [PlainJsonLogger],
+            bindings: [
+                bind(Consumer).factory({ logger: JsonLogger }, ({ logger }) => ({
+                    loggerName: logger.name,
+                })),
+            ],
+        });
+    }).type.toRaiseError("__missing_dependencies__");
+});
+test("provideImport wires single imports to assignable provider tokens", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [Logger],
+        bindings: [
+            bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
+                loggerName: logger.name,
+            })),
+        ],
+    });
+    const LoggerModule = defineModule({
+        exports: [qualified(Logger, Json)],
+        bindings: [bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))],
+    });
+    const wire = provideImport(ConsumerModule, Logger).with(JsonLogger);
+    expect(wire).type.toBe<ModuleImportWire<typeof ConsumerModule, typeof Logger, typeof JsonLogger>>();
+    const App = composeModules({
+        modules: [ConsumerModule, LoggerModule],
+        wire: [wire],
+        exports: [Consumer],
+    });
+    expect(App.createContainer().resolve(Consumer)).type.toBe<{
+        readonly loggerName: string;
+    }>();
+});
+test("wired imports reject structurally ambiguous module targets", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const FirstConsumerModule = defineModule({
+        imports: [Logger],
+        bindings: [],
+    });
+    const SecondConsumerModule = defineModule({
+        imports: [Logger],
+        bindings: [],
+    });
+    const LoggerModule = defineModule({
+        exports: [Logger, qualified(Logger, Json)],
+        bindings: [
+            bind(Logger).factory(() => ({ name: "plain" })),
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+        ],
+    });
+    expect(() => {
+        composeModules({
+            modules: [FirstConsumerModule, SecondConsumerModule, LoggerModule],
+            wire: [provideImport(FirstConsumerModule, Logger).with(JsonLogger)],
+            exports: [JsonLogger],
+        });
+    }).type.toRaiseError("__ambiguous_wire_module__");
+});
+test("wired imports do not require an unwired provider when mixed with other imports", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Config = token("Config").of<{
+        readonly port: number;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+        readonly port: number;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [Logger, Config],
+        bindings: [
+            bind(Consumer).factory({ logger: Logger, config: Config }, ({ logger, config }) => ({
+                loggerName: logger.name,
+                port: config.port,
+            })),
+        ],
+    });
+    const ProviderModule = defineModule({
+        exports: [qualified(Logger, Json), Config],
+        bindings: [
+            bind(qualified(Logger, Json)).factory(() => ({ name: "json" })),
+            bind(Config).factory(() => ({ port: 3000 })),
+        ],
+    });
+    const App = composeModules({
+        modules: [ConsumerModule, ProviderModule],
+        wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+        exports: [Consumer],
+    });
+    expect(App.createContainer().resolve(Consumer)).type.toBe<{
+        readonly loggerName: string;
+        readonly port: number;
+    }>();
+});
+test("provideImport rejects incompatible provider value types", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const NumberLogger = token("NumberLogger").of<{
+        readonly name: number;
+    }>();
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [Logger],
+        bindings: [
+            bind(Consumer).factory({ logger: Logger }, ({ logger }) => ({
+                loggerName: logger.name,
+            })),
+        ],
+    });
+    expect(() => {
+        provideImport(ConsumerModule, Logger).with(NumberLogger);
+    }).type.toRaiseError("__wire_provider_value_not_assignable__");
+});
+test("wired scoped providers still fail singleton consumers", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [Logger],
+        bindings: [
+            bind(Consumer)
+                .singleton()
+                .factory({ logger: Logger }, ({ logger }) => ({
+                    loggerName: logger.name,
+                })),
+        ],
+    });
+    const LoggerModule = defineModule({
+        exports: [qualified(Logger, Json)],
+        bindings: [
+            bind(qualified(Logger, Json))
+                .scoped()
+                .factory(() => ({ name: "json" })),
+        ],
+    });
+    expect(() => {
+        composeModules({
+            modules: [ConsumerModule, LoggerModule],
+            wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+            exports: [Consumer],
+        });
+    }).type.toRaiseError("__scoped_dependency_in_singleton__");
+});
+test("wired provider overrides participate in module override validation", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [Logger],
+        bindings: [
+            bind(Consumer)
+                .singleton()
+                .factory({ logger: Logger }, ({ logger }) => ({
+                    loggerName: logger.name,
+                })),
+        ],
+    });
+    const LoggerModule = defineModule({
+        exports: [qualified(Logger, Json)],
+        bindings: [bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))],
+    });
+    const App = composeModules({
+        modules: [ConsumerModule, LoggerModule],
+        wire: [provideImport(ConsumerModule, Logger).with(JsonLogger)],
+        exports: [Consumer, JsonLogger],
+    });
+    const definition = App;
+    expect(() => {
+        definition.createContainer(
+            override(
+                bind(JsonLogger)
+                    .scoped()
+                    .factory(() => ({ name: "scoped" })),
+            ),
+        );
+    }).type.toRaiseError("__invalid_overrides__");
+    expect(() => {
+        definition.createContainer(unbind(JsonLogger));
+    }).type.toRaiseError("__invalid_overrides__");
+});
+test("wired provider overrides match exact token identity when keys collide", () => {
+    const Logger = token("Logger").of<{
+        readonly name: string;
+    }>();
+    const Json = qualifier("json");
+    const JsonLogger = qualified(Logger, Json);
+    const PlainJsonLogger = token("Logger:json").of<{
+        readonly name: string;
+    }>();
+    const Consumer = token("Consumer").of<{
+        readonly loggerName: string;
+    }>();
+    const ConsumerModule = defineModule({
+        exports: [Consumer],
+        imports: [PlainJsonLogger],
+        bindings: [
+            bind(Consumer).factory({ logger: PlainJsonLogger }, ({ logger }) => ({
+                loggerName: logger.name,
+            })),
+        ],
+    });
+    const LoggerModule = defineModule({
+        exports: [qualified(Logger, Json)],
+        bindings: [bind(qualified(Logger, Json)).factory(() => ({ name: "json" }))],
+    });
+    const App = composeModules({
+        modules: [ConsumerModule, LoggerModule],
+        wire: [provideImport(ConsumerModule, PlainJsonLogger).with(JsonLogger)],
+        exports: [Consumer, JsonLogger],
+    });
+    const app = App.createContainer(override(bind(JsonLogger).factory(() => ({ name: "override" }))));
+    expect(app.resolve(Consumer)).type.toBe<{
+        readonly loggerName: string;
+    }>();
+});

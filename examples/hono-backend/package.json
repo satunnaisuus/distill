@@ -1,0 +1,69 @@
+{
+  "name": "@satunnaisuus/distill-example-hono-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "prisma generate && tsc --noEmit",
+    "dev": "prisma generate && tsx watch src/index.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "node prisma/ensure-sqlite-db.mjs && prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "start": "prisma generate && tsx src/index.ts",
+    "test": "vitest run",
+    "typecheck": "prisma generate && tsc --noEmit"
+  },
+  "nx": {
+    "projectType": "application",
+    "sourceRoot": "examples/hono-backend/src",
+    "targets": {
+      "build": {
+        "dependsOn": [
+          "^build"
+        ],
+        "outputs": []
+      },
+      "typecheck": {
+        "dependsOn": [
+          "^build"
+        ],
+        "outputs": []
+      },
+      "dev": {
+        "continuous": true,
+        "dependsOn": [
+          "^build"
+        ]
+      },
+      "start": {
+        "continuous": true,
+        "dependsOn": [
+          "^build"
+        ]
+      },
+      "test": {
+        "dependsOn": [
+          "^build"
+        ],
+        "outputs": []
+      }
+    }
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.0.1",
+    "@prisma/adapter-better-sqlite3": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "@satunnaisuus/distill": "workspace:*",
+    "better-auth": "^1.6.9",
+    "dotenv": "^17.4.2",
+    "hono": "^4.12.16"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/node": "^25.6.0",
+    "@types/ws": "^8.18.1",
+    "prisma": "^7.8.0",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.5"
+  }
+}

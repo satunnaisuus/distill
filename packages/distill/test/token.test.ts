@@ -1,0 +1,299 @@
+import { describe, expect, it } from "vitest";
+import { bind, defineContainer, multiToken, qualified, qualifier, ref, type Token, token } from "../src/index";
+import {
+    assertMultiTokenKey,
+    isRuntimeMultiToken,
+    isRuntimeQualifiedToken,
+    isRuntimeToken,
+    tokenDisplayKey,
+    tokenKey,
+    tokenKeyRuntimeId,
+    tokenRuntimeId,
+} from "../src/token/index";
+
+describe("tokenKey", () => {
+    it("returns the key for a token created by token().of()", () => {
+        const config = token("Config").of<{ readonly port: number }>();
+
+        expect(tokenKey(config)).toBe("Config");
+        expect(config).toBe("Config");
+    });
+
+    it("returns the key for tokens created by token().of()", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            logger: token("logger").of<{ log: (message: string) => void }>(),
+        };
+
+        expect(tokenKey(tokens.config)).toBe("config");
+        expect(tokenKey(tokens.logger)).toBe("logger");
+    });
+
+    it("returns the literal key for a branded token", () => {
+        const token = "feature-flags" as Token<"feature-flags", { readonly enabled: boolean }>;
+
+        expect(tokenKey(token)).toBe("feature-flags");
+    });
+
+    it("returns stable keys for qualified single tokens", () => {
+        const Logger = token("Logger").of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const Human = qualifier("human");
+        const JsonLogger = qualified(Logger, Json);
+        const HumanLogger = qualified(Logger, Human);
+
+        expect(tokenKey(JsonLogger)).toBe("Logger:json");
+        expect(tokenKey(HumanLogger)).toBe("Logger:human");
+        expect(JsonLogger).not.toBe(HumanLogger);
+        expect(isRuntimeMultiToken(JsonLogger)).toBe(false);
+    });
+
+    it("returns symbol keys for tokens created from symbols", () => {
+        const configKey = Symbol("Config");
+        const Config = token(configKey).of<{ readonly port: number }>();
+
+        expect(tokenKey(Config)).toBe(configKey);
+        expect(Config).toBe(configKey);
+    });
+
+    it("returns class keys for tokens created from classes", () => {
+        class ConfigService {
+            readonly port = 3000;
+        }
+
+        const Config = token(ConfigService).of();
+
+        expect(tokenKey(Config)).toBe(ConfigService);
+        expect(Config).toBe(ConfigService);
+    });
+});
+
+describe("token arrays", () => {
+    it("creates an array from tokens", () => {
+        const tokens = {
+            config: token("config").of<{ readonly port: number }>(),
+            logger: token("logger").of<{ log: (message: string) => void }>(),
+        };
+
+        expect(Object.values(tokens)).toEqual(["config", "logger"]);
+        expect(tokens.config).toBe("config");
+        expect(tokens.logger).toBe("logger");
+    });
+
+    it("supports an empty token array", () => {
+        expect([]).toEqual([]);
+    });
+});
+
+describe("runtime token metadata", () => {
+    it("derives metadata for runtime symbol and class tokens without builder registration", () => {
+        const runtimeSymbol = Symbol("Runtime");
+        class RuntimeService {}
+
+        expect(tokenKey(runtimeSymbol as never)).toBe(runtimeSymbol);
+        expect(tokenDisplayKey(runtimeSymbol as never)).toBe("Symbol(Runtime)");
+        expect(tokenKey(RuntimeService as never)).toBe(RuntimeService);
+        expect(tokenDisplayKey(RuntimeService as never)).toBe("RuntimeService");
+        expect(tokenDisplayKey(token(class {}).of())).toBe("<anonymous class>");
+        expect(() => tokenKey({} as never)).toThrowError("Token must be created with token, multiToken, or qualified");
+    });
+
+    it("reuses runtime key ids across single and multibind tokens from the same non-string key", () => {
+        const hookKey = Symbol("Hooks");
+        const Hook = token(hookKey).of<{ readonly name: string }>();
+        const Hooks = multiToken(hookKey).of<{ readonly name: string }>();
+        class ServiceClass {}
+        const Service = token(ServiceClass).of();
+        const Services = multiToken(ServiceClass).of();
+
+        expect(tokenKeyRuntimeId(Hooks)).toBe(tokenKeyRuntimeId(Hook));
+        expect(tokenRuntimeId(Hook)).toBe(`single:${tokenKeyRuntimeId(Hook)}`);
+        expect(tokenRuntimeId(Hooks)).toBe(`multi:${tokenKeyRuntimeId(Hook)}`);
+        expect(tokenKeyRuntimeId(Services)).toBe(tokenKeyRuntimeId(Service));
+        expect(tokenRuntimeId(Service)).toBe(`single:${tokenKeyRuntimeId(Service)}`);
+        expect(tokenRuntimeId(Services)).toBe(`multi:${tokenKeyRuntimeId(Service)}`);
+    });
+
+    it("classifies runtime tokens and token kinds", () => {
+        class RuntimeService {}
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
+
+        expect(isRuntimeToken("Config")).toBe(true);
+        expect(isRuntimeToken(Symbol("Config"))).toBe(true);
+        expect(isRuntimeToken(RuntimeService)).toBe(true);
+        expect(isRuntimeToken(() => undefined)).toBe(false);
+        expect(isRuntimeToken({})).toBe(false);
+        expect(isRuntimeToken(null)).toBe(false);
+        expect(isRuntimeToken(123)).toBe(false);
+
+        expect(isRuntimeMultiToken(Symbol("Hooks"))).toBe(false);
+        expect(isRuntimeMultiToken({})).toBe(false);
+        expect(isRuntimeMultiToken(123)).toBe(false);
+        expect(() => assertMultiTokenKey("Hooks", Hooks)).not.toThrow();
+        expect(() => assertMultiTokenKey("Config", Config)).toThrowError('Token "Config" is not a multibind token');
+    });
+
+    it("classifies qualified runtime tokens", () => {
+        class Logger {}
+        const Json = qualifier("json");
+        const LoggerToken = token(Logger).of<{ readonly name: string }>();
+        const JsonLogger = qualified(LoggerToken, Json);
+        const StringJsonLogger = qualified(token("StringLogger").of<{ readonly name: string }>(), Json);
+
+        expect(isRuntimeQualifiedToken(JsonLogger)).toBe(true);
+        expect(isRuntimeQualifiedToken(StringJsonLogger)).toBe(true);
+        expect(isRuntimeQualifiedToken(LoggerToken)).toBe(false);
+        expect(isRuntimeQualifiedToken("StringLogger")).toBe(false);
+        expect(isRuntimeQualifiedToken({})).toBe(false);
+        expect(isRuntimeQualifiedToken(123)).toBe(false);
+    });
+
+    it("rejects invalid token and qualifier runtime inputs", () => {
+        expect(() => token({} as never)).toThrowError("Token key must be a string, symbol, or class");
+        expect(() => token("\u0000distill:multi\u0000Hooks")).toThrowError("Token key uses a reserved prefix");
+        expect(() => token('\u0000distill:qualified\u0000["Logger","json"]')).toThrowError(
+            "Token key uses a reserved prefix",
+        );
+        expect(() => qualifier(123 as never)).toThrowError("Qualifier key must be a string");
+        expect(() => qualified(multiToken("Hooks").of() as never, qualifier("json"))).toThrowError(
+            "qualified(...) only accepts single tokens",
+        );
+    });
+});
+
+describe("symbol and class token keys", () => {
+    it("resolves services registered with symbol tokens", () => {
+        const configKey = Symbol("config");
+        const Config = token(configKey).of<{ readonly port: number }>();
+        const container = defineContainer(
+            [Config],
+            bind(Config).factory(() => ({ port: 3000 })),
+        ).create();
+
+        expect(container.resolve(Config)).toEqual({ port: 3000 });
+    });
+
+    it("uses the class instance type as the default token value", () => {
+        class Service {
+            readonly status = "ready";
+        }
+
+        const ServiceToken = token(Service).of();
+        const container = defineContainer([ServiceToken], bind(ServiceToken).class(Service)).create();
+
+        expect(container.resolve(ServiceToken)).toBeInstanceOf(Service);
+        expect(container.resolve(ServiceToken).status).toBe("ready");
+    });
+
+    it("treats class tokens passed to ref as direct tokens", () => {
+        class Service {
+            readonly name = "service";
+        }
+
+        const ServiceToken = token(Service).of();
+        const Consumer = token("Consumer").of<{ readonly name: string }>();
+        const container = defineContainer(
+            [ServiceToken, Consumer],
+            bind(ServiceToken).class(Service),
+            bind(Consumer).factory({ service: ref(ServiceToken) }, ({ service }) => ({ name: service.value.name })),
+        ).create();
+
+        expect(container.resolve(Consumer)).toEqual({ name: "service" });
+    });
+
+    it("keeps different classes with the same name distinct", () => {
+        const FirstService = class Service {
+            readonly id = "first";
+        };
+        const SecondService = class Service {
+            readonly id = "second";
+        };
+
+        const First = token(FirstService).of();
+        const Second = token(SecondService).of();
+        const container = defineContainer(
+            [First, Second],
+            bind(First).class(FirstService),
+            bind(Second).class(SecondService),
+        ).create();
+
+        expect(container.resolve(First).id).toBe("first");
+        expect(container.resolve(Second).id).toBe("second");
+    });
+
+    it("keeps different classes with the same public shape distinct", () => {
+        class FirstService {}
+        class SecondService {}
+
+        const First = token(FirstService).of();
+        const Second = token(SecondService).of();
+        const container = defineContainer(
+            [First, Second],
+            bind(First).class(FirstService),
+            bind(Second).class(SecondService),
+        ).create();
+
+        expect(container.resolve(First)).toBeInstanceOf(FirstService);
+        expect(container.resolve(Second)).toBeInstanceOf(SecondService);
+    });
+
+    it("supports multibind and qualified tokens from non-string keys", () => {
+        class Logger {}
+
+        const hookKey = Symbol("Hooks");
+        const Hooks = multiToken(hookKey).of<{ readonly name: string }>();
+        const LoggerToken = token(Logger).of<{ readonly name: string }>();
+        const Json = qualifier("json");
+        const JsonLogger = qualified(LoggerToken, Json);
+        const container = defineContainer(
+            [Hooks, JsonLogger],
+            bind(Hooks).factory(() => ({ name: "first" })),
+            bind(Hooks).factory(() => ({ name: "second" })),
+            bind(qualified(LoggerToken, Json)).factory(() => ({ name: "json" })),
+        ).create();
+
+        expect(tokenKey(Hooks)).toBe(hookKey);
+        expect(tokenKey(JsonLogger)).toBe("Logger:json");
+        expect(container.resolve(Hooks)).toEqual([{ name: "first" }, { name: "second" }]);
+        expect(container.resolve(JsonLogger)).toEqual({ name: "json" });
+    });
+
+    it("keeps qualified tokens from same-name classes distinct", () => {
+        const FirstLogger = class Logger {
+            readonly id = "first";
+        };
+        const SecondLogger = class Logger {
+            readonly id = "second";
+        };
+
+        const Json = qualifier("json");
+        const FirstJsonLogger = qualified(token(FirstLogger).of(), Json);
+        const SecondJsonLogger = qualified(token(SecondLogger).of(), Json);
+        const container = defineContainer(
+            [FirstJsonLogger, SecondJsonLogger],
+            bind(FirstJsonLogger).factory(() => new FirstLogger()),
+            bind(SecondJsonLogger).factory(() => new SecondLogger()),
+        ).create();
+
+        expect(tokenKey(FirstJsonLogger)).toBe("Logger:json");
+        expect(tokenKey(SecondJsonLogger)).toBe("Logger:json");
+        expect(container.resolve(FirstJsonLogger).id).toBe("first");
+        expect(container.resolve(SecondJsonLogger).id).toBe("second");
+    });
+
+    it("keeps qualified tokens with delimiter collisions distinct", () => {
+        const First = qualified(token("A:B").of<string>(), qualifier("C"));
+        const Second = qualified(token("A").of<string>(), qualifier("B:C"));
+        const container = defineContainer(
+            [First, Second],
+            bind(First).factory(() => "first"),
+            bind(Second).factory(() => "second"),
+        ).create();
+
+        expect(tokenKey(First)).toBe("A:B:C");
+        expect(tokenKey(Second)).toBe("A:B:C");
+        expect(container.resolve(First)).toBe("first");
+        expect(container.resolve(Second)).toBe("second");
+    });
+});

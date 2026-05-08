@@ -103,6 +103,10 @@ dist
 
 # vitepress cache directory
 **/.vitepress/cache
+**/.vitepress/.temp
+
+# TypeDoc markdown output
+apps/docs/docs/api/*/
 
 # Docusaurus cache and generated files
 .docusaurus
@@ -128,6 +132,9 @@ dist
 # pnpm
 .pnpm-store
 
+# Nx
+.nx/
+
 # yarn v3
 .pnp.*
 .yarn/*
@@ -141,3 +148,8 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# Prisma
+examples/hono-backend/prisma/*.db
+examples/hono-backend/prisma/*.db-journal
+examples/hono-backend/src/generated/prisma/
