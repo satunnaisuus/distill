@@ -209,13 +209,10 @@ const assertAllDependenciesHaveVisibleTokens = (
             }
 
             assertTokenInput(dependencyToken, "Module dependencies must be tokens");
-            const dependencyTokenKey = tokenDisplayKey(dependencyToken);
-
-            if (!isMultiToken(dependencyToken)) {
-                throw new Error(`Token "${dependencyTokenKey}" is not a multibind token`);
-            }
 
             if (!hasExactToken(visibleTokens, dependencyToken)) {
+                const dependencyTokenKey = tokenDisplayKey(dependencyToken);
+
                 throw new Error(
                     `Multibind token "${dependencyTokenKey}" is not imported, exported, or locally bound by the module`,
                 );

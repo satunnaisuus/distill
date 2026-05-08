@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { bind, defineContainer, multiToken, qualified, qualifier, ref, type Token, token } from "../src/index";
 import {
+    assertMultiTokenKey,
     isRuntimeMultiToken,
     isRuntimeQualifiedToken,
     isRuntimeToken,
@@ -115,6 +116,8 @@ describe("runtime token metadata", () => {
 
     it("classifies runtime tokens and token kinds", () => {
         class RuntimeService {}
+        const Config = token("Config").of<{ readonly port: number }>();
+        const Hooks = multiToken("Hooks").of<{ readonly name: string }>();
 
         expect(isRuntimeToken("Config")).toBe(true);
         expect(isRuntimeToken(Symbol("Config"))).toBe(true);
@@ -127,6 +130,8 @@ describe("runtime token metadata", () => {
         expect(isRuntimeMultiToken(Symbol("Hooks"))).toBe(false);
         expect(isRuntimeMultiToken({})).toBe(false);
         expect(isRuntimeMultiToken(123)).toBe(false);
+        expect(() => assertMultiTokenKey("Hooks", Hooks)).not.toThrow();
+        expect(() => assertMultiTokenKey("Config", Config)).toThrowError('Token "Config" is not a multibind token');
     });
 
     it("classifies qualified runtime tokens", () => {

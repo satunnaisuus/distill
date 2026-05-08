@@ -631,6 +631,12 @@ describe("module createContainer", () => {
         ).toThrowError("Module exports must be tokens");
         expect(() =>
             defineModule({
+                exports: [Config, Config],
+                bindings: [bind(Config).factory(() => ({ port: 3000 }))],
+            } as never),
+        ).toThrowError('Token "Config" is already exported');
+        expect(() =>
+            defineModule({
                 imports: [Config, Config],
                 bindings: [],
             } as never),
@@ -647,6 +653,13 @@ describe("module createContainer", () => {
                 bindings: [bind(ManyHooks).factory(() => ({ name: "many" }))],
             } as never),
         ).toThrowError('Token "Hooks" is already included in module imports');
+        expect(() =>
+            defineModule({
+                imports: [SingleHooks],
+                exports: [ManyHooks],
+                bindings: [],
+            } as never),
+        ).toThrowError('Token "Hooks" has an incompatible module export');
         expect(() =>
             defineModule({
                 bindings: [
@@ -849,6 +862,40 @@ describe("module createContainer", () => {
         Object.defineProperty(secondProviderBinding, "token", {
             configurable: true,
             get: () => (tokenReads++ === 0 ? OtherConfig : Config),
+        });
+        expect(() =>
+            composeModules({
+                modules: [ConsumerModule, FirstProviderModule, SecondProviderModule],
+                exports: [],
+            } as never),
+        ).toThrowError('Service "Config" has multiple exported providers');
+    });
+    it("rejects providers that become ambiguous after the exported-provider preflight", () => {
+        const Config = token("Config").of<{
+            readonly port: number;
+        }>();
+        const OtherConfig = token("OtherConfig").of<{
+            readonly port: number;
+        }>();
+        const ConsumerModule = defineModule({
+            imports: [Config],
+            bindings: [],
+        });
+        const FirstProviderModule = defineModule({
+            exports: [Config],
+            bindings: [bind(Config).factory(() => ({ port: 3000 }))],
+        });
+        const SecondProviderModule = defineModule({
+            exports: [OtherConfig],
+            bindings: [bind(OtherConfig).factory(() => ({ port: 4000 }))],
+        });
+        const secondProviderBinding = SecondProviderModule.bindings[0] as {
+            readonly token: unknown;
+        };
+        let tokenReads = 0;
+        Object.defineProperty(secondProviderBinding, "token", {
+            configurable: true,
+            get: () => (tokenReads++ < 2 ? OtherConfig : Config),
         });
         expect(() =>
             composeModules({
