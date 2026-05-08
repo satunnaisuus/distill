@@ -51,3 +51,12 @@ jobs:
 
       - name: Run ${{ matrix.name }}
         run: ${{ matrix.command }}
+
+      - name: Upload coverage to Coveralls
+        if: matrix.name == 'Coverage'
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: packages/distill/coverage/lcov.info
+          format: lcov
+          base-path: packages/distill

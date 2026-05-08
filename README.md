@@ -2,6 +2,8 @@
 
 > Type-safe dependency injection for TypeScript
 
+[![Coveralls](https://coveralls.io/repos/github/satunnaisuus/distill/badge.svg?branch=main)](https://coveralls.io/github/satunnaisuus/distill?branch=main)
+
 - End-to-end type inference for tokens, dependency maps, factories, and resolved values
 - Compile-time checks for missing services, duplicate bindings, unknown dependencies, and eager cycles
 - Explicit factory bindings without decorators, reflection, containers as globals, or runtime dependencies
