@@ -30,6 +30,16 @@
     "test:types": "pnpm run build && tstyche",
     "coverage": "vitest run --coverage"
   },
+  "nx": {
+    "targets": {
+      "test": {
+        "parallelism": false
+      },
+      "test:types": {
+        "parallelism": false
+      }
+    }
+  },
   "repository": {
     "type": "git",
     "url": "git+ssh://git@github.com/satunnaisuus/distill.git",
