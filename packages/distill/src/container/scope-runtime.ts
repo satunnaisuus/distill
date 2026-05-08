@@ -3,6 +3,7 @@ import {
     assertScopeIsActive,
     createRuntimeScope,
     defaultModuleContextId,
+    publicModuleContextId,
     type ResolveOptions,
     type RuntimeBinding,
     type RuntimePublicAccess,
@@ -35,6 +36,8 @@ type ResolvedRuntimeTokenValue<TToken extends AnyToken> = TToken extends AnyMult
 
 type RegisterBindingsOptions = {
     readonly moduleContextId?: number;
+    readonly visibleInAllModuleContexts?: boolean;
+    readonly visibleModuleContextIds?: readonly number[];
 };
 
 type RegisterBindingsForScope = (
@@ -166,6 +169,94 @@ const runScopedCallback = async <TResult>(
     return callbackResult as Awaited<TResult>;
 };
 
+const isBindingVisibleToPublic = (scope: RuntimeScope, binding: RuntimeBinding): boolean => {
+    if (binding.visibleInAllModuleContexts) {
+        return true;
+    }
+
+    if (binding.visibleModuleContextIds?.includes(publicModuleContextId)) {
+        return true;
+    }
+
+    if (binding.dependencyModuleContextId === publicModuleContextId) {
+        return true;
+    }
+
+    return scope.context.moduleGraph?.visibleBindingIdsByModuleId.get(publicModuleContextId)?.has(binding.id) ?? false;
+};
+
+const hasPrivateModuleBindingForToken = (
+    scope: RuntimeScope,
+    tokenDetails: ReturnType<typeof getRuntimeTokenDetails>,
+    moduleContextId: number,
+): boolean => {
+    let currentScope: RuntimeScope | undefined = scope;
+
+    while (currentScope) {
+        const scopeForBindings = currentScope;
+        const bindings = scopeForBindings.bindings.get(tokenDetails.keyId) ?? [];
+
+        if (
+            bindings.some(
+                (binding) =>
+                    binding.tokenId === tokenDetails.id &&
+                    binding.isMultiToken === tokenDetails.isMulti &&
+                    binding.dependencyModuleContextId === moduleContextId &&
+                    !isBindingVisibleToPublic(scopeForBindings, binding),
+            )
+        ) {
+            return true;
+        }
+
+        currentScope = currentScope.parent;
+    }
+
+    return false;
+};
+
+const createModuleScopeBindingOptions = (
+    scope: RuntimeScope,
+    publicAccess: RuntimePublicAccess,
+    binding: AnyBinding,
+): RegisterBindingsOptions => {
+    const moduleGraph = scope.context.moduleGraph;
+
+    if (!moduleGraph) {
+        return { moduleContextId: publicAccess.moduleContextId };
+    }
+
+    const bindingTokenDetails = getRuntimeTokenDetails(binding.token);
+    const visibleModuleContextIds = [publicAccess.moduleContextId];
+
+    for (const moduleContextId of moduleGraph.moduleIds) {
+        if (!hasPrivateModuleBindingForToken(scope, bindingTokenDetails, moduleContextId)) {
+            visibleModuleContextIds.push(moduleContextId);
+        }
+    }
+
+    return {
+        moduleContextId: publicAccess.moduleContextId,
+        visibleInAllModuleContexts: false,
+        visibleModuleContextIds,
+    };
+};
+
+const registerChildBindings = (
+    scope: RuntimeScope,
+    bindings: readonly AnyBinding[],
+    publicAccess: RuntimePublicAccess | undefined,
+    options: RuntimeContainerScopeOptions,
+): void => {
+    if (!publicAccess) {
+        options.registerBindings(scope, bindings);
+        return;
+    }
+
+    for (const binding of bindings) {
+        options.registerBindings(scope, [binding], createModuleScopeBindingOptions(scope, publicAccess, binding));
+    }
+};
+
 export const createRuntimeContainerForScope = (
     scope: RuntimeScope,
     options: RuntimeContainerScopeOptions,
@@ -176,11 +267,7 @@ export const createRuntimeContainerForScope = (
         assertScopeIsActive(scope);
 
         const childScope = createRuntimeScope(scope.context, scope);
-        options.registerBindings(
-            childScope,
-            bindings,
-            publicAccess ? { moduleContextId: publicAccess.moduleContextId } : undefined,
-        );
+        registerChildBindings(childScope, bindings, publicAccess, options);
         scope.children.add(childScope);
 
         return createRuntimeContainerForScope(

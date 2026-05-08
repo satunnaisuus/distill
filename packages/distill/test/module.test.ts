@@ -1338,6 +1338,56 @@ describe("module createContainer", () => {
         await app.dispose();
         expect(events).toEqual(["service", "service", "config"]);
     });
+    it("does not let module scopes shadow private same-token bindings", async () => {
+        const Shared = token("Shared").of<{
+            readonly owner: string;
+        }>();
+        const First = token("First").of<{
+            readonly owner: string;
+        }>();
+        const Second = token("Second").of<{
+            readonly owner: string;
+        }>();
+        const FirstModule = defineModule({
+            exports: [First],
+            bindings: [
+                bind(Shared)
+                    .scoped()
+                    .factory(() => ({ owner: "first" })),
+                bind(First)
+                    .scoped()
+                    .factory({ shared: Shared }, ({ shared }) => ({ owner: shared.owner })),
+            ],
+        });
+        const SecondModule = defineModule({
+            exports: [Second],
+            bindings: [
+                bind(Shared)
+                    .scoped()
+                    .factory(() => ({ owner: "second" })),
+                bind(Second)
+                    .scoped()
+                    .factory({ shared: Shared }, ({ shared }) => ({ owner: shared.owner })),
+            ],
+        });
+        const App = composeModules({
+            modules: [FirstModule, SecondModule],
+            exports: [First, Second],
+        });
+        const app = App.createContainer();
+        const request = app.createScope(
+            bind(Shared)
+                .scoped()
+                .factory(() => ({ owner: "scope" })),
+        );
+
+        expect(request.resolve(First)).toEqual({ owner: "first" });
+        expect(request.resolve(Second)).toEqual({ owner: "second" });
+        expect(request.resolve(Shared)).toEqual({ owner: "scope" });
+
+        await request.dispose();
+        await app.dispose();
+    });
     it("extends module scope public access with local multibind bindings", async () => {
         const Service = token("Service").of<{
             readonly name: string;
