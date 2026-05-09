@@ -43,16 +43,139 @@ jobs:
         if: github.event_name != 'pull_request'
         uses: actions/configure-pages@v6
 
-      - name: Build documentation
+      - name: Resolve documentation versions
+        id: docs
         env:
-          VITEPRESS_BASE: ${{ github.event_name != 'pull_request' && format('{0}/', steps.pages.outputs.base_path) || format('/{0}/', github.event.repository.name) }}
-        run: pnpm run docs:build
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
+        run: |
+          set -euo pipefail
+
+          latest_tag="$(git tag --list 'distill-v*' --sort=-version:refname | head -n 1)"
+          has_latest=false
+          latest_version=""
+
+          if [ -n "$latest_tag" ]; then
+            has_latest=true
+            latest_version="${latest_tag#distill-v}"
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            base_path="/${GITHUB_REPOSITORY#*/}"
+            base_url="https://example.invalid${base_path}"
+          else
+            base_path="$PAGES_BASE_PATH"
+            base_url="$PAGES_BASE_URL"
+          fi
+
+          if [ -n "$base_path" ]; then
+            base_path="/${base_path#/}"
+            base_path="${base_path%/}"
+
+            if [ "$base_path" = "/" ]; then
+              base_path=""
+            fi
+          fi
+
+          base_url="${base_url%/}"
+
+          if [ -z "$base_url" ]; then
+            base_url="https://example.invalid${base_path}"
+          fi
+
+          {
+            echo "base_path=$base_path"
+            echo "base_url=$base_url"
+            echo "has_latest=$has_latest"
+            echo "latest_tag=$latest_tag"
+            echo "latest_version=$latest_version"
+          } >> "$GITHUB_OUTPUT"
+
+          if [ "$has_latest" = "true" ]; then
+            echo "Latest release documentation will be built from $latest_tag."
+          else
+            echo "No distill release tag found. The dev build will also be published as latest."
+          fi
+
+      - name: Build dev documentation
+        env:
+          DOCS_EDIT_REF: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref_name }}
+          DOCS_VERSION: dev
+          DOCS_VERSION_LABEL: Dev
+          DOCS_VERSION_ROOT_URL: ${{ steps.docs.outputs.base_url }}
+          VITEPRESS_BASE: ${{ steps.docs.outputs.base_path }}/dev/
+        run: |
+          set -euo pipefail
+
+          pnpm run docs:build
+          mkdir -p site/dev
+          cp -a apps/docs/dist/. site/dev/
+          rm -rf apps/docs/dist
+
+      - name: Prepare latest release documentation
+        if: steps.docs.outputs.has_latest == 'true'
+        env:
+          LATEST_TAG: ${{ steps.docs.outputs.latest_tag }}
+        run: |
+          set -euo pipefail
+
+          latest_worktree="$RUNNER_TEMP/distill-latest-docs"
+          rm -rf "$latest_worktree"
+          git worktree add --detach "$latest_worktree" "$LATEST_TAG"
+
+          rm -rf "$latest_worktree/apps/docs/docs/.vitepress"
+          cp -a apps/docs/docs/.vitepress "$latest_worktree/apps/docs/docs/.vitepress"
+
+      - name: Install latest release dependencies
+        if: steps.docs.outputs.has_latest == 'true'
+        working-directory: ${{ runner.temp }}/distill-latest-docs
+        run: pnpm install --frozen-lockfile
+
+      - name: Build latest release documentation
+        if: steps.docs.outputs.has_latest == 'true'
+        working-directory: ${{ runner.temp }}/distill-latest-docs
+        env:
+          DOCS_EDIT_REF: ""
+          DOCS_VERSION: latest
+          DOCS_VERSION_LABEL: Latest (${{ steps.docs.outputs.latest_version }})
+          DOCS_VERSION_ROOT_URL: ${{ steps.docs.outputs.base_url }}
+          VITEPRESS_BASE: ${{ steps.docs.outputs.base_path }}/latest/
+        run: |
+          set -euo pipefail
+
+          pnpm run docs:build
+          mkdir -p "$GITHUB_WORKSPACE/site/latest"
+          cp -a apps/docs/dist/. "$GITHUB_WORKSPACE/site/latest/"
+
+      - name: Publish dev documentation as latest fallback
+        if: steps.docs.outputs.has_latest != 'true'
+        run: |
+          set -euo pipefail
+
+          mkdir -p site/latest
+          cp -a site/dev/. site/latest/
+
+      - name: Create documentation entrypoint
+        run: |
+          set -euo pipefail
+
+          cat > site/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>Distill documentation</title>
+          <meta http-equiv="refresh" content="0; url=./latest/">
+          <link rel="canonical" href="./latest/">
+          <script>location.replace("./latest/" + location.search + location.hash);</script>
+          <p><a href="./latest/">Distill documentation</a></p>
+          HTML
+
+          touch site/.nojekyll
 
       - name: Upload GitHub Pages artifact
         if: github.event_name != 'pull_request'
         uses: actions/upload-pages-artifact@v5
         with:
-          path: apps/docs/dist
+          path: site
 
   deploy:
     name: Deploy documentation

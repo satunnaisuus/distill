@@ -6,6 +6,8 @@ import llmstxt from "vitepress-plugin-llms";
 
 const configDir = dirname(fileURLToPath(import.meta.url));
 
+const trimTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
+
 const readSidebar = (path: string): DefaultTheme.SidebarItem[] => {
     try {
         return JSON.parse(readFileSync(resolve(configDir, path), "utf8")) as DefaultTheme.SidebarItem[];
@@ -16,6 +18,20 @@ const readSidebar = (path: string): DefaultTheme.SidebarItem[] => {
 
 const distillApiSidebar = readSidebar("../api/distill/typedoc-sidebar.json");
 const generatedApiPathPrefix = "api/distill/";
+const docsVersion = process.env.DOCS_VERSION ?? "dev";
+const docsVersionLabel = process.env.DOCS_VERSION_LABEL ?? (docsVersion === "latest" ? "Latest" : "Dev");
+const docsVersionRootUrl = process.env.DOCS_VERSION_ROOT_URL
+    ? trimTrailingSlash(process.env.DOCS_VERSION_ROOT_URL)
+    : undefined;
+const docsEditRef = process.env.DOCS_EDIT_REF ?? "develop";
+
+const versionLink = (version: "dev" | "latest"): string => {
+    if (docsVersionRootUrl) {
+        return `${docsVersionRootUrl}/${version}/`;
+    }
+
+    return `/${version}/`;
+};
 
 const guideSidebar: DefaultTheme.SidebarItem[] = [
     {
@@ -92,6 +108,13 @@ export default defineConfig({
             { text: "Guide", link: "/guide/getting-started" },
             { text: "Packages", link: "/packages/" },
             { text: "API", link: "/api/" },
+            {
+                text: docsVersionLabel,
+                items: [
+                    { text: "Latest", link: versionLink("latest"), target: "_self" },
+                    { text: "Dev", link: versionLink("dev"), target: "_self" },
+                ],
+            },
         ],
         sidebar: {
             "/guide/": guideSidebar,
@@ -105,10 +128,12 @@ export default defineConfig({
             level: [2, 3],
         },
         socialLinks: [{ icon: "github", link: "https://github.com/satunnaisuus/distill" }],
-        editLink: {
-            pattern: "https://github.com/satunnaisuus/distill/edit/develop/apps/docs/docs/:path",
-            text: "Edit this page on GitHub",
-        },
+        editLink: docsEditRef
+            ? {
+                  pattern: `https://github.com/satunnaisuus/distill/edit/${docsEditRef}/apps/docs/docs/:path`,
+                  text: "Edit this page on GitHub",
+              }
+            : undefined,
         footer: {
             message: "Released under the MIT License.",
             copyright: "Copyright 2026-present satunnaisuus",
