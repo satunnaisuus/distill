@@ -2,7 +2,10 @@
 
 > Type-safe dependency injection for TypeScript
 
+[![npm version](https://img.shields.io/npm/v/@satunnaisuus/distill.svg)](https://www.npmjs.com/package/@satunnaisuus/distill)
 [![Coveralls](https://coveralls.io/repos/github/satunnaisuus/distill/badge.svg?branch=main)](https://coveralls.io/github/satunnaisuus/distill?branch=main)
+[![minzipped size](https://img.shields.io/bundlephobia/minzip/@satunnaisuus/distill.svg)](https://bundlephobia.com/package/@satunnaisuus/distill)
+[![license](https://img.shields.io/npm/l/@satunnaisuus/distill.svg)](./LICENSE)
 
 - End-to-end type inference for tokens, dependency maps, factories, and resolved values
 - Compile-time checks for missing services, duplicate bindings, unknown dependencies, and eager cycles

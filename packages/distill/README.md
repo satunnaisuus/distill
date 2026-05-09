@@ -1,6 +1,9 @@
 # Distill
 
+[![npm version](https://img.shields.io/npm/v/@satunnaisuus/distill.svg)](https://www.npmjs.com/package/@satunnaisuus/distill)
 [![Coveralls](https://coveralls.io/repos/github/satunnaisuus/distill/badge.svg?branch=main)](https://coveralls.io/github/satunnaisuus/distill?branch=main)
+[![minzipped size](https://img.shields.io/bundlephobia/minzip/@satunnaisuus/distill.svg)](https://bundlephobia.com/package/@satunnaisuus/distill)
+[![license](https://img.shields.io/npm/l/@satunnaisuus/distill.svg)](./LICENSE)
 
 Distill is a type-safe dependency injection container for TypeScript. It uses typed tokens and explicit factory bindings so TypeScript can catch unresolved services, singleton missing bindings, duplicate bindings, unknown dependencies, and eager dependency cycles at compile time.
 
