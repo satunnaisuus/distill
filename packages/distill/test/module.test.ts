@@ -1338,6 +1338,44 @@ describe("module createContainer", () => {
         await app.dispose();
         expect(events).toEqual(["service", "service", "config"]);
     });
+    it("creates module scoped containers from scope template factories", async () => {
+        const Request = token("Request").of<{
+            readonly id: string;
+        }>();
+        const Service = token("Service").of<{
+            readonly requestId: string;
+        }>();
+        const AppModule = defineModule({
+            exports: [Service],
+            bindings: [
+                bind(Service)
+                    .scoped()
+                    .factory({ request: Request }, ({ request }) => ({ requestId: request.id })),
+            ],
+        });
+        const App = composeModules({
+            modules: [AppModule],
+            exports: [Service],
+        });
+        const app = App.createContainer();
+        const template = app.createScopeTemplate(
+            (requestId: string) =>
+                [
+                    bind(Request)
+                        .scoped()
+                        .factory(() => ({ id: requestId })),
+                ] as const,
+        );
+        const request = template.create("request-1");
+
+        expect(request.resolve(Service)).toEqual({ requestId: "request-1" });
+        await expect(template.runScoped("request-2", (scope) => scope.resolve(Service))).resolves.toEqual({
+            requestId: "request-2",
+        });
+
+        await request.dispose();
+        await app.dispose();
+    });
     it("does not let module scopes shadow private same-token bindings", async () => {
         const Shared = token("Shared").of<{
             readonly owner: string;

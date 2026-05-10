@@ -36,6 +36,61 @@ test("create accepts single binding overrides", () => {
     expect(container.resolve(tokens.port)).type.toBe<number>();
 });
 
+test("containers with binding overrides remain assignable to the base container type", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+        bind(tokens.port).factory({ config: tokens.config }, ({ config }) => config.port),
+    );
+    const baseContainer = definition.create();
+    type AppContainer = typeof baseContainer;
+    const container = definition.create(override(bind(tokens.config).factory(() => ({ port: 4000 }))));
+
+    expect(container).type.toBeAssignableTo<AppContainer>();
+    expect(container.resolve(tokens.config)).type.toBe<{ readonly port: number }>();
+    expect(container.resolve(tokens.port)).type.toBe<number>();
+});
+
+test("container override resolve types include override dependencies", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+    );
+    const container = definition.create(
+        override(
+            bind(tokens.config)
+                .transient()
+                .factory({ logger: tokens.logger }, () => ({ port: 4000 })),
+        ),
+    );
+    const scope = container.createScope(
+        bind(tokens.logger).factory(() => ({
+            log: () => {},
+        })),
+    );
+
+    expect(() => {
+        container.resolve(tokens.config);
+    }).type.toRaiseError();
+    expect(scope.resolve(tokens.config)).type.toBe<{ readonly port: number }>();
+});
+
+test("child scopes remain assignable to their parent container type", () => {
+    const definition = defineContainer(
+        tokenList,
+        bind(tokens.config).factory(() => ({ port: 3000 })),
+        bind(tokens.port).factory({ config: tokens.config }, ({ config }) => config.port),
+    );
+    const app = definition.create();
+    type AppContainer = typeof app;
+    const child = app.createScope(bind(tokens.server).factory({ port: tokens.port }, ({ port }) => ({ port })));
+
+    expect(child).type.toBeAssignableTo<AppContainer>();
+    expect(child.resolve(tokens.config)).type.toBe<{ readonly port: number }>();
+    expect(child.resolve(tokens.port)).type.toBe<number>();
+    expect(child.resolve(tokens.server)).type.toBe<{ readonly port: number }>();
+});
+
 test("create accepts single binding unbinds", () => {
     const definition = defineContainer(
         tokenList,

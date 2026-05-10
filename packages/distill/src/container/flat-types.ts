@@ -10,6 +10,7 @@ import type {
     ValidateScopeBindings,
     ValidateTokenList,
 } from "../runtime/index";
+import type { ScopeTemplate } from "../shared/index";
 import type {
     AnyMultiToken,
     AnySingleToken,
@@ -25,6 +26,7 @@ import type {
     DuplicateOverridesError,
     IfNever,
     MissingSingleOverrideTargetsError,
+    OverridesPreserveRootResolution,
     OverrideTokensOutsideTokenListError,
     TupleOverridesError,
     UnionOverrideTokenError,
@@ -125,22 +127,42 @@ type CreateScopeFn<
     TScopes extends BindingScopes,
 > = <const TScopeBindings extends readonly AnyBinding[]>(
     ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>
-) => Container<readonly [...TBindings, ...TScopeBindings], TTokenArray, readonly [...TScopes, TScopeBindings]>;
+) => ScopedContainer<TBindings, TTokenArray, TScopes, TScopeBindings>;
 
 type RunScopedFn<
     TBindings extends readonly AnyBinding[],
     TTokenArray extends AnyTokenArray,
     TScopes extends BindingScopes,
-> = <const TScopeBindings extends readonly AnyBinding[], TResult>(
+> = <
+    const TScopeBindings extends readonly AnyBinding[],
+    TCallback extends (scope: Container<TBindings, TTokenArray, readonly [...TScopes, TScopeBindings]>) => unknown,
+>(
     bindings: readonly [...TScopeBindings] & Readonly<ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>>,
-    callback: (
-        scope: Container<
-            readonly [...TBindings, ...TScopeBindings],
-            TTokenArray,
-            readonly [...TScopes, TScopeBindings]
-        >,
-    ) => TResult,
-) => Promise<Awaited<TResult>>;
+    callback: TCallback,
+) => Promise<Awaited<ReturnType<TCallback>>>;
+
+type ScopeTemplateFactoryValidationArgs<
+    TScopeBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+    TScopes extends BindingScopes,
+> =
+    readonly [...TScopeBindings] extends Readonly<ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>>
+        ? []
+        : [validationError: Readonly<ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>>];
+
+type CreateScopeTemplateFn<
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+    TScopes extends BindingScopes,
+> = {
+    <const TArgs extends unknown[], const TScopeBindings extends readonly AnyBinding[]>(
+        createBindings: (...args: TArgs) => readonly [...TScopeBindings],
+        ...validation: ScopeTemplateFactoryValidationArgs<TScopeBindings, TTokenArray, TScopes>
+    ): ScopeTemplate<TArgs, ScopedContainer<TBindings, TTokenArray, TScopes, TScopeBindings>>;
+    <const TScopeBindings extends readonly AnyBinding[]>(
+        ...bindings: TScopeBindings & ValidateScopeBindings<TScopeBindings, TTokenArray, TScopes>
+    ): ScopeTemplate<[], ScopedContainer<TBindings, TTokenArray, TScopes, TScopeBindings>>;
+};
 
 type BindingTokenArray<TBindings extends readonly AnyBinding[]> = readonly BindingTokens<TBindings>[];
 
@@ -171,15 +193,39 @@ type ValidateContainerOverrides<
     MissingSingleOverrideTargetsError<TOverrides, TBindings> &
     InvalidOverrideGraphError<TOverrides, TResolvedBindings, TTokenArray>;
 
-type CreateDefinitionContainerFn<TBindings extends readonly AnyBinding[], TTokenArray extends AnyTokenArray> = <
-    const TOverrides extends readonly AnyBindingOverride[],
->(
-    ...overrides: TOverrides & ValidateContainerOverrides<TOverrides, TBindings, TTokenArray>
-) => Container<
-    ApplyContainerOverrides<TBindings, TOverrides>,
-    TTokenArray,
-    readonly [ApplyContainerOverrides<TBindings, TOverrides>]
->;
+type RootPreservingContainerOverrides<
+    TOverrides extends readonly AnyBindingOverride[],
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+> = TOverrides &
+    ValidateContainerOverrides<TOverrides, TBindings, TTokenArray> &
+    (OverridesPreserveRootResolution<TOverrides> extends true ? unknown : never);
+
+type CreateDefinitionContainerFn<TBindings extends readonly AnyBinding[], TTokenArray extends AnyTokenArray> = {
+    <const TOverrides extends readonly AnyBindingOverride[]>(
+        ...overrides: RootPreservingContainerOverrides<TOverrides, TBindings, TTokenArray>
+    ): Container<TBindings, TTokenArray, readonly [TBindings]>;
+    <const TOverrides extends readonly AnyBindingOverride[]>(
+        ...overrides: TOverrides & ValidateContainerOverrides<TOverrides, TBindings, TTokenArray>
+    ): Container<
+        ApplyContainerOverrides<TBindings, TOverrides>,
+        TTokenArray,
+        readonly [ApplyContainerOverrides<TBindings, TOverrides>]
+    >;
+};
+
+type ScopedContainer<
+    TBindings extends readonly AnyBinding[],
+    TTokenArray extends AnyTokenArray,
+    TParentScopes extends BindingScopes,
+    TScopeBindings extends readonly AnyBinding[],
+    TChildScopes extends BindingScopes = readonly [...TParentScopes, TScopeBindings],
+> = Container<TBindings, TTokenArray, TChildScopes> &
+    IfNever<
+        Extract<BindingTokens<TScopeBindings>, BindingTokens<TParentScopes[number]>>,
+        Container<TBindings, TTokenArray, TParentScopes>,
+        unknown
+    >;
 
 export type ContainerDefinition<
     TBindings extends readonly AnyBinding[] = [],
@@ -196,6 +242,7 @@ export type Container<
     resolve: ResolveFn<TScopes, TTokenArray>;
     resolveOptional: ResolveOptionalFn<TScopes, TTokenArray>;
     createScope: CreateScopeFn<TBindings, TTokenArray, TScopes>;
+    createScopeTemplate: CreateScopeTemplateFn<TBindings, TTokenArray, TScopes>;
     runScoped: RunScopedFn<TBindings, TTokenArray, TScopes>;
     dispose(): Promise<void>;
     readonly disposed: boolean;

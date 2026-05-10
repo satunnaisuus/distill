@@ -1,8 +1,9 @@
 import { Hono } from "hono";
-import type { HttpBindings, HttpSubRouter } from "../http/index.js";
+import type { HttpBindings } from "../http/index.js";
+import type { Router } from "../integration.js";
 import type { GreetingService } from "./greeting-service.js";
 
-export const createGreetingsSubRouter = (greetingService: GreetingService): HttpSubRouter => {
+export const createGreetingsRouter = (greetingService: GreetingService): Router => {
     const router = new Hono<HttpBindings>();
 
     router.get("/", (c) => {

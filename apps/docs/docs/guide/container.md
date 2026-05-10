@@ -91,6 +91,42 @@ const currentUser = request.resolve(CurrentUser);
 Use scoped bindings for values that should be cached once per resolving scope. Singleton bindings are cached where they
 are registered, and transient bindings are created on every resolution.
 
+## Scope Templates
+
+Use `createScopeTemplate(...)` when a scoped container type needs to be named before the scope is created at runtime.
+Templates are useful for request middleware that stores a scoped container in a framework context.
+
+Call shapes:
+
+```ts
+container.createScopeTemplate(...bindings)
+container.createScopeTemplate((input) => bindings)
+template.create(input)
+template.runScoped(input, callback)
+```
+
+```ts
+import { type ScopeTemplateContainer } from "@satunnaisuus/distill";
+
+type RequestState = {
+    readonly userId: string;
+};
+
+const requestTemplate = container.createScopeTemplate((state: RequestState) => [
+    bind(CurrentUserId)
+        .scoped()
+        .factory(() => state.userId),
+] as const);
+
+type RequestContainer = ScopeTemplateContainer<typeof requestTemplate>;
+
+const request = requestTemplate.create({ userId: "user-1" });
+const userId = request.resolve(CurrentUserId);
+```
+
+`template.runScoped(...)` mirrors `container.runScoped(...)`: it creates a scope from the template bindings, passes it to
+the callback, and disposes it after the callback settles.
+
 ## Automatic Scope Disposal
 
 `runScoped(...)` creates a child scope, passes it to a callback, and disposes the scope after the callback settles.

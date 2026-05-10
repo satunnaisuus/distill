@@ -5,6 +5,7 @@ import {
     type MultiToken,
     multiToken,
     override,
+    type ScopeTemplateContainer,
     token,
     unbind,
 } from "@satunnaisuus/distill";
@@ -302,6 +303,63 @@ test("imported exported bindings preserve unresolved scoped dependencies", () =>
     expect(requestScope.resolve(AppService)).type.toBe<{
         readonly requestId: string;
     }>();
+});
+test("module containers expose request scope template container types", () => {
+    const Request = token("Request").of<{
+        readonly id: string;
+    }>();
+    const Service = token("Service").of<{
+        readonly requestId: string;
+    }>();
+    const ApiModule = defineModule({
+        exports: [Service],
+        bindings: [
+            bind(Service)
+                .scoped()
+                .factory({ request: Request }, ({ request }) => ({ requestId: request.id })),
+        ],
+    });
+    const App = composeModules({
+        modules: [ApiModule],
+        exports: [Service],
+    });
+    const app = App.createContainer();
+    const requestScope = app.createScopeTemplate(
+        (request: { readonly id: string }) =>
+            [
+                bind(Request)
+                    .scoped()
+                    .factory(() => request),
+            ] as const,
+    );
+    type RequestContainer = ScopeTemplateContainer<typeof requestScope>;
+    const requestContainer = {} as RequestContainer;
+
+    expect(requestContainer.resolve(Service)).type.toBe<{
+        readonly requestId: string;
+    }>();
+    expect(requestScope.create({ id: "request-1" }).resolve(Service)).type.toBe<{
+        readonly requestId: string;
+    }>();
+    expect(requestScope.runScoped({ id: "request-1" }, (scope) => scope.resolve(Service))).type.toBe<
+        Promise<{
+            readonly requestId: string;
+        }>
+    >();
+    expect(
+        app.runScoped(
+            [
+                bind(Request)
+                    .scoped()
+                    .factory(() => ({ id: "request-1" })),
+            ] as const,
+            (scope) => scope.resolve(Service),
+        ),
+    ).type.toBe<
+        Promise<{
+            readonly requestId: string;
+        }>
+    >();
 });
 test("module bindings reject imported internals", () => {
     const Secret = token("Secret").of<{
@@ -727,6 +785,129 @@ test("module override types preserve non-overridden composition exports", () => 
     expect(app.resolve(Server)).type.toBe<{
         readonly port: number;
     }>();
+});
+test("module containers with binding overrides remain assignable to the base container type", () => {
+    const Config = token("Config").of<{
+        readonly port: number;
+    }>();
+    const Server = token("Server").of<{
+        readonly port: number;
+    }>();
+    const AppModule = defineModule({
+        exports: [Config, Server],
+        bindings: [
+            bind(Config).factory(() => ({ port: 3000 })),
+            bind(Server).factory({ config: Config }, ({ config }) => ({ port: config.port })),
+        ],
+    });
+    const App = composeModules({
+        modules: [AppModule],
+        exports: [Config, Server],
+    });
+    const baseApp = App.createContainer();
+    type AppContainer = typeof baseApp;
+    const app = App.createContainer(override(bind(Config).factory(() => ({ port: 4000 }))));
+
+    expect(app).type.toBeAssignableTo<AppContainer>();
+    expect(app.resolve(Config)).type.toBe<{
+        readonly port: number;
+    }>();
+    expect(app.resolve(Server)).type.toBe<{
+        readonly port: number;
+    }>();
+});
+test("module override resolve types include override dependencies", () => {
+    const Request = token("Request").of<{
+        readonly id: string;
+    }>();
+    const Config = token("Config").of<{
+        readonly requestId: string;
+    }>();
+    const Service = token("Service").of<{
+        readonly requestId: string;
+    }>();
+    const AppModule = defineModule({
+        exports: [Config, Service],
+        bindings: [
+            bind(Config).factory(() => ({ requestId: "base" })),
+            bind(Service)
+                .scoped()
+                .factory({ request: Request }, ({ request }) => ({ requestId: request.id })),
+        ],
+    });
+    const App = composeModules({
+        modules: [AppModule],
+        exports: [Config, Service],
+    });
+    const app = App.createContainer(
+        override(
+            bind(Config)
+                .transient()
+                .factory({ service: Service }, ({ service }) => ({ requestId: service.requestId })),
+        ),
+    );
+    const scope = app.createScope(
+        bind(Request)
+            .scoped()
+            .factory(() => ({ id: "request-1" })),
+    );
+
+    expect(() => {
+        app.resolve(Config);
+    }).type.toRaiseError();
+    expect(scope.resolve(Config)).type.toBe<{
+        readonly requestId: string;
+    }>();
+});
+test("module child scopes remain assignable to their parent container type", () => {
+    const Request = token("Request").of<{
+        readonly id: string;
+    }>();
+    const Service = token("Service").of<{
+        readonly id: string;
+    }>();
+    const AppModule = defineModule({
+        exports: [Service],
+        bindings: [
+            bind(Service)
+                .scoped()
+                .factory({ request: Request }, ({ request }) => ({ id: request.id })),
+        ],
+    });
+    const App = composeModules({
+        modules: [AppModule],
+        exports: [Service],
+    });
+    const app = App.createContainer();
+    type AppContainer = typeof app;
+    const child = app.createScope(
+        bind(Request)
+            .scoped()
+            .factory(() => ({ id: "request-1" })),
+    );
+
+    expect(child).type.toBeAssignableTo<AppContainer>();
+    expect(child.resolve(Service)).type.toBe<{
+        readonly id: string;
+    }>();
+});
+test("module container unbinds still remove public tokens from the container type", () => {
+    const Config = token("Config").of<{
+        readonly port: number;
+    }>();
+    const AppModule = defineModule({
+        exports: [Config],
+        bindings: [bind(Config).factory(() => ({ port: 3000 }))],
+    });
+    const App = composeModules({
+        modules: [AppModule],
+        exports: [Config],
+    });
+    const app = App.createContainer(unbind(Config));
+
+    expect(() => {
+        app.resolve(Config);
+    }).type.toRaiseError();
 });
 test("module override validation follows public override dependencies", () => {
     const Request = token("Request").of<{

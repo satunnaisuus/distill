@@ -1,12 +1,13 @@
 import { Hono } from "hono";
-import type { HttpBindings, HttpSubRouter } from "../http/index.js";
+import type { HttpBindings } from "../http/index.js";
+import type { Router } from "../integration.js";
 import type { Auth } from "./auth-token.js";
 
-type CreateAuthSubRouterDeps = {
+type CreateAuthRouterDeps = {
     auth: Auth;
 };
 
-export const createAuthSubRouter = ({ auth }: CreateAuthSubRouterDeps): HttpSubRouter => {
+export const createAuthRouter = ({ auth }: CreateAuthRouterDeps): Router => {
     const router = new Hono<HttpBindings>();
 
     router.on(["GET", "POST"], "/*", (c) => auth.handler(c.req.raw));

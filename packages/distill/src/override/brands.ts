@@ -1,5 +1,5 @@
-import type { AnyBinding } from "../binding/index";
-import type { IsUnion, TupleError, ValidationErrorUnlessNever } from "../shared/index";
+import type { AnyBinding, BindingDependencies, BindingLifetimeOf } from "../binding/index";
+import type { IfNever, IsUnion, TupleError, ValidationErrorUnlessNever } from "../shared/index";
 import type {
     AnyMultiToken,
     AnySingleToken,
@@ -69,16 +69,114 @@ export type BindingIsOverridden<TBinding extends AnyBinding, TOverrides extends 
         ? HasExactToken<MultiOverrideTokens<TOverrides>, TBinding["token"]>
         : HasExactToken<SingleOverrideTokens<TOverrides>, TBinding["token"]>;
 
-type RemoveOverriddenBindings<
+type BindingPreservesRootResolution<TBinding extends AnyBinding> =
+    BindingLifetimeOf<TBinding> extends "singleton"
+        ? BindingDependencies<TBinding> extends undefined
+            ? true
+            : false
+        : false;
+
+type HasRootResolutionChangingBinding<TBindings extends readonly AnyBinding[]> =
+    TBindings[number] extends infer TBinding
+        ? TBinding extends AnyBinding
+            ? BindingPreservesRootResolution<TBinding> extends true
+                ? never
+                : true
+            : true
+        : never;
+
+type BindingsPreserveRootResolution<TBindings extends readonly AnyBinding[]> = IfNever<
+    HasRootResolutionChangingBinding<TBindings>,
+    true,
+    false
+>;
+
+type OverridePreservesRootResolution<TOverride extends AnyBindingOverride> =
+    TOverride extends BindingOverride<infer TBinding>
+        ? BindingPreservesRootResolution<TBinding>
+        : TOverride extends BindingOverrideAll<AnyMultiToken, infer TBindings>
+          ? BindingsPreserveRootResolution<TBindings>
+          : false;
+
+type HasRootResolutionChangingOverride<TOverrides extends readonly AnyBindingOverride[]> =
+    TOverrides[number] extends infer TOverride
+        ? TOverride extends AnyBindingOverride
+            ? OverridePreservesRootResolution<TOverride> extends true
+                ? never
+                : true
+            : true
+        : never;
+
+export type OverridesPreserveRootResolution<TOverrides extends readonly AnyBindingOverride[]> = IfNever<
+    HasRootResolutionChangingOverride<TOverrides>,
+    true,
+    false
+>;
+
+type OverrideBindingForToken<
+    TOverrideBindings extends readonly AnyBinding[],
+    TToken extends AnyToken,
+    TBinding extends AnyBinding = TOverrideBindings[number],
+> = TBinding extends AnyBinding ? (HasExactToken<TBinding["token"], TToken> extends true ? TBinding : never) : never;
+
+type SingleOverrideReplacementBindings<TOverrideBindings extends readonly AnyBinding[]> =
+    number extends TOverrideBindings["length"]
+        ? readonly AnyBinding[]
+        : TOverrideBindings extends readonly [
+                infer TCurrentBinding extends AnyBinding,
+                ...infer TRemainingBindings extends readonly AnyBinding[],
+            ]
+          ? IsMultiToken<TCurrentBinding["token"]> extends true
+              ? SingleOverrideReplacementBindings<TRemainingBindings>
+              : readonly [TCurrentBinding, ...SingleOverrideReplacementBindings<TRemainingBindings>]
+          : readonly [];
+
+type MultiOverrideReplacementBindings<TOverrideBindings extends readonly AnyBinding[]> =
+    number extends TOverrideBindings["length"]
+        ? readonly AnyBinding[]
+        : TOverrideBindings extends readonly [
+                infer TCurrentBinding extends AnyBinding,
+                ...infer TRemainingBindings extends readonly AnyBinding[],
+            ]
+          ? IsMultiToken<TCurrentBinding["token"]> extends true
+              ? readonly [TCurrentBinding, ...MultiOverrideReplacementBindings<TRemainingBindings>]
+              : MultiOverrideReplacementBindings<TRemainingBindings>
+          : readonly [];
+
+type ApplySingleOverrideBinding<
+    TCurrentBinding extends AnyBinding,
+    TOverrides extends readonly AnyBindingOverride[],
+    TOverrideBindings extends readonly AnyBinding[],
+    TRemainingBindings extends readonly AnyBinding[],
+    TReplacementBinding extends AnyBinding = OverrideBindingForToken<
+        SingleOverrideReplacementBindings<TOverrideBindings>,
+        TCurrentBinding["token"]
+    >,
+> = [TReplacementBinding] extends [never]
+    ? HasExactToken<SingleOverrideTokens<TOverrides>, TCurrentBinding["token"]> extends true
+        ? ApplyOverrideBindingsInPlace<TRemainingBindings, TOverrides, TOverrideBindings>
+        : readonly [TCurrentBinding, ...ApplyOverrideBindingsInPlace<TRemainingBindings, TOverrides, TOverrideBindings>]
+    : readonly [
+          TReplacementBinding,
+          ...ApplyOverrideBindingsInPlace<TRemainingBindings, TOverrides, TOverrideBindings>,
+      ];
+
+type ApplyOverrideBindingsInPlace<
     TBindings extends readonly AnyBinding[],
     TOverrides extends readonly AnyBindingOverride[],
+    TOverrideBindings extends readonly AnyBinding[],
 > = TBindings extends readonly [
     infer TCurrentBinding extends AnyBinding,
     ...infer TRemainingBindings extends AnyBinding[],
 ]
-    ? BindingIsOverridden<TCurrentBinding, TOverrides> extends true
-        ? RemoveOverriddenBindings<TRemainingBindings, TOverrides>
-        : readonly [TCurrentBinding, ...RemoveOverriddenBindings<TRemainingBindings, TOverrides>]
+    ? IsMultiToken<TCurrentBinding["token"]> extends true
+        ? HasExactToken<MultiOverrideTokens<TOverrides>, TCurrentBinding["token"]> extends true
+            ? ApplyOverrideBindingsInPlace<TRemainingBindings, TOverrides, TOverrideBindings>
+            : readonly [
+                  TCurrentBinding,
+                  ...ApplyOverrideBindingsInPlace<TRemainingBindings, TOverrides, TOverrideBindings>,
+              ]
+        : ApplySingleOverrideBinding<TCurrentBinding, TOverrides, TOverrideBindings, TRemainingBindings>
     : readonly [];
 
 export type SingleOverrideBindings<TOverrides extends readonly AnyBindingOverride[]> = TOverrides extends readonly [
@@ -102,17 +200,20 @@ export type MultiOverrideBindings<TOverrides extends readonly AnyBindingOverride
 export type ApplyContainerOverrides<
     TBindings extends readonly AnyBinding[],
     TOverrides extends readonly AnyBindingOverride[],
-> = readonly [
-    ...RemoveOverriddenBindings<TBindings, TOverrides>,
-    ...SingleOverrideBindings<TOverrides>,
-    ...MultiOverrideBindings<TOverrides>,
-];
+> = ApplyContainerOverrideBindings<
+    TBindings,
+    TOverrides,
+    readonly [...SingleOverrideBindings<TOverrides>, ...MultiOverrideBindings<TOverrides>]
+>;
 
 export type ApplyContainerOverrideBindings<
     TBindings extends readonly AnyBinding[],
     TOverrides extends readonly AnyBindingOverride[],
     TOverrideBindings extends readonly AnyBinding[],
-> = readonly [...RemoveOverriddenBindings<TBindings, TOverrides>, ...TOverrideBindings];
+> = readonly [
+    ...ApplyOverrideBindingsInPlace<TBindings, TOverrides, TOverrideBindings>,
+    ...MultiOverrideReplacementBindings<TOverrideBindings>,
+];
 
 type OverrideOperationToken<TOverride extends AnyBindingOverride> =
     TOverride extends BindingOverride<infer TBinding>

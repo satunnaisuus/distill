@@ -852,6 +852,54 @@ describe("defineContainer", () => {
         expect(childScope.resolve(tokens.service)).toEqual({ name: "child" });
     });
 
+    it("creates scoped containers from static scope templates", async () => {
+        const tokens = {
+            request: token("request").of<{ readonly id: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+        const template = container.createScopeTemplate(
+            bind(tokens.request)
+                .scoped()
+                .factory(() => ({ id: "request-1" })),
+        );
+        const createdScope = template.create();
+        let callbackScope: { readonly disposed: boolean } | undefined;
+
+        expect(createdScope.resolve(tokens.request)).toEqual({ id: "request-1" });
+
+        const result = await template.runScoped((scope) => {
+            callbackScope = scope;
+
+            return scope.resolve(tokens.request);
+        });
+
+        expect(result).toEqual({ id: "request-1" });
+        expect(callbackScope?.disposed).toBe(true);
+    });
+
+    it("creates scoped containers from scope template factories", async () => {
+        const tokens = {
+            request: token("request").of<{ readonly id: string }>(),
+        };
+        const container = defineContainer(Object.values(tokens)).create();
+        const template = container.createScopeTemplate(
+            (requestId: string) =>
+                [
+                    bind(tokens.request)
+                        .scoped()
+                        .factory(() => ({ id: requestId })),
+                ] as const,
+        );
+        const firstScope = template.create("request-1");
+        const secondScope = template.create("request-2");
+
+        expect(firstScope.resolve(tokens.request)).toEqual({ id: "request-1" });
+        expect(secondScope.resolve(tokens.request)).toEqual({ id: "request-2" });
+        await expect(template.runScoped("request-3", (scope) => scope.resolve(tokens.request))).resolves.toEqual({
+            id: "request-3",
+        });
+    });
+
     it("resolves ref dependencies from the scope that created the ref", () => {
         const tokens = {
             config: token("config").of<{ readonly name: string }>(),

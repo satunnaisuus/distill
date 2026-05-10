@@ -13,6 +13,7 @@ export {
     type ComposedModuleDefinition,
     composeModules,
     defineModule,
+    type ModuleContainer,
     type ModuleDefinition,
     type ModuleImportWire,
     provideImport,
@@ -26,6 +27,7 @@ export {
     overrideAll,
     unbind,
 } from "./override/index";
+export type { ScopeTemplate, ScopeTemplateArgs, ScopeTemplateContainer } from "./shared/index";
 export {
     type MultiToken,
     type MultiTokenBuilder,

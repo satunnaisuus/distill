@@ -1,3 +1,4 @@
+export type { ScopeTemplate, ScopeTemplateArgs, ScopeTemplateContainer } from "./scope-template-types";
 export type {
     HasTrue,
     IfNever,

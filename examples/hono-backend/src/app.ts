@@ -1,34 +1,17 @@
-import { bind, composeModules } from "@satunnaisuus/distill";
 import { Hono } from "hono";
-import {
-    type Auth,
-    AuthModule,
-    type AuthRequestContainer,
-    AuthToken,
-    CurrentSession,
-    CurrentUser,
-} from "./auth/index.js";
-import { ConfigModule } from "./config/index.js";
-import { DatabaseModule } from "./database/index.js";
-import { GreetingsModule } from "./greetings/index.js";
-import { type HttpBindings, HttpModule, type HttpSubRouter, HttpSubRouterToken } from "./http/index.js";
+import { type AppContainer, AppModule, createAppContainer, createAuthRequestScopeTemplate } from "./app-container.js";
+import { AuthToken, CurrentSession, CurrentUser } from "./auth/index.js";
+import type { HttpBindings } from "./http/index.js";
+import { createHonoApp, type HonoContainer, type ROUTER } from "./integration.js";
 
-export const AppModule = composeModules({
-    modules: [HttpModule, ConfigModule, DatabaseModule, AuthModule, GreetingsModule],
-} as const);
-
-export const createAppContainer = () => AppModule.createContainer();
-
-export type AppContainer = {
-    readonly resolve: {
-        (token: typeof AuthToken): Auth;
-        (token: typeof HttpSubRouterToken): HttpSubRouter[];
-    };
-    readonly runScoped: (...args: any[]) => Promise<unknown>;
-};
+export { AppModule, createAppContainer };
 
 export const createApp = (container: AppContainer): Hono<HttpBindings> => {
+    const honoContainer: HonoContainer = {
+        resolve: ((token: typeof ROUTER) => container.resolve(token)) as HonoContainer["resolve"],
+    };
     const app = new Hono<HttpBindings>();
+    const authRequestScopeTemplate = createAuthRequestScopeTemplate(container);
 
     app.use("*", async (c, next) => {
         const auth = container.resolve(AuthToken);
@@ -36,28 +19,17 @@ export const createApp = (container: AppContainer): Hono<HttpBindings> => {
         const user = authSession?.user ?? null;
         const session = authSession?.session ?? null;
 
-        await container.runScoped(
-            [
-                bind(CurrentUser)
-                    .scoped()
-                    .factory(() => user),
-                bind(CurrentSession)
-                    .scoped()
-                    .factory(() => session),
-            ] as const,
-            async (requestContainer: AuthRequestContainer) => {
-                c.set("requestContainer", requestContainer);
-                c.set("user", requestContainer.resolve(CurrentUser));
-                c.set("session", requestContainer.resolve(CurrentSession));
+        await authRequestScopeTemplate.runScoped({ user, session }, async (requestContainer) => {
+            c.set("container", requestContainer);
+            c.set("user", requestContainer.resolve(CurrentUser));
+            c.set("session", requestContainer.resolve(CurrentSession));
 
-                await next();
-            },
-        );
+            await next();
+        });
     });
 
-    for (const subRouter of container.resolve(HttpSubRouterToken)) {
-        app.route(subRouter.path, subRouter.router);
-    }
-
-    return app;
+    return createHonoApp<HttpBindings>({
+        container: honoContainer,
+        app,
+    });
 };

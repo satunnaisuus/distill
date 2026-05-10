@@ -22,12 +22,21 @@ export type RuntimeContainer = {
     resolve<TToken extends AnyToken>(token: TToken): ResolvedRuntimeTokenValue<TToken>;
     resolveOptional<TToken extends AnyToken>(token: TToken): TokenValue<TToken> | undefined;
     createScope(...bindings: readonly AnyBinding[]): RuntimeContainer;
+    createScopeTemplate(...bindings: readonly AnyBinding[]): RuntimeScopeTemplate;
+    createScopeTemplate(createBindings: RuntimeScopeTemplateBindingFactory): RuntimeScopeTemplate;
     runScoped<TResult>(
         bindings: readonly AnyBinding[],
         callback: (scope: RuntimeContainer) => TResult,
     ): Promise<Awaited<TResult>>;
     dispose(): Promise<void>;
     readonly disposed: boolean;
+};
+
+type RuntimeScopeTemplateBindingFactory = (...args: unknown[]) => readonly AnyBinding[];
+
+type RuntimeScopeTemplate = {
+    create(...args: unknown[]): RuntimeContainer;
+    runScoped(...argsAndCallback: unknown[]): Promise<unknown>;
 };
 
 type ResolvedRuntimeTokenValue<TToken extends AnyToken> = TToken extends AnyMultiToken
@@ -169,6 +178,34 @@ const runScopedCallback = async <TResult>(
     return callbackResult as Awaited<TResult>;
 };
 
+const createScopeTemplateBindingFactory = (
+    bindingsOrFactory: readonly (AnyBinding | RuntimeScopeTemplateBindingFactory)[],
+): RuntimeScopeTemplateBindingFactory => {
+    if (bindingsOrFactory.length === 1 && typeof bindingsOrFactory[0] === "function") {
+        return bindingsOrFactory[0] as RuntimeScopeTemplateBindingFactory;
+    }
+
+    return () => bindingsOrFactory as readonly AnyBinding[];
+};
+
+const splitRunScopedTemplateArgs = (
+    argsAndCallback: readonly unknown[],
+): {
+    readonly args: readonly unknown[];
+    readonly callback: (scope: RuntimeContainer) => unknown;
+} => {
+    const callback = argsAndCallback[argsAndCallback.length - 1];
+
+    if (typeof callback !== "function") {
+        throw new TypeError("Scope template runScoped callback must be a function");
+    }
+
+    return {
+        args: argsAndCallback.slice(0, -1),
+        callback: callback as (scope: RuntimeContainer) => unknown,
+    };
+};
+
 const isBindingVisibleToPublic = (scope: RuntimeScope, binding: RuntimeBinding): boolean => {
     const moduleGraph = scope.context.moduleGraph as NonNullable<RuntimeScope["context"]["moduleGraph"]>;
     const publicBindingIds = moduleGraph.visibleBindingIdsByModuleId.get(publicModuleContextId) as ReadonlySet<number>;
@@ -289,6 +326,20 @@ export const createRuntimeContainerForScope = (
         },
         createScope(...bindings) {
             return createChildContainer(bindings);
+        },
+        createScopeTemplate(...bindingsOrFactory) {
+            const createBindings = createScopeTemplateBindingFactory(bindingsOrFactory);
+
+            return {
+                create(...args) {
+                    return createChildContainer(createBindings(...args));
+                },
+                runScoped(...argsAndCallback) {
+                    const { args, callback } = splitRunScopedTemplateArgs(argsAndCallback);
+
+                    return runScopedCallback(createChildContainer(createBindings(...args)), callback);
+                },
+            };
         },
         runScoped(bindings, callback) {
             return runScopedCallback(createChildContainer(bindings), callback);

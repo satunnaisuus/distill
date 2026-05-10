@@ -1,6 +1,6 @@
 {
   "name": "@satunnaisuus/distill",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "A type-safe DI container for TypeScript.",
   "type": "module",
   "main": "./dist/index.mjs",

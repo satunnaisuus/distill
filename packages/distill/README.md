@@ -200,6 +200,32 @@ app.resolve(Registry).names;
 
 Exports apply to concrete bindings, not whole tokens. This lets a module keep some multibind contributions private while exposing selected contributions to importers and public `resolve`.
 
+### Create reusable scope templates
+
+Use `createScopeTemplate(...)` when framework code needs the scoped container type before a request scope exists.
+
+```ts
+import { bind, type ScopeTemplateContainer, token } from "@satunnaisuus/distill";
+
+type CurrentUser = {
+    readonly id: string;
+};
+
+const CurrentUser = token("CurrentUser").of<CurrentUser>();
+
+const requestTemplate = container.createScopeTemplate((user: CurrentUser) => [
+    bind(CurrentUser)
+        .scoped()
+        .factory(() => user),
+] as const);
+
+type RequestContainer = ScopeTemplateContainer<typeof requestTemplate>;
+
+await requestTemplate.runScoped({ id: "user-1" }, async (requestContainer: RequestContainer) => {
+    requestContainer.resolve(CurrentUser);
+});
+```
+
 ### Use provider helpers
 
 ```ts

@@ -1,4 +1,13 @@
-import { type Binding, type BindingLifetime, bind, defineContainer, ref, token } from "@satunnaisuus/distill";
+import {
+    type Binding,
+    type BindingLifetime,
+    bind,
+    defineContainer,
+    ref,
+    type ScopeTemplateArgs,
+    type ScopeTemplateContainer,
+    token,
+} from "@satunnaisuus/distill";
 import { expect, test } from "tstyche";
 import type { Config, Logger } from "./fixtures/services.js";
 import { tokenList, tokens } from "./fixtures/tokens.js";
@@ -137,6 +146,67 @@ test("runScoped returns awaited async callback result types", () => {
     const result = app.runScoped([] as const, async (scope) => scope.resolve(tokens.config));
 
     expect(result).type.toBe<Promise<Config>>();
+});
+
+test("createScopeTemplate exposes reusable scoped container types", () => {
+    const app = defineContainer(
+        tokenList,
+        bind(tokens.config)
+            .scoped()
+            .factory(() => ({ port: 3000 })),
+    ).create();
+    const requestScope = app.createScopeTemplate(
+        (input: { readonly port: number }) =>
+            [
+                bind(tokens.port)
+                    .scoped()
+                    .factory(() => input.port),
+            ] as const,
+    );
+    type RequestScopeArgs = ScopeTemplateArgs<typeof requestScope>;
+    type RequestContainer = ScopeTemplateContainer<typeof requestScope>;
+    const requestContainer = {} as RequestContainer;
+    const created = requestScope.create({ port: 4000 });
+    const result = requestScope.runScoped({ port: 5000 }, (scope) => scope.resolve(tokens.port));
+
+    expect<RequestScopeArgs>().type.toBe<[{ readonly port: number }]>();
+    expect(requestContainer.resolve(tokens.config)).type.toBe<Config>();
+    expect(requestContainer.resolve(tokens.port)).type.toBe<number>();
+    expect(created.resolve(tokens.port)).type.toBe<number>();
+    expect(result).type.toBe<Promise<number>>();
+    expect(() => {
+        app.resolve(tokens.port);
+    }).type.toRaiseError();
+});
+
+test("createScopeTemplate accepts static scope bindings", () => {
+    const app = defineContainer(tokenList).create();
+    const requestScope = app.createScopeTemplate(
+        bind(tokens.port)
+            .scoped()
+            .factory(() => 3000),
+    );
+    type RequestContainer = ScopeTemplateContainer<typeof requestScope>;
+    const requestContainer = {} as RequestContainer;
+
+    expect(requestContainer.resolve(tokens.port)).type.toBe<number>();
+    expect(requestScope.create().resolve(tokens.port)).type.toBe<number>();
+    expect(requestScope.runScoped((scope) => scope.resolve(tokens.port))).type.toBe<Promise<number>>();
+});
+
+test("createScopeTemplate rejects invalid scope bindings", () => {
+    const app = defineContainer(tokenList).create();
+
+    expect(() => {
+        app.createScopeTemplate(
+            () =>
+                [
+                    bind(tokens.server).factory({ config: tokens.config }, ({ config }) => ({
+                        port: config.port,
+                    })),
+                ] as const,
+        );
+    }).type.toRaiseError();
 });
 
 test("runScoped rejects invalid scope bindings like createScope", () => {

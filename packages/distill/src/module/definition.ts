@@ -53,6 +53,7 @@ export {
     createRuntimeModuleGraph,
     createRuntimeModuleWireAliasEntries,
 } from "./container-runtime";
+export type { ModuleContainer } from "./container-scope-types";
 export type { ScopeTokenCompatibilityError } from "./scope-token-compatibility-types";
 export type {
     AnyComposedModuleDefinition,
