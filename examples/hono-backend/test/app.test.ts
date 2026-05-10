@@ -2,6 +2,7 @@ import { bind, override } from "@satunnaisuus/distill";
 import { describe, expect, it, vi } from "vitest";
 import { AppModule, createApp } from "../src/app.js";
 import { AUTH, type Auth } from "../src/auth/index.js";
+import { EVENT_EMITTER, USER_CREATED_EVENT } from "../src/events/index.js";
 import { GREETING_SERVICE, type GreetingRecord, type GreetingService } from "../src/greetings/index.js";
 
 const createAuthStub = (): Auth =>
@@ -79,6 +80,30 @@ describe("Hono app with Distill overrides", () => {
                 },
             });
             expect(createGreeting).toHaveBeenCalledWith("Override");
+        } finally {
+            await container.dispose();
+        }
+    });
+
+    it("creates a greeting when a user.created event is emitted", async () => {
+        const { createGreeting, service } = createGreetingServiceStub();
+        const container = AppModule.createContainer(
+            override(bind(AUTH).value(createAuthStub())),
+            override(bind(GREETING_SERVICE).value(service)),
+        );
+
+        try {
+            createApp(container);
+            createApp(container);
+
+            await container.resolve(EVENT_EMITTER).emitAsync(USER_CREATED_EVENT, {
+                id: "user-1",
+                email: "new-user@example.com",
+                name: "New User",
+            });
+
+            expect(createGreeting).toHaveBeenCalledWith("New User");
+            expect(createGreeting).toHaveBeenCalledTimes(1);
         } finally {
             await container.dispose();
         }

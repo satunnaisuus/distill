@@ -3,11 +3,12 @@ import { AuthModule } from "./auth/auth-module.js";
 import { type AuthSession, type AuthUser, CURRENT_SESSION, CURRENT_USER } from "./auth/auth-token.js";
 import { ConfigModule } from "./config/index.js";
 import { DatabaseModule } from "./database/index.js";
+import { EventsModule } from "./events/index.js";
 import { GreetingsModule } from "./greetings/index.js";
 import { HttpModule } from "./http/index.js";
 
 export const AppModule = composeModules({
-    modules: [HttpModule, ConfigModule, DatabaseModule, AuthModule, GreetingsModule],
+    modules: [HttpModule, ConfigModule, DatabaseModule, EventsModule, AuthModule, GreetingsModule],
 } as const);
 
 export const createAppContainer = () => AppModule.createContainer();

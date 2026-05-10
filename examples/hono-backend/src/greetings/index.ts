@@ -5,3 +5,4 @@ export { GreetingService } from "./greeting-service.js";
 export { GREETING_SERVICE } from "./greeting-service-token.js";
 export { GreetingsModule } from "./greetings-module.js";
 export { createGreetingsRouter } from "./greetings-router.js";
+export { createUserCreatedGreetingHandler } from "./user-created-greeting-handler.js";

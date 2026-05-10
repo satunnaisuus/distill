@@ -68,6 +68,9 @@ importers:
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2
+      eventemitter2:
+        specifier: ^6.4.9
+        version: 6.4.9
       hono:
         specifier: ^4.12.16
         version: 4.12.16
@@ -1997,6 +2000,9 @@ packages:
 
   estree-walker@3.0.3:
     resolution: {integrity: sha512-7RUKfXgSMMkzt6ZuXmqapOurLGPPfgj6l9uRZ7lRGolvk0y2yocc35LdcxKC5PQZdn2DMqioAQ2NoWcrTKmm6g==}
+
+  eventemitter2@6.4.9:
+    resolution: {integrity: sha512-JEPTiaOt9f04oa6NOkc4aH+nVp5I3wEjpHbIPqfgCdD5v5bUzy7xQqwcVO2aDQgOWhI28da57HksMrzK9HlRxg==}
 
   expand-template@2.0.3:
     resolution: {integrity: sha512-XYfuKMvj4O35f/pOXLObndIRvyQ+/+6AhODh+OKWj9S9498pHHn/IMszH+gt0fBCRWMNfk1ZSp5x3AifmnI2vg==}
@@ -5072,6 +5078,8 @@ snapshots:
   estree-walker@3.0.3:
     dependencies:
       '@types/estree': 1.0.8
+
+  eventemitter2@6.4.9: {}
 
   expand-template@2.0.3: {}
 
