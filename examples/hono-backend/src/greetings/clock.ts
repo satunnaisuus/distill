@@ -4,7 +4,7 @@ export type Clock = {
     readonly now: () => Date;
 };
 
-export const ClockToken = token("Clock").of<Clock>();
+export const CLOCK = token("Clock").of<Clock>();
 
 export const systemClock: Clock = {
     now: () => new Date(),

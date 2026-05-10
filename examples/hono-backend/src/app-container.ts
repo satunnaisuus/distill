@@ -1,6 +1,6 @@
 import { bind, composeModules, type ScopeTemplateContainer } from "@satunnaisuus/distill";
 import { AuthModule } from "./auth/auth-module.js";
-import { type AuthSession, type AuthUser, CurrentSession, CurrentUser } from "./auth/auth-token.js";
+import { type AuthSession, type AuthUser, CURRENT_SESSION, CURRENT_USER } from "./auth/auth-token.js";
 import { ConfigModule } from "./config/index.js";
 import { DatabaseModule } from "./database/index.js";
 import { GreetingsModule } from "./greetings/index.js";
@@ -23,10 +23,10 @@ export function createAuthRequestScopeTemplate(container: AppContainer) {
     return container.createScopeTemplate(
         (state: AuthRequestScopeState) =>
             [
-                bind(CurrentUser)
+                bind(CURRENT_USER)
                     .scoped()
                     .factory(() => state.user),
-                bind(CurrentSession)
+                bind(CURRENT_SESSION)
                     .scoped()
                     .factory(() => state.session),
             ] as const,

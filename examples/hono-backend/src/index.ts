@@ -1,10 +1,10 @@
 import { serve } from "@hono/node-server";
 import { createApp, createAppContainer } from "./app.js";
-import { AppConfig } from "./config/index.js";
+import { APP_CONFIG } from "./config/index.js";
 
 const container = createAppContainer();
 const app = createApp(container);
-const config = container.resolve(AppConfig);
+const config = container.resolve(APP_CONFIG);
 
 serve(
     {

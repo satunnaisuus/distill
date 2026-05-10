@@ -7,4 +7,4 @@ export type AppConfigValue = {
     readonly authSecret: string;
 };
 
-export const AppConfig = token("AppConfig").of<AppConfigValue>();
+export const APP_CONFIG = token("AppConfig").of<AppConfigValue>();

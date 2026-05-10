@@ -1,17 +1,17 @@
 import { bind, defineModule } from "@satunnaisuus/distill";
-import { Database } from "../database/index.js";
+import { DATABASE } from "../database/index.js";
 import { ROUTER } from "../integration.js";
-import { ClockToken, systemClock } from "./clock.js";
+import { CLOCK, systemClock } from "./clock.js";
 import { GreetingService } from "./greeting-service.js";
-import { GreetingServiceToken } from "./greeting-service-token.js";
+import { GREETING_SERVICE } from "./greeting-service-token.js";
 import { createGreetingsRouter } from "./greetings-router.js";
 export const GreetingsModule = defineModule({
-    imports: [Database],
-    exports: [GreetingServiceToken, ROUTER],
+    imports: [DATABASE],
+    exports: [GREETING_SERVICE, ROUTER],
     bindings: [
-        bind(ClockToken).value(systemClock),
-        bind(GreetingServiceToken).class({ clock: ClockToken, database: Database }, GreetingService),
-        bind(ROUTER).factory({ greetingService: GreetingServiceToken }, ({ greetingService }) =>
+        bind(CLOCK).value(systemClock),
+        bind(GREETING_SERVICE).class({ clock: CLOCK, database: DATABASE }, GreetingService),
+        bind(ROUTER).factory({ greetingService: GREETING_SERVICE }, ({ greetingService }) =>
             createGreetingsRouter(greetingService),
         ),
     ],

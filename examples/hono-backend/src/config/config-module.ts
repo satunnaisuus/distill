@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { bind, defineModule } from "@satunnaisuus/distill";
-import { AppConfig } from "./app-config.js";
+import { APP_CONFIG } from "./app-config.js";
 
 const parsePort = (value: string | undefined) => {
     const port = Number.parseInt(value ?? "3000", 10);
@@ -8,9 +8,9 @@ const parsePort = (value: string | undefined) => {
 };
 const port = parsePort(process.env.PORT);
 export const ConfigModule = defineModule({
-    exports: [AppConfig],
+    exports: [APP_CONFIG],
     bindings: [
-        bind(AppConfig).value({
+        bind(APP_CONFIG).value({
             port,
             databaseUrl: process.env.DATABASE_URL ?? "file:./prisma/dev.db",
             authBaseUrl: process.env.BETTER_AUTH_URL ?? `http://localhost:${port}`,

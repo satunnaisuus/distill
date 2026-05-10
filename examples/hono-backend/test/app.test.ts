@@ -1,8 +1,8 @@
 import { bind, override } from "@satunnaisuus/distill";
 import { describe, expect, it, vi } from "vitest";
 import { AppModule, createApp } from "../src/app.js";
-import { type Auth, AuthToken } from "../src/auth/index.js";
-import { type GreetingRecord, type GreetingService, GreetingServiceToken } from "../src/greetings/index.js";
+import { AUTH, type Auth } from "../src/auth/index.js";
+import { GREETING_SERVICE, type GreetingRecord, type GreetingService } from "../src/greetings/index.js";
 
 const createAuthStub = (): Auth =>
     ({
@@ -42,8 +42,8 @@ describe("Hono app with Distill overrides", () => {
     it("tests routes against overridden container bindings", async () => {
         const { createGreeting, service } = createGreetingServiceStub();
         const container = AppModule.createContainer(
-            override(bind(AuthToken).value(createAuthStub())),
-            override(bind(GreetingServiceToken).value(service)),
+            override(bind(AUTH).value(createAuthStub())),
+            override(bind(GREETING_SERVICE).value(service)),
         );
 
         try {

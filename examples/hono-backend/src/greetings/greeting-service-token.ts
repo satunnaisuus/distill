@@ -1,4 +1,4 @@
 import { token } from "@satunnaisuus/distill";
 import type { GreetingService } from "./greeting-service.js";
 
-export const GreetingServiceToken = token("GreetingService").of<GreetingService>();
+export const GREETING_SERVICE = token("GreetingService").of<GreetingService>();
