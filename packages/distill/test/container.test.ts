@@ -900,6 +900,26 @@ describe("defineContainer", () => {
         });
     });
 
+    it("rejects scope template runScoped calls without a callback before creating a scope", () => {
+        const tokens = {
+            request: token("request").of<{ readonly id: string }>(),
+        };
+        const createBindings = vi.fn((requestId: string) => [
+            bind(tokens.request)
+                .scoped()
+                .factory(() => ({ id: requestId })),
+        ]);
+        const container = defineContainer(Object.values(tokens)).create();
+        const template = container.createScopeTemplate(createBindings) as {
+            readonly runScoped: (...args: readonly unknown[]) => Promise<unknown>;
+        };
+
+        expect(() => {
+            template.runScoped("request-1");
+        }).toThrowError("Scope template runScoped callback must be a function");
+        expect(createBindings).not.toHaveBeenCalled();
+    });
+
     it("resolves ref dependencies from the scope that created the ref", () => {
         const tokens = {
             config: token("config").of<{ readonly name: string }>(),
